@@ -148,7 +148,7 @@ function updateSmartViewCounts() {
         const view = btn.getAttribute('onclick').match(/'(\w+)'/)[1];
         if (view === 'recent') btn.innerHTML = `Recent Changes <span class="view-count">${recentCount}</span>`;
         else if (view === 'stuck') btn.innerHTML = `Potentially Stuck <span class="view-count">${stuckCount}</span>`;
-        else if (view === 'new') btn.innerHTML = `New This Month <span class="view-count">${newCount}</span>`;
+        else if (view === 'new') btn.innerHTML = `New Submissions <span class="view-count">${newCount}</span>`;
     });
 }
 
