@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Program Approval Tracker</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <h1>Program Approval Tracker</h1>
+            <span class="subtitle">CourseLeaf CIM Dashboard</span>
+        </div>
+        <div class="header-right">
+            <span id="scan-status" class="scan-status"></span>
+            
+        </div>
+    </header>
+
+    <!-- Pipeline Summary -->
+    <section id="pipeline" class="pipeline-section">
+        <h2>Pipeline Summary</h2>
+        <div id="pipeline-bar" class="pipeline-bar">
+            <!-- Populated by JS -->
+        </div>
+    </section>
+
+    <!-- Smart Views + Type Buttons -->
+    <section class="smart-views-section">
+        <div class="view-group">
+            <button class="type-btn active" onclick="setTypeFilter('')">All</button>
+            <button class="type-btn" onclick="setTypeFilter('Undergraduate')">Undergraduate</button>
+            <button class="type-btn" onclick="setTypeFilter('Graduate')">Graduate</button>
+            <button class="type-btn" onclick="setTypeFilter('Other')">Other</button>
+        </div>
+        <div class="view-divider"></div>
+        <div class="view-group">
+            <button class="proposal-btn active-all" onclick="setProposalFilter('')">All</button>
+            <button class="proposal-btn" onclick="setProposalFilter('Added')">New Programs</button>
+            <button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button>
+            <button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button>
+        </div>
+        <div class="view-divider"></div>
+        <div class="view-group">
+            <button class="smart-view-btn active" onclick="setSmartView('all')">All Programs</button>
+            <button class="smart-view-btn" onclick="setSmartView('recent')">Recently Moved</button>
+            <button class="smart-view-btn" onclick="setSmartView('stuck')">Potentially Stuck</button>
+            <button class="smart-view-btn" onclick="setSmartView('new')">New This Month</button>
+        </div>
+    </section>
+
+    <!-- Filters -->
+    <section class="filters-section">
+        <div class="filter-group">
+            <label>College:</label>
+            <select id="filter-college" onchange="applyFilters()">
+                <option value="">All Colleges</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Approver:</label>
+            <select id="filter-approver" onchange="applyFilters()">
+                <option value="">All Approvers</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Step:</label>
+            <select id="filter-step" onchange="applyFilters()">
+                <option value="">All Steps</option>
+            </select>
+        </div>
+        <div class="filter-group search-group">
+            <label>Search:</label>
+            <input type="text" id="filter-search" placeholder="Program name..." oninput="applyFilters()">
+        </div>
+        <div class="filter-group">
+            <span id="result-count" class="result-count"></span>
+        </div>
+    </section>
+
+    <!-- Programs Table -->
+    <section id="programs" class="programs-section">
+        <div id="programs-table-container">
+            <!-- Populated by JS -->
+        </div>
+    </section>
+
+    <!-- Recent Changes -->
+    <section id="changes" class="changes-section">
+        <h2>Recent Changes</h2>
+        <div id="changes-list">
+            <p class="empty-state">No changes recorded yet. Run a scan to start tracking.</p>
+        </div>
+    </section>
+
+    <script src="app.js"></script>
+</body>
+</html>
