@@ -50,13 +50,7 @@ async function loadPrograms() {
 }
 
 async function loadChanges() {
-    try {
-        const res = await fetch('/api/changes');
-        const data = await res.json();
-        renderChanges(data.changes || []);
-    } catch (e) {
-        console.error('Failed to load changes:', e);
-    }
+    // Changes are now shown via the "Recent Changes" smart view button
 }
 
 async function loadApprovers() {
@@ -141,8 +135,8 @@ async function loadColleges() {
 function updateSmartViewCounts() {
     const now = new Date();
     const recentCount = allPrograms.filter(p => {
-        const updated = new Date(p.last_updated);
-        return (now - updated) < 7 * 86400000; // 7 days
+        const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
+        return entered && (now - entered) < 14 * 86400000; // 14 days
     }).length;
     const stuckCount = allPrograms.filter(p => getDaysAtStep(p) >= STUCK_THRESHOLD_DAYS).length;
     const newCount = allPrograms.filter(p => {
@@ -152,7 +146,7 @@ function updateSmartViewCounts() {
 
     document.querySelectorAll('.smart-view-btn').forEach(btn => {
         const view = btn.getAttribute('onclick').match(/'(\w+)'/)[1];
-        if (view === 'recent') btn.innerHTML = `Recently Moved <span class="view-count">${recentCount}</span>`;
+        if (view === 'recent') btn.innerHTML = `Recent Changes <span class="view-count">${recentCount}</span>`;
         else if (view === 'stuck') btn.innerHTML = `Potentially Stuck <span class="view-count">${stuckCount}</span>`;
         else if (view === 'new') btn.innerHTML = `New This Month <span class="view-count">${newCount}</span>`;
     });
@@ -250,8 +244,8 @@ async function applyFilters() {
     let filtered = allPrograms.filter(p => {
         // Smart view filters
         if (smartView === 'recent') {
-            const updated = new Date(p.last_updated);
-            if ((now - updated) >= 7 * 86400000) return false;
+            const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
+            if (!entered || (now - entered) >= 14 * 86400000) return false;
         } else if (smartView === 'stuck') {
             if (getDaysAtStep(p) < STUCK_THRESHOLD_DAYS) return false;
         } else if (smartView === 'new') {
@@ -614,8 +608,7 @@ document.addEventListener('DOMContentLoaded', () => {
             el.textContent = 'Static snapshot';
         }
 
-        // Changes
-        renderChanges(D.changes || []);
+        // Changes shown via smart view button, not separate section
 
         // Counts
         updateSmartViewCounts();
