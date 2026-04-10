@@ -43,6 +43,7 @@ async function loadPrograms() {
         allPrograms = data.programs || [];
         groupedPrograms = data.grouped || {};
         populateStepFilter();
+        populateCampusFilter();
         applyFilters();
     } catch (e) {
         console.error('Failed to load programs:', e);
@@ -211,6 +212,18 @@ function renderPipeline(pipeline) {
     }).join('');
 }
 
+function populateCampusFilter() {
+    const campuses = new Set();
+    allPrograms.forEach(p => {
+        const c = extractCampus(p.name);
+        if (c) campuses.add(c);
+    });
+    const sorted = Array.from(campuses).sort();
+    const select = document.getElementById('filter-campus');
+    select.innerHTML = '<option value="">All Campuses</option>' +
+        sorted.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
 function populateStepFilter() {
     const select = document.getElementById('filter-step');
     const steps = new Set();
@@ -224,6 +237,7 @@ function populateStepFilter() {
 
 async function applyFilters() {
     const stepFilter = document.getElementById('filter-step').value;
+    const campusFilter = document.getElementById('filter-campus').value;
     const collegeFilter = document.getElementById('filter-college').value;
     const approverFilter = document.getElementById('filter-approver').value;
     const search = document.getElementById('filter-search').value.toLowerCase();
@@ -260,6 +274,7 @@ async function applyFilters() {
         // Regular filters
         if (pipelineFilter && p.current_step !== pipelineFilter) return false;
         if (stepFilter && p.current_step !== stepFilter) return false;
+        if (campusFilter && extractCampus(p.name) !== campusFilter) return false;
         if (collegeFilter && p.college !== collegeFilter) return false;
         if (approverProgramIds && !approverProgramIds.has(p.id)) return false;
         if (search && !p.name.toLowerCase().includes(search) &&
@@ -535,6 +550,15 @@ function abbreviateCollege(college) {
     return COLLEGE_ABBREVS[college] || college;
 }
 
+function extractCampus(name) {
+    const match = name.match(/\(([^)]+)\)\s*$/);
+    if (!match) return '';
+    const val = match[1];
+    // Filter out non-campus parentheticals
+    if (val.length > 20 || val.indexOf('template') !== -1 || val.indexOf('Copy') !== -1) return '';
+    return val;
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -588,6 +612,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Programs
         allPrograms = D.programs || [];
         populateStepFilter();
+        populateCampusFilter();
 
         // Colleges
         const cSel = document.getElementById('filter-college');
