@@ -174,20 +174,20 @@ async function loadScanStatus() {
     try {
         const res = await fetch('/api/scan/status');
         const data = await res.json();
-        const el = document.getElementById('scan-status');
+        const statusEl = document.getElementById('scan-status');
+        const updatedEl = document.getElementById('last-updated');
         if (data.running) {
-            el.innerHTML = '<span class="spinner"></span> Scanning...';
-            el.className = 'scan-status running';
+            statusEl.innerHTML = '<span class="spinner"></span> Updating...';
+            statusEl.className = 'scan-status running';
             document.getElementById('scan-btn').disabled = true;
-        } else if (data.last_scan) {
-            const time = formatTime(data.last_scan.scan_time);
-            el.textContent = `Last scan: ${time} (${data.last_scan.programs_with_workflow} programs, ${data.last_scan.changes_detected} changes)`;
-            el.className = 'scan-status';
-            document.getElementById('scan-btn').disabled = false;
         } else {
-            el.textContent = 'No scans yet';
-            el.className = 'scan-status';
+            statusEl.textContent = '';
+            statusEl.className = 'scan-status';
             document.getElementById('scan-btn').disabled = false;
+        }
+        if (data.last_scan) {
+            const d = new Date(data.last_scan.scan_time);
+            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'})}`;
         }
     } catch (e) {
         console.error('Failed to load scan status:', e);
@@ -624,13 +624,13 @@ document.addEventListener('DOMContentLoaded', () => {
         aSel.innerHTML = '<option value="">All Approvers</option>' +
             (D.approvers||[]).map(a => `<option value="${a.email}">${a.display} (${a.count})</option>`).join('');
 
-        // Scan status
-        const el = document.getElementById('scan-status');
+        // Timestamps
+        const updatedEl = document.getElementById('last-updated');
+        const statusEl = document.getElementById('scan-status');
+        statusEl.textContent = '';
         if (D.last_scan) {
-            const t = formatTime(D.last_scan.scan_time);
-            el.textContent = `Data from: ${t} (${D.last_scan.programs_with_workflow} programs)`;
-        } else {
-            el.textContent = 'Static snapshot';
+            const d = new Date(D.last_scan.scan_time);
+            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'})}`;
         }
 
         // Changes shown via smart view button, not separate section
@@ -698,8 +698,35 @@ document.addEventListener('DOMContentLoaded', () => {
         return _origApplyFilters();
     };
 
-    // Disable scan
-    window.triggerScan = function() {};
+    // Update button tries to reach local Flask server to trigger scan + deploy
+    window.triggerScan = async function() {
+        const btn = document.getElementById('scan-btn');
+        const statusEl = document.getElementById('scan-status');
+        btn.disabled = true;
+        statusEl.innerHTML = '<span class="spinner"></span> Connecting...';
+        statusEl.className = 'scan-status running';
+        try {
+            const res = await fetch('http://localhost:5001/api/scan/trigger', {method: 'POST', mode: 'cors'});
+            if (res.ok) {
+                statusEl.innerHTML = '<span class="spinner"></span> Updating (this takes ~20 min)...';
+                // Poll local server for completion
+                const poll = setInterval(async () => {
+                    try {
+                        const s = await fetch('http://localhost:5001/api/scan/status');
+                        const d = await s.json();
+                        if (!d.running) {
+                            clearInterval(poll);
+                            statusEl.textContent = 'Update complete! Page will refresh with new data shortly.';
+                            btn.disabled = false;
+                        }
+                    } catch(e) { clearInterval(poll); btn.disabled = false; }
+                }, 15000);
+            }
+        } catch(e) {
+            statusEl.textContent = 'Cannot reach local server. Run update.sh on your Mac.';
+            btn.disabled = false;
+        }
+    };
 
     // Remove auto-refresh interval (static data doesn't change)
 

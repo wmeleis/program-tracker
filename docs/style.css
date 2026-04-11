@@ -60,6 +60,12 @@ header h1 {
     gap: 12px;
 }
 
+.last-updated {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-right: 8px;
+}
+
 .scan-status {
     font-size: 13px;
     color: var(--text-secondary);
