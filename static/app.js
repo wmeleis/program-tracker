@@ -8,6 +8,7 @@ let smartView = 'all';
 let typeFilter = '';
 let proposalFilter = '';
 let approverPrograms = null;
+let cachedPipeline = [];
 const STUCK_THRESHOLD_DAYS = 30;
 
 // The 14 main tracked pipeline steps
@@ -46,6 +47,8 @@ async function loadDashboard() {
         loadColleges(),
         loadApprovers()
     ]);
+    // Re-render pipeline now that allPrograms is loaded (for college count)
+    if (cachedPipeline.length) renderPipeline(cachedPipeline);
     updateSmartViewCounts();
     updateTypeCounts();
     updateProposalCounts();
@@ -55,7 +58,8 @@ async function loadPipeline() {
     try {
         const res = await fetch('/api/pipeline');
         const data = await res.json();
-        renderPipeline(data.pipeline);
+        cachedPipeline = data.pipeline;
+        renderPipeline(cachedPipeline);
     } catch (e) {
         console.error('Failed to load pipeline:', e);
     }
@@ -531,8 +535,8 @@ function togglePipelineFilter(role) {
     } else {
         pipelineFilter = role;
     }
-    // Refresh pipeline to update active state
-    loadPipeline();
+    // Re-render pipeline to update active state
+    if (cachedPipeline.length) renderPipeline(cachedPipeline);
     applyFilters();
 }
 
