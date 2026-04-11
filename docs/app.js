@@ -10,6 +10,31 @@ let proposalFilter = '';
 let approverPrograms = null;
 const STUCK_THRESHOLD_DAYS = 30;
 
+// The 14 main tracked pipeline steps
+const PIPELINE_STEPS = new Set([
+    "Program PR Graduate Dean's Office",
+    "Provost Initial Review",
+    "Program Review 2",
+    "Program UIP College Approval",
+    "Program Graduate Provost Review",
+    "Program Graduate Curriculum Committee",
+    "Program Undergraduate Curriculum Committee - Tabled Proposals",
+    "Program Provost Administrative and Budgetary Review",
+    "Program Provost Approval",
+    "Program Faculty Senate",
+    "Program University Board of Trustees",
+    "Program Banner Setup",
+    "Program Editor",
+    "Program Catalog Setup",
+]);
+
+function isCollegeStep(step) {
+    if (!step) return false;
+    if (PIPELINE_STEPS.has(step)) return false;
+    // College steps have department codes like EN, SC, SH, AM, BA, etc.
+    return step.match(/^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )/);
+}
+
 // ==================== Data Loading ====================
 
 async function loadDashboard() {
@@ -135,6 +160,7 @@ async function loadColleges() {
 
 function updateSmartViewCounts() {
     const now = new Date();
+    const collegeCount = allPrograms.filter(p => isCollegeStep(p.current_step)).length;
     const recentCount = allPrograms.filter(p => {
         const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
         return entered && (now - entered) < 14 * 86400000; // 14 days
@@ -147,7 +173,8 @@ function updateSmartViewCounts() {
 
     document.querySelectorAll('.smart-view-btn').forEach(btn => {
         const view = btn.getAttribute('onclick').match(/'(\w+)'/)[1];
-        if (view === 'recent') btn.innerHTML = `Recent Changes <span class="view-count">${recentCount}</span>`;
+        if (view === 'college') btn.innerHTML = `College Review <span class="view-count">${collegeCount}</span>`;
+        else if (view === 'recent') btn.innerHTML = `Recent Changes <span class="view-count">${recentCount}</span>`;
         else if (view === 'stuck') btn.innerHTML = `Potentially Stuck <span class="view-count">${stuckCount}</span>`;
         else if (view === 'new') btn.innerHTML = `New Submissions <span class="view-count">${newCount}</span>`;
     });
@@ -257,7 +284,9 @@ async function applyFilters() {
 
     let filtered = allPrograms.filter(p => {
         // Smart view filters
-        if (smartView === 'recent') {
+        if (smartView === 'college') {
+            if (!isCollegeStep(p.current_step)) return false;
+        } else if (smartView === 'recent') {
             const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
             if (!entered || (now - entered) >= 14 * 86400000) return false;
         } else if (smartView === 'stuck') {
