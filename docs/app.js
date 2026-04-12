@@ -216,7 +216,7 @@ async function loadScanStatus() {
         }
         if (data.last_scan) {
             const d = new Date(data.last_scan.scan_time);
-            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'})}`;
+            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
     } catch (e) {
         console.error('Failed to load scan status:', e);
@@ -673,7 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = '';
         if (D.last_scan) {
             const d = new Date(D.last_scan.scan_time);
-            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'})}`;
+            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
 
         // Changes shown via smart view button, not separate section
