@@ -11,7 +11,7 @@ from database import (
     init_db, migrate_db, get_all_programs, get_program_workflow,
     get_pipeline_counts, get_recent_changes, get_last_scan,
     get_programs_by_step, get_colleges, get_current_approvers,
-    get_programs_by_approver
+    get_programs_by_approver, get_program_curriculum
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, run_full_scan
 
@@ -79,6 +79,13 @@ def api_program_workflow(program_id):
     """Get workflow steps for a specific program."""
     steps = get_program_workflow(program_id)
     return jsonify({'steps': steps})
+
+
+@app.route('/api/program/<int:program_id>/curriculum')
+def api_program_curriculum(program_id):
+    """Get curriculum HTML for a specific program."""
+    html = get_program_curriculum(program_id)
+    return jsonify({'curriculum_html': html})
 
 
 @app.route('/api/pipeline')

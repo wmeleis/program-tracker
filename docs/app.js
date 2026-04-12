@@ -782,11 +782,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.loadWorkflowDetail = async function(programId) {
         const D = await _getData();
         const steps = D.workflows[String(programId)] || [];
-        const detailRow = document.getElementById(`detail-${programId}`);
-        if (!detailRow) return;
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
 
         if (steps.length === 0) {
-            detailRow.querySelector('td').innerHTML = '<div class="workflow-meta">No workflow data.</div>';
+            contentEl.innerHTML = '<div class="workflow-meta">No workflow data.</div>';
             return;
         }
 
@@ -806,7 +806,7 @@ document.addEventListener('DOMContentLoaded', () => {
             metaHtml = `<div class="workflow-meta">Current approver(s): ${emailLinks}</div>`;
         }
 
-        detailRow.querySelector('td').innerHTML = `
+        contentEl.innerHTML = `
             <div class="workflow-steps">${stepsHtml}</div>
             ${metaHtml}
         `;

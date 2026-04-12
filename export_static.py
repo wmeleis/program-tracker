@@ -7,7 +7,7 @@ from datetime import datetime
 from database import (
     get_all_programs, get_program_workflow, get_pipeline_counts,
     get_recent_changes, get_last_scan, get_colleges,
-    get_current_approvers
+    get_current_approvers, get_all_curriculum
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES
 
@@ -57,7 +57,13 @@ def build_static_site():
     data = export_data()
     with open(os.path.join(EXPORT_DIR, 'data.json'), 'w') as f:
         json.dump(data, f)
-    print(f"Exported: {len(data['programs'])} programs, {len(data['workflows'])} workflows")
+
+    # Export curriculum data separately (can be large)
+    curriculum = get_all_curriculum()
+    with open(os.path.join(EXPORT_DIR, 'curriculum.json'), 'w') as f:
+        json.dump(curriculum, f)
+
+    print(f"Exported: {len(data['programs'])} programs, {len(data['workflows'])} workflows, {len(curriculum)} curricula")
 
     # Copy CSS
     shutil.copy2(
@@ -107,8 +113,9 @@ def build_static_js(original_js):
     # The original rendering, filter, and UI code stays intact.
 
     override = r'''/* ======= STATIC SITE DATA LAYER ======= */
-/* Overrides API calls to read from data.json */
+/* Overrides API calls to read from data.json and curriculum.json */
 let _cache = null;
+let _curriculumCache = null;
 async function _getData() {
     if (!_cache) {
         const r = await fetch('data.json');
@@ -163,11 +170,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.loadWorkflowDetail = async function(programId) {
         const D = await _getData();
         const steps = D.workflows[String(programId)] || [];
-        const detailRow = document.getElementById(`detail-${programId}`);
-        if (!detailRow) return;
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
 
         if (steps.length === 0) {
-            detailRow.querySelector('td').innerHTML = '<div class="workflow-meta">No workflow data.</div>';
+            contentEl.innerHTML = '<div class="workflow-meta">No workflow data.</div>';
             return;
         }
 
@@ -187,7 +194,7 @@ document.addEventListener('DOMContentLoaded', () => {
             metaHtml = `<div class="workflow-meta">Current approver(s): ${emailLinks}</div>`;
         }
 
-        detailRow.querySelector('td').innerHTML = `
+        contentEl.innerHTML = `
             <div class="workflow-steps">${stepsHtml}</div>
             ${metaHtml}
         `;
@@ -211,6 +218,28 @@ document.addEventListener('DOMContentLoaded', () => {
             window._staticApproverIds = null;
         }
         return _origApplyFilters();
+    };
+
+    // Patch curriculum loading to use static data
+    window.loadCurriculumDetail = async function(programId) {
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
+        contentEl.innerHTML = '<div class="workflow-loading">Loading curriculum...</div>';
+        if (!_curriculumCache) {
+            try {
+                const r = await fetch('curriculum.json');
+                _curriculumCache = await r.json();
+            } catch(e) {
+                contentEl.innerHTML = '<div class="workflow-meta">Failed to load curriculum data.</div>';
+                return;
+            }
+        }
+        const html = _curriculumCache[String(programId)] || '';
+        if (html) {
+            contentEl.innerHTML = `<div class="curriculum-content">${html}</div>`;
+        } else {
+            contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available.</div>';
+        }
     };
 
     // Update button tries to reach local Flask server to trigger scan + deploy

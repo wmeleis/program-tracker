@@ -347,6 +347,10 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 result.meta.program_title = getXml("programtitle");
                 result.meta.campus = getXml("campus");
                 result.meta.prog_acad_level = getXml("prog_acad_level");
+                // Curriculum body (HTML with course tables)
+                var bodyEl = xmlDoc.querySelector("body");
+                result.meta.curriculum_html = bodyEl ? bodyEl.innerHTML : "";
+                result.meta.req_degree_credits = getXml("req_degree_credits");
                 // deletejustification non-empty implies inactivation
                 var dj = getXml("deletejustification");
                 if (dj) result.meta.proposal_type = "Inactivation Proposal";
@@ -562,6 +566,7 @@ def run_full_scan():
             'degree': degree,
             'date_submitted': date_submitted,
             'step_entered_date': step_entered_date,
+            'curriculum_html': meta.get('curriculum_html', '').replace('<![CDATA[', '').replace(']]>', '').strip(),
         }
 
         # Detect changes

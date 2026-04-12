@@ -45,6 +45,7 @@ def init_db():
                 degree TEXT,
                 date_submitted TEXT,
                 step_entered_date TEXT,
+                curriculum_html TEXT DEFAULT '',
                 first_seen TIMESTAMP,
                 last_updated TIMESTAMP
             );
@@ -103,8 +104,8 @@ def upsert_program(program_data):
                 INSERT INTO programs (id, banner_code, name, status, current_step,
                     total_steps, completed_steps, current_approver_emails,
                     program_type, college, department, degree, date_submitted,
-                    step_entered_date, first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    step_entered_date, curriculum_html, first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 program_data['id'],
                 program_data.get('banner_code', ''),
@@ -120,6 +121,7 @@ def upsert_program(program_data):
                 program_data.get('degree', ''),
                 program_data.get('date_submitted', ''),
                 program_data.get('step_entered_date', now),
+                program_data.get('curriculum_html', ''),
                 now, now
             ))
             changed = True
@@ -141,6 +143,7 @@ def upsert_program(program_data):
                     current_approver_emails = ?, program_type = ?,
                     college = ?, department = ?, degree = ?,
                     date_submitted = ?, step_entered_date = ?,
+                    curriculum_html = ?,
                     last_updated = ?
                 WHERE id = ?
             """, (
@@ -157,6 +160,7 @@ def upsert_program(program_data):
                 program_data.get('degree', ''),
                 program_data.get('date_submitted', ''),
                 step_entered,
+                program_data.get('curriculum_html', ''),
                 now,
                 program_data['id']
             ))
@@ -308,6 +312,25 @@ def get_current_approvers():
         return sorted(approver_map.values(), key=lambda x: x['display'])
 
 
+def get_program_curriculum(program_id):
+    """Get curriculum HTML for a single program."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT curriculum_html FROM programs WHERE id = ?",
+            (program_id,)
+        ).fetchone()
+        return row['curriculum_html'] if row else ''
+
+
+def get_all_curriculum():
+    """Get curriculum HTML for all programs (for static export)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, curriculum_html FROM programs WHERE curriculum_html != ''"
+        ).fetchall()
+        return {str(row['id']): row['curriculum_html'] for row in rows}
+
+
 def get_programs_by_approver(email):
     """Get all programs where the given email is the current approver."""
     with get_db() as conn:
@@ -335,6 +358,7 @@ def migrate_db():
             'degree': 'TEXT DEFAULT ""',
             'date_submitted': 'TEXT DEFAULT ""',
             'step_entered_date': 'TEXT DEFAULT ""',
+            'curriculum_html': 'TEXT DEFAULT ""',
         }
         for col, typedef in new_cols.items():
             if col not in existing_cols:
