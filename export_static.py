@@ -130,14 +130,9 @@ document.addEventListener('DOMContentLoaded', () => {
         cachedPipeline = D.pipeline;
 
         // Pipeline (after allPrograms so college count is correct)
-        renderPipeline(D.pipeline);
+        renderPipeline(D.pipeline, allPrograms);
         populateStepFilter();
         populateCampusFilter();
-
-        // Colleges
-        const cSel = document.getElementById('filter-college');
-        cSel.innerHTML = '<option value="">All Colleges</option>' +
-            (D.colleges||[]).map(c => `<option value="${c}">${c}</option>`).join('');
 
         // Approvers
         const aSel = document.getElementById('filter-approver');
@@ -150,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = '';
         if (D.last_scan) {
             const d = new Date(D.last_scan.scan_time);
-            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'})}`;
+            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
 
         // Changes shown via smart view button, not separate section
