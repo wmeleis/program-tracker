@@ -308,8 +308,9 @@ function populateStepFilter() {
     select.innerHTML = '<option value="">All Steps</option>' + options;
 }
 
-// Apply all filters EXCEPT pipeline and college, for use in updating pipeline counts and college dropdown
-function getBaseFiltered(approverProgramIds) {
+// Apply all filters EXCEPT pipeline, college, and any in the 'exclude' set
+function getBaseFiltered(approverProgramIds, exclude) {
+    const ex = exclude || {};
     const stepFilter = document.getElementById('filter-step').value;
     const campusFilter = document.getElementById('filter-campus').value;
     const approverFilter = document.getElementById('filter-approver').value;
@@ -326,8 +327,8 @@ function getBaseFiltered(approverProgramIds) {
             const submitted = p.date_submitted ? new Date(p.date_submitted) : null;
             if (!submitted || (now - submitted) >= 30 * 86400000) return false;
         }
-        if (typeFilter && p.program_type !== typeFilter) return false;
-        if (proposalFilter && p.status !== proposalFilter) return false;
+        if (!ex.type && typeFilter && p.program_type !== typeFilter) return false;
+        if (!ex.proposal && proposalFilter && p.status !== proposalFilter) return false;
         if (stepFilter && p.current_step !== stepFilter) return false;
         if (campusFilter && extractCampus(p.name) !== campusFilter) return false;
         if (approverProgramIds && !approverProgramIds.has(p.id)) return false;
@@ -362,9 +363,9 @@ async function applyFilters() {
     // Update college dropdown from base filtered set
     updateCollegeOptions(baseFiltered);
 
-    // Update button counts from base filtered set
-    updateTypeCounts(baseFiltered);
-    updateProposalCounts(baseFiltered);
+    // Each button group's counts exclude its own filter so you see what's available
+    updateTypeCounts(getBaseFiltered(approverProgramIds, {type: true}));
+    updateProposalCounts(getBaseFiltered(approverProgramIds, {proposal: true}));
 
     // Now apply pipeline and college filters for the table
     let filtered = baseFiltered.filter(p => {
