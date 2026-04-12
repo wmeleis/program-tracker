@@ -122,9 +122,10 @@ function setProposalFilter(status) {
     applyFilters();
 }
 
-function updateProposalCounts() {
-    const counts = { '': allPrograms.length, 'Added': 0, 'Edited': 0, 'Deactivated': 0 };
-    allPrograms.forEach(p => {
+function updateProposalCounts(programs) {
+    const src = programs || allPrograms;
+    const counts = { '': src.length, 'Added': 0, 'Edited': 0, 'Deactivated': 0 };
+    src.forEach(p => {
         const s = p.status || '';
         if (counts[s] !== undefined) counts[s]++;
     });
@@ -136,9 +137,10 @@ function updateProposalCounts() {
     });
 }
 
-function updateTypeCounts() {
-    const counts = { '': allPrograms.length };
-    allPrograms.forEach(p => {
+function updateTypeCounts(programs) {
+    const src = programs || allPrograms;
+    const counts = { '': src.length };
+    src.forEach(p => {
         const t = p.program_type || 'Other';
         counts[t] = (counts[t] || 0) + 1;
     });
@@ -359,6 +361,10 @@ async function applyFilters() {
 
     // Update college dropdown from base filtered set
     updateCollegeOptions(baseFiltered);
+
+    // Update button counts from base filtered set
+    updateTypeCounts(baseFiltered);
+    updateProposalCounts(baseFiltered);
 
     // Now apply pipeline and college filters for the table
     let filtered = baseFiltered.filter(p => {
