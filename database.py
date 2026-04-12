@@ -85,6 +85,15 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_workflow_steps_program ON workflow_steps(program_id);
             CREATE INDEX IF NOT EXISTS idx_scan_history_time ON scan_history(scan_time);
             CREATE INDEX IF NOT EXISTS idx_scan_history_program ON scan_history(program_id);
+
+            CREATE TABLE IF NOT EXISTS reference_curriculum (
+                program_id INTEGER PRIMARY KEY,
+                version_id INTEGER,
+                version_date TEXT,
+                curriculum_html TEXT,
+                fetched_at TIMESTAMP,
+                FOREIGN KEY (program_id) REFERENCES programs(id)
+            );
         """)
 
 
@@ -346,6 +355,40 @@ def get_programs_by_approver(email):
         return [dict(row) for row in rows]
 
 
+def upsert_reference_curriculum(program_id, version_id, version_date, html):
+    """Insert or update reference curriculum for a program."""
+    with get_db() as conn:
+        now = datetime.now().isoformat()
+        conn.execute("""
+            INSERT INTO reference_curriculum (program_id, version_id, version_date, curriculum_html, fetched_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(program_id) DO UPDATE SET
+                version_id = excluded.version_id,
+                version_date = excluded.version_date,
+                curriculum_html = excluded.curriculum_html,
+                fetched_at = excluded.fetched_at
+        """, (program_id, version_id, version_date, html, now))
+
+
+def get_reference_curriculum(program_id):
+    """Get reference curriculum for a single program."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT version_id, version_date, curriculum_html FROM reference_curriculum WHERE program_id = ?",
+            (program_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_all_reference_curriculum():
+    """Get reference curriculum for all programs (for static export)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT program_id, version_date, curriculum_html FROM reference_curriculum"
+        ).fetchall()
+        return {str(row['program_id']): {'version_date': row['version_date'], 'html': row['curriculum_html']} for row in rows}
+
+
 def migrate_db():
     """Add new columns to existing database if needed."""
     with get_db() as conn:
@@ -364,3 +407,15 @@ def migrate_db():
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE programs ADD COLUMN {col} {typedef}")
                 print(f"  Added column: {col}")
+
+        # Create reference_curriculum table if it doesn't exist
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reference_curriculum (
+                program_id INTEGER PRIMARY KEY,
+                version_id INTEGER,
+                version_date TEXT,
+                curriculum_html TEXT,
+                fetched_at TIMESTAMP,
+                FOREIGN KEY (program_id) REFERENCES programs(id)
+            )
+        """)

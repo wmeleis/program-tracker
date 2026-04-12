@@ -619,5 +619,183 @@ def run_full_scan():
     }
 
 
+def fetch_reference_curricula(program_ids, batch_size=10):
+    """Fetch the most recent historical version (reference curriculum) for each program.
+
+    Uses the CourseLeaf history API:
+    /courseleaf/courseleaf.cgi?page=/programadmin/{id}/index.html&output=xml&step=showtcf&view=history&diffversion={versionId}
+
+    For each program:
+    1. Fetches the program page to get the history div with version IDs
+    2. Takes the most recent history entry (last onclick with highest version ID)
+    3. Fetches that version's full content via the API
+    4. Extracts the HTML content from the <showdata> CDATA section
+    """
+    from database import upsert_reference_curriculum, get_db
+
+    # Check which programs already have reference data with up-to-date versions
+    existing_refs = {}
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT program_id, version_id FROM reference_curriculum"
+        ).fetchall()
+        existing_refs = {row['program_id']: row['version_id'] for row in rows}
+
+    print(f"\nFetching reference curricula for {len(program_ids)} programs...")
+    batches = [program_ids[i:i+batch_size] for i in range(0, len(program_ids), batch_size)]
+    fetched = 0
+    skipped = 0
+
+    for batch_num, batch in enumerate(batches):
+        ids_json = json.dumps(batch)
+        js_code = f'''
+(function() {{
+    var ids = {ids_json};
+    var results = {{}};
+    var parser = new DOMParser();
+
+    for (var i = 0; i < ids.length; i++) {{
+        var id = ids[i];
+        try {{
+            // Step 1: Fetch program page to get history versions
+            var xhr1 = new XMLHttpRequest();
+            xhr1.open("GET", "/programadmin/" + id + "/", false);
+            xhr1.send();
+            if (xhr1.status !== 200) {{
+                results[id] = {{error: "fetch_failed", status: xhr1.status}};
+                continue;
+            }}
+
+            var doc = parser.parseFromString(xhr1.responseText, "text/html");
+            var histDiv = doc.getElementById("history");
+            if (!histDiv) {{
+                results[id] = {{error: "no_history"}};
+                continue;
+            }}
+
+            // Parse version IDs and dates from onclick="return cim.showHistory(N);"
+            var links = histDiv.querySelectorAll("a[onclick]");
+            if (links.length === 0) {{
+                results[id] = {{error: "no_versions"}};
+                continue;
+            }}
+
+            // Last link = most recent history entry
+            var lastLink = links[links.length - 1];
+            var onclickAttr = lastLink.getAttribute("onclick");
+            var vMatch = onclickAttr.match(/showHistory\\((\\d+)\\)/);
+            if (!vMatch) {{
+                results[id] = {{error: "no_version_id"}};
+                continue;
+            }}
+
+            var versionId = parseInt(vMatch[1]);
+            var versionDate = lastLink.textContent.trim();
+
+            // Step 2: Fetch historical version content
+            var apiUrl = "/courseleaf/courseleaf.cgi?page=/programadmin/" + id +
+                "/index.html&output=xml&step=showtcf&view=history&diffversion=" + versionId;
+            var xhr2 = new XMLHttpRequest();
+            xhr2.open("GET", apiUrl, false);
+            xhr2.send();
+
+            if (xhr2.status !== 200) {{
+                results[id] = {{error: "history_fetch_failed", status: xhr2.status}};
+                continue;
+            }}
+
+            // Step 3: Extract content from <showdata> CDATA
+            var xml = xhr2.responseText;
+            var cdataStart = xml.indexOf("<![CDATA[");
+            var cdataEnd = xml.indexOf("]]>", cdataStart + 9);
+            var html = "";
+            if (cdataStart !== -1 && cdataEnd !== -1) {{
+                html = xml.substring(cdataStart + 9, cdataEnd);
+            }}
+
+            results[id] = {{
+                version_id: versionId,
+                version_date: versionDate,
+                html_size: html.length
+            }};
+
+            // Store HTML in a data attribute to avoid JSON escaping issues
+            var store = document.createElement("div");
+            store.id = "__ref_" + id;
+            store.style.display = "none";
+            store.textContent = html;
+            document.body.appendChild(store);
+
+        }} catch(e) {{
+            results[id] = {{error: e.toString()}};
+        }}
+    }}
+
+    return JSON.stringify(results);
+}})();
+'''
+        result = run_js_in_tab("programadmin", js_code, match_by='url', timeout=120)
+        if not result:
+            print(f"  Batch {batch_num+1}/{len(batches)}: No result from Chrome")
+            continue
+
+        try:
+            batch_results = json.loads(result)
+        except json.JSONDecodeError:
+            print(f"  Batch {batch_num+1}/{len(batches)}: JSON parse error")
+            continue
+
+        # Now fetch the stored HTML for each successful program
+        for prog_id in batch:
+            prog_str = str(prog_id)
+            info = batch_results.get(prog_str, {})
+
+            if 'error' in info:
+                if info['error'] != 'no_history' and info['error'] != 'no_versions':
+                    print(f"  Program {prog_id}: {info['error']}")
+                skipped += 1
+                continue
+
+            version_id = info.get('version_id')
+            version_date = info.get('version_date', '')
+
+            # Skip if we already have this version
+            if existing_refs.get(prog_id) == version_id:
+                skipped += 1
+                continue
+
+            # Retrieve the stored HTML from the hidden div
+            js_get = f'''
+(function() {{
+    var el = document.getElementById("__ref_{prog_id}");
+    if (!el) return "";
+    var html = el.textContent;
+    el.remove();
+    return html;
+}})();
+'''
+            html = run_js_in_tab("programadmin", js_get, match_by='url', timeout=30)
+            if html and html != 'missing value':
+                upsert_reference_curriculum(prog_id, version_id, version_date, html)
+                fetched += 1
+            else:
+                skipped += 1
+
+        print(f"  Batch {batch_num+1}/{len(batches)}: fetched {fetched} references")
+
+    # Clean up any remaining hidden divs
+    cleanup_js = '''
+(function() {
+    var els = document.querySelectorAll("[id^=__ref_]");
+    els.forEach(function(el) { el.remove(); });
+    return els.length;
+})();
+'''
+    run_js_in_tab("programadmin", cleanup_js, match_by='url', timeout=10)
+
+    print(f"Reference curricula: {fetched} fetched, {skipped} skipped")
+    return fetched
+
+
 if __name__ == '__main__':
     run_full_scan()

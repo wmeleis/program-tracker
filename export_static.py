@@ -7,7 +7,7 @@ from datetime import datetime
 from database import (
     get_all_programs, get_program_workflow, get_pipeline_counts,
     get_recent_changes, get_last_scan, get_colleges,
-    get_current_approvers, get_all_curriculum
+    get_current_approvers, get_all_curriculum, get_all_reference_curriculum
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES
 
@@ -63,7 +63,12 @@ def build_static_site():
     with open(os.path.join(EXPORT_DIR, 'curriculum.json'), 'w') as f:
         json.dump(curriculum, f)
 
-    print(f"Exported: {len(data['programs'])} programs, {len(data['workflows'])} workflows, {len(curriculum)} curricula")
+    # Export reference curriculum data
+    reference = get_all_reference_curriculum()
+    with open(os.path.join(EXPORT_DIR, 'reference.json'), 'w') as f:
+        json.dump(reference, f)
+
+    print(f"Exported: {len(data['programs'])} programs, {len(data['workflows'])} workflows, {len(curriculum)} curricula, {len(reference)} references")
 
     # Copy CSS
     shutil.copy2(
@@ -239,6 +244,32 @@ document.addEventListener('DOMContentLoaded', () => {
             contentEl.innerHTML = `<div class="curriculum-content">${html}</div>`;
         } else {
             contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available.</div>';
+        }
+    };
+
+    // Patch reference curriculum loading to use static data
+    let _referenceCache = null;
+    window.loadReferenceDetail = async function(programId) {
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
+        contentEl.innerHTML = '<div class="workflow-loading">Loading reference curriculum...</div>';
+        if (!_referenceCache) {
+            try {
+                const r = await fetch('reference.json');
+                _referenceCache = await r.json();
+            } catch(e) {
+                contentEl.innerHTML = '<div class="workflow-meta">Failed to load reference data.</div>';
+                return;
+            }
+        }
+        const ref = _referenceCache[String(programId)];
+        if (ref && ref.html) {
+            const header = ref.version_date
+                ? `<div class="reference-header">Last approved version: ${ref.version_date}</div>`
+                : '';
+            contentEl.innerHTML = `${header}<div class="curriculum-content">${ref.html}</div>`;
+        } else {
+            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals.</div>';
         }
     };
 

@@ -476,6 +476,8 @@ function renderProgramTable(programs) {
                                 onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'workflow')">Workflow</button>
                             <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}"
                                 onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'curriculum')">Curriculum</button>
+                            <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}"
+                                onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'reference')">Reference</button>
                         </div>
                         <div class="detail-content" id="detail-content-${p.id}">
                             <div class="workflow-loading">Loading...</div>
@@ -493,6 +495,7 @@ function renderProgramTable(programs) {
     expandedRows.forEach(id => {
         const tab = detailTabState[id] || 'workflow';
         if (tab === 'workflow') loadWorkflowDetail(id);
+        else if (tab === 'reference') loadReferenceDetail(id);
         else loadCurriculumDetail(id);
     });
 }
@@ -554,6 +557,31 @@ async function loadCurriculumDetail(programId) {
     }
 }
 
+async function loadReferenceDetail(programId) {
+    const contentEl = document.getElementById(`detail-content-${programId}`);
+    if (!contentEl) return;
+    contentEl.innerHTML = '<div class="workflow-loading">Loading reference curriculum...</div>';
+
+    try {
+        const res = await fetch(`/api/program/${programId}/reference`);
+        if (!res.ok) {
+            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals.</div>';
+            return;
+        }
+        const data = await res.json();
+        if (data.curriculum_html) {
+            const header = data.version_date
+                ? `<div class="reference-header">Last approved version: ${escapeHtml(data.version_date)}</div>`
+                : '';
+            contentEl.innerHTML = `${header}<div class="curriculum-content">${data.curriculum_html}</div>`;
+        } else {
+            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available.</div>';
+        }
+    } catch (e) {
+        contentEl.innerHTML = '<div class="workflow-meta">Failed to load reference curriculum.</div>';
+    }
+}
+
 function switchDetailTab(programId, tab) {
     detailTabState[programId] = tab;
     const detailRow = document.getElementById(`detail-${programId}`);
@@ -562,6 +590,7 @@ function switchDetailTab(programId, tab) {
         btn.classList.toggle('active', btn.textContent.trim().toLowerCase() === tab);
     });
     if (tab === 'workflow') loadWorkflowDetail(programId);
+    else if (tab === 'reference') loadReferenceDetail(programId);
     else loadCurriculumDetail(programId);
 }
 
@@ -851,6 +880,32 @@ document.addEventListener('DOMContentLoaded', () => {
             contentEl.innerHTML = `<div class="curriculum-content">${html}</div>`;
         } else {
             contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available.</div>';
+        }
+    };
+
+    // Patch reference curriculum loading to use static data
+    let _referenceCache = null;
+    window.loadReferenceDetail = async function(programId) {
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
+        contentEl.innerHTML = '<div class="workflow-loading">Loading reference curriculum...</div>';
+        if (!_referenceCache) {
+            try {
+                const r = await fetch('reference.json');
+                _referenceCache = await r.json();
+            } catch(e) {
+                contentEl.innerHTML = '<div class="workflow-meta">Failed to load reference data.</div>';
+                return;
+            }
+        }
+        const ref = _referenceCache[String(programId)];
+        if (ref && ref.html) {
+            const header = ref.version_date
+                ? `<div class="reference-header">Last approved version: ${ref.version_date}</div>`
+                : '';
+            contentEl.innerHTML = `${header}<div class="curriculum-content">${ref.html}</div>`;
+        } else {
+            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals.</div>';
         }
     };
 
