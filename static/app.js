@@ -48,7 +48,7 @@ async function loadDashboard() {
         loadApprovers()
     ]);
     // Re-render pipeline now that allPrograms is loaded (for college count)
-    if (cachedPipeline.length) renderPipeline(cachedPipeline);
+    if (cachedPipeline.length) renderPipeline(cachedPipeline, allPrograms);
     updateSmartViewCounts();
     updateTypeCounts();
     updateProposalCounts();
@@ -216,7 +216,7 @@ async function loadScanStatus() {
         }
         if (data.last_scan) {
             const d = new Date(data.last_scan.scan_time);
-            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'})}`;
+            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
     } catch (e) {
         console.error('Failed to load scan status:', e);
@@ -225,10 +225,40 @@ async function loadScanStatus() {
 
 // ==================== Rendering ====================
 
-function renderPipeline(pipeline) {
+function updatePipelineCounts(baseFiltered) {
+    if (!cachedPipeline.length) return;
+    // Recount each pipeline step from filtered data
+    const stepCounts = {};
+    baseFiltered.forEach(p => {
+        const step = p.current_step;
+        if (step) stepCounts[step] = (stepCounts[step] || 0) + 1;
+    });
+    const updated = cachedPipeline.map(step => ({
+        ...step,
+        count: stepCounts[step.role] || 0
+    }));
+    renderPipeline(updated, baseFiltered);
+}
+
+function updateCollegeOptions(baseFiltered) {
+    const select = document.getElementById('filter-college');
+    const current = select.value;
+    const counts = {};
+    baseFiltered.forEach(p => {
+        if (p.college) counts[p.college] = (counts[p.college] || 0) + 1;
+    });
+    const sorted = Object.keys(counts).sort();
+    select.innerHTML = '<option value="">All Colleges</option>' +
+        sorted.map(c => `<option value="${c}">${c} (${counts[c]})</option>`).join('');
+    // Preserve selection if still valid
+    if (counts[current]) select.value = current;
+}
+
+function renderPipeline(pipeline, baseFiltered) {
     const bar = document.getElementById('pipeline-bar');
     // Add College Review as the first step in the pipeline
-    const collegeCount = allPrograms.filter(p => isCollegeStep(p.current_step)).length;
+    const source = baseFiltered || allPrograms;
+    const collegeCount = source.filter(p => isCollegeStep(p.current_step)).length;
     const collegeActive = pipelineFilter === '__college__' ? ' active' : '';
     let html = `
         <div class="pipeline-step ${collegeCount > 0 ? 'has-items' : 'empty'}${collegeActive}"
@@ -276,13 +306,38 @@ function populateStepFilter() {
     select.innerHTML = '<option value="">All Steps</option>' + options;
 }
 
-async function applyFilters() {
+// Apply all filters EXCEPT pipeline and college, for use in updating pipeline counts and college dropdown
+function getBaseFiltered(approverProgramIds) {
     const stepFilter = document.getElementById('filter-step').value;
     const campusFilter = document.getElementById('filter-campus').value;
-    const collegeFilter = document.getElementById('filter-college').value;
     const approverFilter = document.getElementById('filter-approver').value;
     const search = document.getElementById('filter-search').value.toLowerCase();
     const now = new Date();
+
+    return allPrograms.filter(p => {
+        if (smartView === 'recent') {
+            const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
+            if (!entered || (now - entered) >= 14 * 86400000) return false;
+        } else if (smartView === 'stuck') {
+            if (getDaysAtStep(p) < STUCK_THRESHOLD_DAYS) return false;
+        } else if (smartView === 'new') {
+            const submitted = p.date_submitted ? new Date(p.date_submitted) : null;
+            if (!submitted || (now - submitted) >= 30 * 86400000) return false;
+        }
+        if (typeFilter && p.program_type !== typeFilter) return false;
+        if (proposalFilter && p.status !== proposalFilter) return false;
+        if (stepFilter && p.current_step !== stepFilter) return false;
+        if (campusFilter && extractCampus(p.name) !== campusFilter) return false;
+        if (approverProgramIds && !approverProgramIds.has(p.id)) return false;
+        if (search && !p.name.toLowerCase().includes(search) &&
+            !(p.banner_code && p.banner_code.toLowerCase().includes(search))) return false;
+        return true;
+    });
+}
+
+async function applyFilters() {
+    const collegeFilter = document.getElementById('filter-college').value;
+    const approverFilter = document.getElementById('filter-approver').value;
 
     // If approver filter is active, fetch programs from API (or use static cache)
     let approverProgramIds = window._staticApproverIds || null;
@@ -296,31 +351,20 @@ async function applyFilters() {
         }
     }
 
-    let filtered = allPrograms.filter(p => {
-        // Smart view filters
-        if (smartView === 'recent') {
-            const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
-            if (!entered || (now - entered) >= 14 * 86400000) return false;
-        } else if (smartView === 'stuck') {
-            if (getDaysAtStep(p) < STUCK_THRESHOLD_DAYS) return false;
-        } else if (smartView === 'new') {
-            const submitted = p.date_submitted ? new Date(p.date_submitted) : null;
-            if (!submitted || (now - submitted) >= 30 * 86400000) return false;
-        }
+    // Base filtered set (all filters except pipeline and college)
+    const baseFiltered = getBaseFiltered(approverProgramIds);
 
-        // Type and proposal filters (from top buttons)
-        if (typeFilter && p.program_type !== typeFilter) return false;
-        if (proposalFilter && p.status !== proposalFilter) return false;
+    // Update pipeline counts from base filtered set
+    updatePipelineCounts(baseFiltered);
 
-        // Regular filters
+    // Update college dropdown from base filtered set
+    updateCollegeOptions(baseFiltered);
+
+    // Now apply pipeline and college filters for the table
+    let filtered = baseFiltered.filter(p => {
         if (pipelineFilter === '__college__' && !isCollegeStep(p.current_step)) return false;
         if (pipelineFilter && pipelineFilter !== '__college__' && p.current_step !== pipelineFilter) return false;
-        if (stepFilter && p.current_step !== stepFilter) return false;
-        if (campusFilter && extractCampus(p.name) !== campusFilter) return false;
         if (collegeFilter && p.college !== collegeFilter) return false;
-        if (approverProgramIds && !approverProgramIds.has(p.id)) return false;
-        if (search && !p.name.toLowerCase().includes(search) &&
-            !(p.banner_code && p.banner_code.toLowerCase().includes(search))) return false;
         return true;
     });
 
@@ -535,8 +579,7 @@ function togglePipelineFilter(role) {
     } else {
         pipelineFilter = role;
     }
-    // Re-render pipeline to update active state
-    if (cachedPipeline.length) renderPipeline(cachedPipeline);
+    // Re-render pipeline to update active state (full recount happens in applyFilters)
     applyFilters();
 }
 
