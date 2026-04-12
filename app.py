@@ -11,9 +11,10 @@ from database import (
     init_db, migrate_db, get_all_programs, get_program_workflow,
     get_pipeline_counts, get_recent_changes, get_last_scan,
     get_programs_by_step, get_colleges, get_current_approvers,
-    get_programs_by_approver, get_program_curriculum
+    get_programs_by_approver, get_program_curriculum,
+    get_reference_curriculum
 )
-from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, run_full_scan
+from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -88,6 +89,15 @@ def api_program_curriculum(program_id):
     return jsonify({'curriculum_html': html})
 
 
+@app.route('/api/program/<int:program_id>/reference')
+def api_program_reference(program_id):
+    """Get reference (previously approved) curriculum for a program."""
+    ref = get_reference_curriculum(program_id)
+    if ref:
+        return jsonify(ref)
+    return jsonify({'error': 'No reference curriculum found'}), 404
+
+
 @app.route('/api/pipeline')
 def api_pipeline():
     """Get pipeline summary counts."""
@@ -132,6 +142,14 @@ def api_scan_trigger():
             scan_status['error'] = None
             result = run_full_scan()
             scan_status['last_result'] = result
+            # Fetch reference curricula for all programs in the pipeline
+            try:
+                programs = get_all_programs()
+                prog_ids = [p['id'] for p in programs]
+                if prog_ids:
+                    fetch_reference_curricula(prog_ids)
+            except Exception as e:
+                print(f"Reference fetch error: {e}")
             # Auto-export and deploy to GitHub Pages
             try:
                 import subprocess
