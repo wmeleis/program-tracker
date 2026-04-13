@@ -843,6 +843,11 @@ document.addEventListener('DOMContentLoaded', () => {
         populateStepFilter();
         populateCampusFilter();
 
+        // Colleges
+        const cSel = document.getElementById('filter-college');
+        cSel.innerHTML = '<option value="">All Colleges</option>' +
+            (D.colleges||[]).map(c => `<option value="${c}">${c}</option>`).join('');
+
         // Approvers
         const aSel = document.getElementById('filter-approver');
         aSel.innerHTML = '<option value="">All Approvers</option>' +
