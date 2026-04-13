@@ -246,7 +246,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const html = _curriculumCache[String(programId)] || '';
         if (html) {
-            contentEl.innerHTML = `<div class="curriculum-content">${html}</div>`;
+            const cleaned = cleanCurriculumHtml(html);
+            contentEl.innerHTML = `<div class="curriculum-content">${cleaned}</div>`;
         } else {
             contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available.</div>';
         }
