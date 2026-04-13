@@ -721,13 +721,15 @@ tr.program-row.expanded td {
 }
 
 .curriculum-content table.sc_courselist {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
     border-collapse: collapse;
     margin: 0 0 12px 0;
 }
 
 .curriculum-content table {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
     border-collapse: collapse;
     margin: 0 0 12px 0;
 }
@@ -747,10 +749,16 @@ tr.program-row.expanded td {
     white-space: nowrap;
 }
 
+/* Title column */
+.curriculum-content .titlecol {
+    min-width: 250px;
+}
+
 /* Hours column right-aligned and fixed width */
 .curriculum-content .hourscol {
-    width: 60px;
+    width: 50px;
     text-align: right;
+    padding-left: 16px;
 }
 
 .curriculum-content th {
