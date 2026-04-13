@@ -568,7 +568,8 @@ async function loadCurriculumDetail(programId) {
         const res = await fetch(`/api/program/${programId}/curriculum`);
         const data = await res.json();
         if (data.curriculum_html) {
-            contentEl.innerHTML = `<div class="curriculum-content">${data.curriculum_html}</div>`;
+            const cleaned = cleanCurriculumHtml(data.curriculum_html);
+            contentEl.innerHTML = `<div class="curriculum-content">${cleaned}</div>`;
         } else {
             contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available. Run a scan to collect curriculum details.</div>';
         }
