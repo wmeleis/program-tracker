@@ -619,17 +619,70 @@ def run_full_scan():
     }
 
 
+def _parse_campus_from_name(name):
+    """Extract the campus from a program name like 'Management, MS (Oakland)'.
+    Returns (base_name_without_campus, campus) or (name, None) if no campus found."""
+    match = re.search(r'\(([^)]+)\)\s*$', name)
+    if match:
+        campus = match.group(1).strip()
+        base = name[:match.start()].strip()
+        return base, campus
+    return name, None
+
+
+def _build_boston_counterpart_map(program_ids):
+    """For non-Boston programs, find the Boston counterpart's CIM ID.
+
+    Returns a dict: {non_boston_program_id: boston_program_id}
+    Programs that are already Boston or have no counterpart are not included.
+    """
+    from database import get_db
+
+    # Load all known programs (including ones not in current scan)
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, name FROM programs").fetchall()
+        all_programs = {row['id']: row['name'] for row in rows}
+
+    # Build name -> ID map for Boston programs
+    boston_by_base_name = {}  # base_name -> program_id
+    for pid, name in all_programs.items():
+        base, campus = _parse_campus_from_name(name)
+        if campus and campus.lower() == 'boston':
+            boston_by_base_name[base.lower()] = pid
+        elif not campus:
+            # Programs without a campus parenthetical are assumed to be Boston
+            boston_by_base_name[name.strip().lower()] = pid
+
+    # Map non-Boston programs to their Boston counterparts
+    counterpart_map = {}
+    for pid in program_ids:
+        name = all_programs.get(pid, '')
+        if not name:
+            continue
+        base, campus = _parse_campus_from_name(name)
+        if campus and campus.lower() != 'boston':
+            boston_id = boston_by_base_name.get(base.lower())
+            if boston_id:
+                counterpart_map[pid] = boston_id
+            else:
+                print(f"  No Boston counterpart found for: {name} (ID {pid})")
+
+    return counterpart_map
+
+
 def fetch_reference_curricula(program_ids, batch_size=10):
     """Fetch the most recent historical version (reference curriculum) for each program.
 
     Uses the CourseLeaf history API:
     /courseleaf/courseleaf.cgi?page=/programadmin/{id}/index.html&output=xml&step=showtcf&view=history&diffversion={versionId}
 
-    For each program:
-    1. Fetches the program page to get the history div with version IDs
-    2. Takes the most recent history entry (last onclick with highest version ID)
-    3. Fetches that version's full content via the API
-    4. Extracts the HTML content from the <showdata> CDATA section
+    For Boston programs:
+    - Fetches the program's own CIM history (most recent approved version)
+
+    For non-Boston programs (Oakland, Charlotte, etc.):
+    - Finds the Boston counterpart by name (strips campus, matches Boston version)
+    - Uses the Boston program's most recently approved CIM history version as reference
+    - This is because non-Boston programs are typically based on the Boston curriculum
     """
     from database import upsert_reference_curriculum, get_db
 
@@ -641,6 +694,11 @@ def fetch_reference_curricula(program_ids, batch_size=10):
         ).fetchall()
         existing_refs = {row['program_id']: row['version_id'] for row in rows}
 
+    # Build mapping of non-Boston programs to their Boston counterparts
+    counterpart_map = _build_boston_counterpart_map(program_ids)
+    if counterpart_map:
+        print(f"  Found {len(counterpart_map)} non-Boston programs with Boston counterparts")
+
     print(f"\nFetching reference curricula for {len(program_ids)} programs...")
     batches = [program_ids[i:i+batch_size] for i in range(0, len(program_ids), batch_size)]
     fetched = 0
@@ -648,18 +706,24 @@ def fetch_reference_curricula(program_ids, batch_size=10):
 
     for batch_num, batch in enumerate(batches):
         ids_json = json.dumps(batch)
+        # Build counterpart mapping for this batch: {non_boston_id: boston_id}
+        batch_counterparts = {pid: counterpart_map[pid] for pid in batch if pid in counterpart_map}
+        counterparts_json = json.dumps(batch_counterparts)
         js_code = f'''
 (function() {{
     var ids = {ids_json};
+    var counterparts = {counterparts_json};
     var results = {{}};
     var parser = new DOMParser();
 
     for (var i = 0; i < ids.length; i++) {{
         var id = ids[i];
+        // For non-Boston programs, fetch the Boston counterpart's history
+        var fetchId = counterparts[id] || id;
         try {{
             // Step 1: Fetch program page to get history versions
             var xhr1 = new XMLHttpRequest();
-            xhr1.open("GET", "/programadmin/" + id + "/", false);
+            xhr1.open("GET", "/programadmin/" + fetchId + "/", false);
             xhr1.send();
             if (xhr1.status !== 200) {{
                 results[id] = {{error: "fetch_failed", status: xhr1.status}};
@@ -692,8 +756,8 @@ def fetch_reference_curricula(program_ids, batch_size=10):
             var versionId = parseInt(vMatch[1]);
             var versionDate = lastLink.textContent.trim();
 
-            // Step 2: Fetch historical version content
-            var apiUrl = "/courseleaf/courseleaf.cgi?page=/programadmin/" + id +
+            // Step 2: Fetch historical version content (using fetchId, which may be Boston counterpart)
+            var apiUrl = "/courseleaf/courseleaf.cgi?page=/programadmin/" + fetchId +
                 "/index.html&output=xml&step=showtcf&view=history&diffversion=" + versionId;
             var xhr2 = new XMLHttpRequest();
             xhr2.open("GET", apiUrl, false);
@@ -802,7 +866,11 @@ def fetch_reference_curricula(program_ids, batch_size=10):
 '''
             html = run_js_in_tab("programadmin", js_get, match_by='url', timeout=30)
             if html and html != 'missing value':
-                upsert_reference_curriculum(prog_id, version_id, version_date, html)
+                # If this is a non-Boston program, note the Boston source in version_date
+                display_date = version_date
+                if prog_id in counterpart_map:
+                    display_date = f"{version_date} (Boston version)"
+                upsert_reference_curriculum(prog_id, version_id, display_date, html)
                 fetched += 1
             else:
                 skipped += 1
