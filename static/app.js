@@ -582,13 +582,17 @@ function cleanCurriculumHtml(html) {
     const div = document.createElement('div');
     div.innerHTML = html;
 
-    // Remove "Course Not Found" error elements (red boxes)
-    div.querySelectorAll('.structuredcontenterror').forEach(el => el.remove());
-
-    // Remove rows that only contained a "not found" course (now empty after above)
-    div.querySelectorAll('tr').forEach(tr => {
-        const code = tr.querySelector('.codecol');
-        if (code && code.textContent.trim() === '') tr.remove();
+    // Replace "Course Not Found" error elements with plain text (keep the course code)
+    div.querySelectorAll('.structuredcontenterror').forEach(el => {
+        const text = el.textContent.replace(/\u00a0/g, ' ').trim();
+        // In title column, strip "Course XXX Not Found" → just show the code
+        const notFound = text.match(/^Course\s+(.+)\s+Not Found$/);
+        if (notFound) {
+            el.replaceWith(document.createTextNode(notFound[1]));
+        } else {
+            // In code column, just unwrap to plain text
+            el.replaceWith(document.createTextNode(text));
+        }
     });
 
     // Remove "Program Overview" section (h2 + following content until next h2)
