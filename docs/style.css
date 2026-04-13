@@ -661,6 +661,11 @@ header h1 {
     font-weight: 500;
 }
 
+/* Hide red error boxes and "Course Not Found" elements in reference/curriculum */
+.curriculum-content .structuredcontenterror {
+    display: none !important;
+}
+
 /* Curriculum content */
 .curriculum-content {
     padding: 4px 0;

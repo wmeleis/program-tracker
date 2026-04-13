@@ -557,6 +557,66 @@ async function loadCurriculumDetail(programId) {
     }
 }
 
+function cleanCurriculumHtml(html) {
+    // Remove unwanted sections from reference/curriculum HTML
+    const div = document.createElement('div');
+    div.innerHTML = html;
+
+    // Remove "Course Not Found" error elements (red boxes)
+    div.querySelectorAll('.structuredcontenterror').forEach(el => el.remove());
+
+    // Remove rows that only contained a "not found" course (now empty after above)
+    div.querySelectorAll('tr').forEach(tr => {
+        const code = tr.querySelector('.codecol');
+        if (code && code.textContent.trim() === '') tr.remove();
+    });
+
+    // Remove "Program Overview" section (h2 + following content until next h2)
+    div.querySelectorAll('h2').forEach(h2 => {
+        if (h2.textContent.trim() === 'Program Overview') {
+            // Remove everything from this h2 until the next h2 or end
+            let node = h2.nextSibling;
+            while (node) {
+                const next = node.nextSibling;
+                if (node.nodeName === 'H2') break;
+                node.parentNode.removeChild(node);
+                node = next;
+            }
+            h2.remove();
+        }
+    });
+
+    // Remove Milestone sections (h4 or h3 with "Milestone" + following p)
+    div.querySelectorAll('h3, h4').forEach(h => {
+        if (h.textContent.trim() === 'Milestone') {
+            let node = h.nextSibling;
+            while (node) {
+                const next = node.nextSibling;
+                if (node.nodeName && node.nodeName.match(/^H[2-4]$/)) break;
+                node.parentNode.removeChild(node);
+                node = next;
+            }
+            h.remove();
+        }
+    });
+
+    // Remove "Research Areas" section
+    div.querySelectorAll('h2, h3').forEach(h => {
+        if (h.textContent.trim() === 'Research Areas') {
+            let node = h.nextSibling;
+            while (node) {
+                const next = node.nextSibling;
+                if (node.nodeName === 'H2') break;
+                node.parentNode.removeChild(node);
+                node = next;
+            }
+            h.remove();
+        }
+    });
+
+    return div.innerHTML;
+}
+
 async function loadReferenceDetail(programId) {
     const contentEl = document.getElementById(`detail-content-${programId}`);
     if (!contentEl) return;
@@ -570,10 +630,11 @@ async function loadReferenceDetail(programId) {
         }
         const data = await res.json();
         if (data.curriculum_html) {
+            const cleaned = cleanCurriculumHtml(data.curriculum_html);
             const header = data.version_date
                 ? `<div class="reference-header">Last approved version: ${escapeHtml(data.version_date)}</div>`
                 : '';
-            contentEl.innerHTML = `${header}<div class="curriculum-content">${data.curriculum_html}</div>`;
+            contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {
             contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available.</div>';
         }
