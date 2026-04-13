@@ -173,3 +173,23 @@ launchctl load ~/Library/LaunchAgents/com.programtracker.update.plist
 # Check launchd logs
 cat data/launchd.log
 ```
+
+## Recent Features (added after initial build)
+
+### Reference Curriculum
+Captures the last-approved version of each program's curriculum from CourseLeaf's history API, enabling before/after comparison.
+
+- **`scraper.py`:** `fetch_reference_curricula()` — fetches historical version IDs from the history UI, retrieves that version's XML, parses CDATA-wrapped HTML for curriculum content. Called automatically after each scan.
+- **`database.py`:** `reference_curriculum` table (`program_id`, `version_id`, `version_date`, `curriculum_html`, `fetched_at`). Functions: `upsert_reference_curriculum()`, `get_reference_curriculum()`, `get_all_reference_curriculum()`.
+- **`app.py`:** `GET /api/program/<id>/reference` endpoint. Auto-fetches reference data after each scan completes.
+- **`export_static.py`:** Exports `reference.json` alongside `data.json` for the static site.
+- **`static/app.js`:** Adds a "Reference" tab in expandable program rows (alongside "Workflow" and "Curriculum"). `loadReferenceDetail()` displays the version date and cleaned curriculum HTML. `cleanCurriculumHtml()` strips errors and unnecessary sections.
+
+### Curriculum Display
+Programs now store their full curriculum HTML (`programs.curriculum_html`). Expandable rows have a "Curriculum" tab showing the current proposal's curriculum content.
+
+### Cross-Filtering
+Button counts (type, proposal, smart views) dynamically update to reflect what's available given other active filters, excluding their own filter type from the count calculation.
+
+### Timezone Handling
+All timestamps displayed in Eastern Time (America/New_York) with "ET" suffix. Applied in both the Flask-served and static GitHub Pages versions.
