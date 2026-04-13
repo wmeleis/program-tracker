@@ -582,6 +582,11 @@ function cleanCurriculumHtml(html) {
     const div = document.createElement('div');
     div.innerHTML = html;
 
+    // Strip all links — replace <a> with plain text
+    div.querySelectorAll('a').forEach(el => {
+        el.replaceWith(document.createTextNode(el.textContent));
+    });
+
     // Replace "Course Not Found" error elements with plain text (keep the course code)
     div.querySelectorAll('.structuredcontenterror').forEach(el => {
         const text = el.textContent.replace(/\u00a0/g, ' ').trim();
