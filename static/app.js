@@ -586,6 +586,9 @@ function cleanCurriculumHtml(html) {
     const div = document.createElement('div');
     div.innerHTML = html;
 
+    // Remove hidden elements (captions, noscript header rows) — CSS display:none doesn't apply in detached DOM
+    div.querySelectorAll('.hidden, .noscript, caption').forEach(el => el.remove());
+
     // Strip all links — replace <a> with plain text
     div.querySelectorAll('a').forEach(el => {
         el.replaceWith(document.createTextNode(el.textContent));
