@@ -629,9 +629,10 @@ function cleanCurriculumHtml(html) {
         }
     });
 
-    // Remove "Research Areas" section
+    // Remove "Research Areas" and "Program Credit/GPA Requirements" sections
     div.querySelectorAll('h2, h3').forEach(h => {
-        if (h.textContent.trim() === 'Research Areas') {
+        const text = h.textContent.trim();
+        if (text === 'Research Areas' || text === 'Program Credit/GPA Requirements') {
             let node = h.nextSibling;
             while (node) {
                 const next = node.nextSibling;
