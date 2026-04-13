@@ -708,7 +708,7 @@ tr.program-row.expanded td {
     cursor: default;
 }
 
-/* Hide CIM's "Course List" captions and redundant header rows */
+/* Fallback: hide CIM's "Course List" captions and redundant header rows via CSS too */
 .curriculum-content .hidden,
 .curriculum-content .noscript,
 .curriculum-content caption {
