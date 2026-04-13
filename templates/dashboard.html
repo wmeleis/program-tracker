@@ -55,31 +55,46 @@
     <section class="filters-section">
         <div class="filter-group">
             <label>College:</label>
-            <select id="filter-college" onchange="applyFilters()">
-                <option value="">All Colleges</option>
-            </select>
+            <div class="filter-select-wrap">
+                <select id="filter-college" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Colleges</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
+            </div>
         </div>
         <div class="filter-group">
             <label>Campus:</label>
-            <select id="filter-campus" onchange="applyFilters()">
-                <option value="">All Campuses</option>
-            </select>
+            <div class="filter-select-wrap">
+                <select id="filter-campus" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Campuses</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-campus')" title="Clear">&times;</span>
+            </div>
         </div>
         <div class="filter-group">
             <label>Approver:</label>
-            <select id="filter-approver" onchange="applyFilters()">
-                <option value="">All Approvers</option>
-            </select>
+            <div class="filter-select-wrap">
+                <select id="filter-approver" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Approvers</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-approver')" title="Clear">&times;</span>
+            </div>
         </div>
         <div class="filter-group">
             <label>Step:</label>
-            <select id="filter-step" onchange="applyFilters()">
-                <option value="">All Steps</option>
-            </select>
+            <div class="filter-select-wrap">
+                <select id="filter-step" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Steps</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-step')" title="Clear">&times;</span>
+            </div>
         </div>
         <div class="filter-group search-group">
             <label>Search:</label>
-            <input type="text" id="filter-search" placeholder="Program name..." oninput="applyFilters()">
+            <div class="filter-select-wrap">
+                <input type="text" id="filter-search" placeholder="Program name..." oninput="applyFilters(); updateClearButtons()">
+                <span class="filter-clear" onclick="clearFilter('filter-search')" title="Clear">&times;</span>
+            </div>
         </div>
         <div class="filter-group">
             <span id="result-count" class="result-count"></span>
