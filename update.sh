@@ -2,7 +2,7 @@
 # Hourly update script for Program Approval Tracker
 # Triggers scan via Flask server, which auto-exports and pushes to GitHub
 
-cd /Users/wmeleis/Downloads/CIM
+cd /Users/wmeleis/committees/nu-docs/Curriculum/CIM
 LOG="data/update.log"
 echo "$(date): Starting update" >> "$LOG"
 
@@ -12,12 +12,12 @@ if ! pgrep -q "Google Chrome"; then
     exit 0
 fi
 
-# Check session is still valid
+# Check session is still valid (match Approve Pages tab by URL, not title)
 SESSION_CHECK=$(osascript -e '
 tell application "Google Chrome"
     set tabList to every tab of window 1
     repeat with t in tabList
-        if title of t is "Approve Pages" then
+        if URL of t contains "courseleaf/approve" then
             tell t to execute javascript "document.body.innerText.substring(0, 100)"
             return result
         end if
@@ -25,8 +25,13 @@ tell application "Google Chrome"
     return "TAB_NOT_FOUND"
 end tell' 2>/dev/null)
 
-if [[ "$SESSION_CHECK" != *"CourseLeaf"* ]]; then
-    echo "$(date): Session expired or tab not found, skipping" >> "$LOG"
+if [[ "$SESSION_CHECK" == "TAB_NOT_FOUND" ]] || [[ -z "$SESSION_CHECK" ]]; then
+    echo "$(date): Approve Pages tab not found, skipping" >> "$LOG"
+    exit 0
+fi
+
+if [[ "$SESSION_CHECK" == *"Log in"* ]] || [[ "$SESSION_CHECK" == *"login"* ]]; then
+    echo "$(date): Session expired, skipping" >> "$LOG"
     osascript -e 'display notification "CourseLeaf session expired. Please log in." with title "Program Tracker"' 2>/dev/null
     exit 0
 fi
@@ -34,7 +39,7 @@ fi
 # Ensure Flask server is running
 if ! curl -s http://localhost:5001/api/scan/status > /dev/null 2>&1; then
     echo "$(date): Starting Flask server..." >> "$LOG"
-    /usr/bin/python3 app.py &>/tmp/cim_server.log &
+    PYTHONUNBUFFERED=1 /usr/bin/python3 app.py &>/tmp/cim_server.log &
     sleep 3
 fi
 
