@@ -309,9 +309,10 @@ function populateStepFilter() {
     select.innerHTML = '<option value="">All Steps</option>' + options;
 }
 
-// Apply all filters EXCEPT pipeline, college, and any in the 'exclude' set
+// Apply all filters EXCEPT pipeline and any in the 'exclude' set
 function getBaseFiltered(approverProgramIds, exclude) {
     const ex = exclude || {};
+    const collegeFilter = document.getElementById('filter-college').value;
     const stepFilter = document.getElementById('filter-step').value;
     const campusFilter = document.getElementById('filter-campus').value;
     const approverFilter = document.getElementById('filter-approver').value;
@@ -330,6 +331,7 @@ function getBaseFiltered(approverProgramIds, exclude) {
         }
         if (!ex.type && typeFilter && p.program_type !== typeFilter) return false;
         if (!ex.proposal && proposalFilter && p.status !== proposalFilter) return false;
+        if (!ex.college && collegeFilter && p.college !== collegeFilter) return false;
         if (stepFilter && p.current_step !== stepFilter) return false;
         if (campusFilter && extractCampus(p.name) !== campusFilter) return false;
         if (approverProgramIds && !approverProgramIds.has(p.id)) return false;
@@ -355,24 +357,23 @@ async function applyFilters() {
         }
     }
 
-    // Base filtered set (all filters except pipeline and college)
+    // Base filtered set (all filters except pipeline)
     const baseFiltered = getBaseFiltered(approverProgramIds);
 
     // Update pipeline counts from base filtered set
     updatePipelineCounts(baseFiltered);
 
-    // Update college dropdown from base filtered set
-    updateCollegeOptions(baseFiltered);
+    // Update college dropdown excluding the college filter itself (so you see what's available)
+    updateCollegeOptions(getBaseFiltered(approverProgramIds, {college: true}));
 
     // Each button group's counts exclude its own filter so you see what's available
     updateTypeCounts(getBaseFiltered(approverProgramIds, {type: true}));
     updateProposalCounts(getBaseFiltered(approverProgramIds, {proposal: true}));
 
-    // Now apply pipeline and college filters for the table
+    // Now apply pipeline filter for the table (college already applied in baseFiltered)
     let filtered = baseFiltered.filter(p => {
         if (pipelineFilter === '__college__' && !isCollegeStep(p.current_step)) return false;
         if (pipelineFilter && pipelineFilter !== '__college__' && p.current_step !== pipelineFilter) return false;
-        if (collegeFilter && p.college !== collegeFilter) return false;
         return true;
     });
 
