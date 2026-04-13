@@ -179,7 +179,12 @@ cat data/launchd.log
 ### Reference Curriculum
 Captures the last-approved version of each program's curriculum from CourseLeaf's history API, enabling before/after comparison.
 
-- **`scraper.py`:** `fetch_reference_curricula()` — fetches historical version IDs from the history UI, retrieves that version's XML, parses CDATA-wrapped HTML for curriculum content. Called automatically after each scan.
+**Boston vs non-Boston logic:**
+- **Boston programs** (campus = "Boston" or no campus parenthetical): Uses the program's own CIM history — fetches the most recently approved version.
+- **Non-Boston programs** (Oakland, Charlotte, etc.): Uses the **Boston counterpart's** most recently approved CIM history version as the reference. The counterpart is matched by stripping the campus parenthetical from the name (e.g., "Management, MS (Oakland)" → matches "Management, MS (Boston)"). The version_date is annotated with "(Boston version)" to indicate the source. This is because non-Boston programs are typically based on the Boston curriculum.
+- Helper functions: `_parse_campus_from_name(name)` extracts campus, `_build_boston_counterpart_map(program_ids)` builds the mapping using all programs in the database.
+
+- **`scraper.py`:** `fetch_reference_curricula()` — fetches historical version IDs from the history UI, retrieves that version's XML, parses CDATA-wrapped HTML for curriculum content. For non-Boston programs, fetches the Boston counterpart's history instead. Called automatically after each scan.
 - **`database.py`:** `reference_curriculum` table (`program_id`, `version_id`, `version_date`, `curriculum_html`, `fetched_at`). Functions: `upsert_reference_curriculum()`, `get_reference_curriculum()`, `get_all_reference_curriculum()`.
 - **`app.py`:** `GET /api/program/<id>/reference` endpoint. Auto-fetches reference data after each scan completes.
 - **`export_static.py`:** Exports `reference.json` alongside `data.json` for the static site.
