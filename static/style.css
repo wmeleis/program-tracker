@@ -833,6 +833,88 @@ tr.program-row.expanded td {
     margin: 16px 0;
 }
 
+/* Compare / Diff view */
+.compare-identical {
+    padding: 16px;
+    background: #dcfce7;
+    border: 1px solid #86efac;
+    border-radius: 6px;
+    color: #166534;
+    font-weight: 600;
+    font-size: 14px;
+    text-align: center;
+    margin-top: 8px;
+}
+
+.compare-legend {
+    display: flex;
+    gap: 20px;
+    margin: 8px 0 12px;
+    font-size: 12px;
+    color: #475569;
+}
+
+.compare-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-box {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+}
+
+.diff-removed-bg { background: #fecaca; }
+.diff-added-bg { background: #bbf7d0; }
+
+.compare-content {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.diff-line {
+    padding: 2px 12px;
+    white-space: pre-wrap;
+    border-bottom: 1px solid transparent;
+}
+
+.diff-same {
+    background: #fff;
+    color: #334155;
+}
+
+.diff-removed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.diff-added {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.diff-removed::before {
+    content: '− ';
+    font-weight: 700;
+}
+
+.diff-added::before {
+    content: '+ ';
+    font-weight: 700;
+}
+
+.compare-tab {
+    display: inline-block;
+    width: 180px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .pipeline-bar { flex-wrap: wrap; }

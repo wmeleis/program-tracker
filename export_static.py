@@ -280,6 +280,65 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // Patch compare loading to use static data
+    window.loadCompareDetail = async function(programId) {
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
+        contentEl.innerHTML = '<div class="workflow-loading">Loading comparison...</div>';
+
+        if (!_curriculumCache) {
+            try { const r = await fetch('curriculum.json'); _curriculumCache = await r.json(); } catch(e) {}
+        }
+        if (!_referenceCache) {
+            try { const r = await fetch('reference.json'); _referenceCache = await r.json(); } catch(e) {}
+        }
+
+        const currHtml = (_curriculumCache || {})[String(programId)] || '';
+        const ref = (_referenceCache || {})[String(programId)];
+        const refHtml = ref ? ref.html : '';
+
+        if (!currHtml && !refHtml) {
+            contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available for comparison.</div>';
+            return;
+        }
+        if (!refHtml) {
+            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available for comparison. This may be a new program.</div>';
+            return;
+        }
+        if (!currHtml) {
+            contentEl.innerHTML = '<div class="workflow-meta">No current curriculum available for comparison.</div>';
+            return;
+        }
+
+        const refLines = extractCurriculumLines(refHtml);
+        const currLines = extractCurriculumLines(currHtml);
+        const diff = diffLines(refLines, currLines);
+        const hasChanges = diff.some(d => d.type !== 'same');
+
+        let header = ref.version_date
+            ? `<div class="reference-header">Comparing current proposal against: ${escapeHtml(ref.version_date)}</div>`
+            : '';
+
+        if (!hasChanges) {
+            contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the reference version.</div>`;
+            return;
+        }
+
+        const diffHtml = diff.map(d => {
+            const escaped = escapeHtml(d.text).replace(/\\t/g, '<span class="compare-tab"></span>');
+            if (d.type === 'removed') return `<div class="diff-line diff-removed">${escaped}</div>`;
+            if (d.type === 'added') return `<div class="diff-line diff-added">${escaped}</div>`;
+            return `<div class="diff-line diff-same">${escaped}</div>`;
+        }).join('');
+
+        contentEl.innerHTML = `${header}
+            <div class="compare-legend">
+                <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Removed from reference</span>
+                <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Added in current</span>
+            </div>
+            <div class="compare-content">${diffHtml}</div>`;
+    };
+
     // Update button tries to reach local Flask server to trigger scan + deploy
     window.triggerScan = async function() {
         const btn = document.getElementById('scan-btn');
