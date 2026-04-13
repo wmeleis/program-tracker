@@ -399,7 +399,8 @@ def classify_program_type(name, workflow_steps=None):
                        ', mps', ', phd', 'graduate certificate', ', mba', ', msf',
                        'doctoral', 'ms—align', ', msw', ', msis']
     undergrad_indicators = [', bs ', ', bs(', ', ba ', ', ba(', ', bfa', ', bsba',
-                           ', bsib', ', bsche', 'minor', ', aa ']
+                           ', bsib', ', bsche', ', bsbioe', 'minor', ', aa ',
+                           'business concentration']
 
     for ind in grad_indicators:
         if ind in name_lower or name_lower.endswith(ind.strip()):
