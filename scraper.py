@@ -704,14 +704,40 @@ def fetch_reference_curricula(program_ids, batch_size=10):
                 continue;
             }}
 
-            // Step 3: Extract content from <showdata> CDATA
+            // Step 3: Extract curriculum content from <showdata> CDATA
             var xml = xhr2.responseText;
             var cdataStart = xml.indexOf("<![CDATA[");
             var cdataEnd = xml.indexOf("]]>", cdataStart + 9);
-            var html = "";
+            var fullHtml = "";
             if (cdataStart !== -1 && cdataEnd !== -1) {{
-                html = xml.substring(cdataStart + 9, cdataEnd);
+                fullHtml = xml.substring(cdataStart + 9, cdataEnd);
             }}
+
+            // Parse the full HTML and extract just the curriculum sections
+            var refDoc = parser.parseFromString(fullHtml, "text/html");
+            var parts = [];
+
+            // Body = curriculum with course tables (bodycontentframediv3)
+            var bodyDiv = refDoc.getElementById("bodycontentframediv3");
+            if (bodyDiv) {{
+                parts.push(bodyDiv.innerHTML);
+            }}
+
+            // Concentrations section
+            var concDiv = refDoc.getElementById("concentrations");
+            if (concDiv) {{
+                // Get the concentration content - walk up to the row
+                var concRow = concDiv.closest(".row") || concDiv.parentElement;
+                if (concRow) parts.push(concRow.innerHTML);
+            }}
+
+            // Overview text (overviewcontentframediv4)
+            var overviewDiv = refDoc.getElementById("overviewcontentframediv4");
+            if (overviewDiv) {{
+                parts.push('<h2>Program Overview</h2>' + overviewDiv.innerHTML);
+            }}
+
+            var html = parts.join("\\n");
 
             results[id] = {{
                 version_id: versionId,
@@ -719,7 +745,7 @@ def fetch_reference_curricula(program_ids, batch_size=10):
                 html_size: html.length
             }};
 
-            // Store HTML in a data attribute to avoid JSON escaping issues
+            // Store extracted curriculum in a hidden div
             var store = document.createElement("div");
             store.id = "__ref_" + id;
             store.style.display = "none";
