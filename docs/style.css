@@ -277,8 +277,47 @@ header h1 {
     background: white;
 }
 
+.filter-select-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.filter-clear {
+    display: none;
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 50%;
+}
+
+.filter-clear:hover {
+    color: var(--text);
+    background: var(--border);
+}
+
+.filter-select-wrap.has-value .filter-clear {
+    display: block;
+}
+
+.filter-select-wrap.has-value select {
+    padding-right: 24px;
+}
+
 .search-group { flex: 1; min-width: 200px; }
 .search-group input { width: 100%; }
+.search-group .filter-select-wrap { width: 100%; }
+.search-group .filter-select-wrap input { width: 100%; }
+
+.search-group .filter-select-wrap.has-value input {
+    padding-right: 24px;
+}
 
 .result-count {
     font-size: 13px;

@@ -12,6 +12,25 @@ let approverPrograms = null;
 let cachedPipeline = [];
 const STUCK_THRESHOLD_DAYS = 30;
 
+function clearFilter(id) {
+    const el = document.getElementById(id);
+    if (el.tagName === 'SELECT') el.value = '';
+    else el.value = '';
+    updateClearButtons();
+    applyFilters();
+}
+
+function updateClearButtons() {
+    document.querySelectorAll('.filter-select-wrap').forEach(wrap => {
+        const input = wrap.querySelector('select, input');
+        if (input && input.value) {
+            wrap.classList.add('has-value');
+        } else {
+            wrap.classList.remove('has-value');
+        }
+    });
+}
+
 // The 14 main tracked pipeline steps
 const PIPELINE_STEPS = new Set([
     "Program PR Graduate Dean's Office",
