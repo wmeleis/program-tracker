@@ -498,6 +498,8 @@ function renderProgramTable(programs) {
                                 onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'curriculum')">Curriculum</button>
                             <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}"
                                 onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'reference')">Reference</button>
+                            <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}"
+                                onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'compare')">Compare</button>
                         </div>
                         <div class="detail-content" id="detail-content-${p.id}">
                             <div class="workflow-loading">Loading...</div>
@@ -516,6 +518,7 @@ function renderProgramTable(programs) {
         const tab = detailTabState[id] || 'workflow';
         if (tab === 'workflow') loadWorkflowDetail(id);
         else if (tab === 'reference') loadReferenceDetail(id);
+        else if (tab === 'compare') loadCompareDetail(id);
         else loadCurriculumDetail(id);
     });
 }
@@ -683,7 +686,159 @@ function switchDetailTab(programId, tab) {
     });
     if (tab === 'workflow') loadWorkflowDetail(programId);
     else if (tab === 'reference') loadReferenceDetail(programId);
+    else if (tab === 'compare') loadCompareDetail(programId);
     else loadCurriculumDetail(programId);
+}
+
+// Extract normalized text lines from curriculum HTML for diffing
+function extractCurriculumLines(html) {
+    const div = document.createElement('div');
+    div.innerHTML = cleanCurriculumHtml(html);
+    const lines = [];
+
+    function processNode(node) {
+        if (node.nodeType === 3) {
+            const text = node.textContent.trim();
+            if (text) lines.push(text);
+            return;
+        }
+        if (node.nodeType !== 1) return;
+        const tag = node.tagName;
+
+        // Table rows: extract as "CODE  TITLE  HOURS"
+        if (tag === 'TR') {
+            const cells = node.querySelectorAll('td, th');
+            if (cells.length === 0) return;
+            const parts = Array.from(cells).map(c => c.textContent.replace(/\u00a0/g, ' ').trim()).filter(Boolean);
+            if (parts.length > 0) lines.push(parts.join('\t'));
+            return;
+        }
+
+        // Skip table/tbody/thead — we handle via TR
+        if (['TABLE', 'TBODY', 'THEAD', 'COLGROUP', 'CAPTION', 'COL'].includes(tag)) {
+            node.childNodes.forEach(processNode);
+            return;
+        }
+
+        // Headers
+        if (tag.match(/^H[1-6]$/)) {
+            const text = node.textContent.trim();
+            if (text) lines.push(text);
+            return;
+        }
+
+        // Paragraphs and list items
+        if (['P', 'LI'].includes(tag)) {
+            const text = node.textContent.trim();
+            if (text) lines.push(text);
+            return;
+        }
+
+        // Other block elements
+        if (['DIV', 'UL', 'OL', 'SECTION', 'HR'].includes(tag)) {
+            node.childNodes.forEach(processNode);
+            return;
+        }
+
+        // Inline or unknown: get text
+        const text = node.textContent.trim();
+        if (text) lines.push(text);
+    }
+
+    div.childNodes.forEach(processNode);
+    return lines;
+}
+
+// Simple diff algorithm (longest common subsequence based)
+function diffLines(oldLines, newLines) {
+    const m = oldLines.length, n = newLines.length;
+    // Build LCS table
+    const dp = Array.from({length: m + 1}, () => new Uint16Array(n + 1));
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (oldLines[i-1] === newLines[j-1]) dp[i][j] = dp[i-1][j-1] + 1;
+            else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+        }
+    }
+    // Backtrack to produce diff
+    const result = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldLines[i-1] === newLines[j-1]) {
+            result.unshift({type: 'same', text: oldLines[i-1]});
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+            result.unshift({type: 'added', text: newLines[j-1]});
+            j--;
+        } else {
+            result.unshift({type: 'removed', text: oldLines[i-1]});
+            i--;
+        }
+    }
+    return result;
+}
+
+async function loadCompareDetail(programId) {
+    const contentEl = document.getElementById(`detail-content-${programId}`);
+    if (!contentEl) return;
+    contentEl.innerHTML = '<div class="workflow-loading">Loading comparison...</div>';
+
+    try {
+        const [currRes, refRes] = await Promise.all([
+            fetch(`/api/program/${programId}/curriculum`),
+            fetch(`/api/program/${programId}/reference`)
+        ]);
+
+        const currData = currRes.ok ? await currRes.json() : {};
+        const refData = refRes.ok ? await refRes.json() : {};
+
+        const currHtml = currData.curriculum_html || '';
+        const refHtml = refData.curriculum_html || '';
+
+        if (!currHtml && !refHtml) {
+            contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available for comparison.</div>';
+            return;
+        }
+        if (!refHtml) {
+            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available for comparison. This may be a new program.</div>';
+            return;
+        }
+        if (!currHtml) {
+            contentEl.innerHTML = '<div class="workflow-meta">No current curriculum available for comparison.</div>';
+            return;
+        }
+
+        const refLines = extractCurriculumLines(refHtml);
+        const currLines = extractCurriculumLines(currHtml);
+        const diff = diffLines(refLines, currLines);
+
+        const hasChanges = diff.some(d => d.type !== 'same');
+
+        let header = refData.version_date
+            ? `<div class="reference-header">Comparing current proposal against: ${escapeHtml(refData.version_date)}</div>`
+            : '';
+
+        if (!hasChanges) {
+            contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the reference version.</div>`;
+            return;
+        }
+
+        const diffHtml = diff.map(d => {
+            const escaped = escapeHtml(d.text).replace(/\t/g, '<span class="compare-tab"></span>');
+            if (d.type === 'removed') return `<div class="diff-line diff-removed">${escaped}</div>`;
+            if (d.type === 'added') return `<div class="diff-line diff-added">${escaped}</div>`;
+            return `<div class="diff-line diff-same">${escaped}</div>`;
+        }).join('');
+
+        contentEl.innerHTML = `${header}
+            <div class="compare-legend">
+                <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Removed from reference</span>
+                <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Added in current</span>
+            </div>
+            <div class="compare-content">${diffHtml}</div>`;
+    } catch (e) {
+        contentEl.innerHTML = '<div class="workflow-meta">Failed to load comparison.</div>';
+    }
 }
 
 function renderChanges(changes) {
