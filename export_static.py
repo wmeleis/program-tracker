@@ -264,10 +264,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const ref = _referenceCache[String(programId)];
         if (ref && ref.html) {
+            const cleaned = cleanCurriculumHtml(ref.html);
             const header = ref.version_date
                 ? `<div class="reference-header">Last approved version: ${ref.version_date}</div>`
                 : '';
-            contentEl.innerHTML = `${header}<div class="curriculum-content">${ref.html}</div>`;
+            contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {
             contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals.</div>';
         }
