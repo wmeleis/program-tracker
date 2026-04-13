@@ -513,12 +513,23 @@ header h1 {
 /* Workflow detail (expanded row) */
 .workflow-detail {
     padding: 16px 20px;
-    background: #f8fafc;
-    border-bottom: 2px solid var(--border);
+    background: #eef2f7;
+    border-left: 4px solid var(--primary);
+    border-bottom: 3px solid var(--primary);
 }
 
 .workflow-detail td {
-    padding: 0;
+    padding: 12px 16px;
+}
+
+/* Highlight the program row that is expanded */
+tr.program-row.expanded {
+    background: #eef2f7;
+    border-bottom: none;
+}
+
+tr.program-row.expanded td {
+    font-weight: 600;
 }
 
 .workflow-steps {
@@ -700,8 +711,6 @@ header h1 {
     padding: 4px 0;
     font-size: 13px;
     line-height: 1.5;
-    max-height: 500px;
-    overflow-y: auto;
 }
 
 .curriculum-content table {
