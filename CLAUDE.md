@@ -40,7 +40,7 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 
 ### Scheduled Execution
 - **launchd agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
-- **Schedule:** `StartCalendarInterval` at :00 and :30 (every 30 min)
+- **Schedule:** `StartCalendarInterval` at 2am, 7am, 11am, 3pm, 7pm ET (5 scans/day covering MA+CA working hours)
 - **Runs:** `update.sh` which triggers scan via Flask API
 - **Requirement:** Chrome must be open with valid CourseLeaf session
 
@@ -181,8 +181,12 @@ Captures the last-approved version of each program's curriculum from CourseLeaf'
 
 **Boston vs non-Boston logic:**
 - **Boston programs** (campus = "Boston" or no campus parenthetical): Uses the program's own CIM history — fetches the most recently approved version.
-- **Non-Boston programs** (Oakland, Charlotte, etc.): Uses the **Boston counterpart's** most recently approved CIM history version as the reference. The counterpart is matched by stripping the campus parenthetical from the name (e.g., "Management, MS (Oakland)" → matches "Management, MS (Boston)"). The version_date is annotated with "(Boston version)" to indicate the source. This is because non-Boston programs are typically based on the Boston curriculum.
-- Helper functions: `_parse_campus_from_name(name)` extracts campus, `_build_boston_counterpart_map(program_ids)` builds the mapping using all programs in the database.
+- **Non-Boston programs** (Oakland, Charlotte, etc.): Uses the **Boston counterpart's** most recently approved CIM history version as the reference. The version_date is annotated with "(Boston version)" to indicate the source. This is because non-Boston programs are typically based on the Boston curriculum.
+- **Counterpart matching (two-tier):**
+  1. **By name** — strips the campus parenthetical from the name (e.g., "Management, MS (Oakland)" → matches "Management, MS" or "Management, MS (Boston)" in the database).
+  2. **By banner code via CIM search** — for programs not matched by name (Boston version already completed the workflow and isn't in the pipeline DB), searches CIM program IDs 1–2100 via XHR for matching banner code + Boston campus. This finds programs like "Analytics, MPS (Boston)" (ID 158) that are no longer in the active workflow.
+- **Fallback**: Non-Boston programs with no Boston counterpart found anywhere use their own CIM history.
+- Helper functions: `_parse_campus_from_name(name)` extracts campus, `_build_boston_counterpart_map(program_ids)` builds the mapping (DB + CIM search), `_search_cim_for_boston_ids(banner_codes)` searches CIM by banner code in chunks of 200 IDs.
 
 - **`scraper.py`:** `fetch_reference_curricula()` — fetches historical version IDs from the history UI, retrieves that version's XML, parses CDATA-wrapped HTML for curriculum content. For non-Boston programs, fetches the Boston counterpart's history instead. Called automatically after each scan.
 - **`database.py`:** `reference_curriculum` table (`program_id`, `version_id`, `version_date`, `curriculum_html`, `fetched_at`). Functions: `upsert_reference_curriculum()`, `get_reference_curriculum()`, `get_all_reference_curriculum()`.

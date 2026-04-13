@@ -626,18 +626,106 @@ def _parse_campus_from_name(name):
     return name, None
 
 
+def _search_cim_for_boston_ids(banner_codes):
+    """Search CIM for Boston program IDs by banner code.
+
+    For each banner code, searches program IDs via XHR to find the one
+    with matching code and Boston campus. Programs that completed the
+    workflow aren't in our DB but still exist in CIM.
+
+    Args:
+        banner_codes: dict of {banner_code: [non_boston_program_id, ...]}
+
+    Returns:
+        dict of {banner_code: boston_program_id}
+    """
+    if not banner_codes:
+        return {}
+
+    codes_list = list(banner_codes.keys())
+    codes_json = json.dumps(codes_list)
+    print(f"  Searching CIM for {len(codes_list)} Boston program IDs by banner code...")
+
+    # Search in chunks of 200 IDs to avoid Chrome JS timeout
+    all_found = {}
+    chunk_size = 200
+    for start in range(1, 2100, chunk_size):
+        end = min(start + chunk_size, 2100)
+        remaining = [c for c in codes_list if c.lower() not in all_found]
+        if not remaining:
+            break  # Found all
+        remaining_json = json.dumps(remaining)
+        js_code = f'''
+(function() {{
+    var codes = {remaining_json};
+    var codeSet = {{}};
+    for (var c = 0; c < codes.length; c++) codeSet[codes[c].toLowerCase()] = true;
+    var results = {{}};
+    var parser = new DOMParser();
+
+    for (var id = {start}; id < {end}; id++) {{
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/programadmin/" + id + "/index.xml", false);
+        xhr.send();
+        if (xhr.status !== 200 || xhr.responseText.length < 100) continue;
+
+        var xml = parser.parseFromString(xhr.responseText, "text/xml");
+        var codeEl = xml.querySelector("code");
+        var campusEl = xml.querySelector("campus");
+        if (!codeEl) continue;
+
+        var code = codeEl.textContent.trim().toLowerCase();
+        var campus = campusEl ? campusEl.textContent.trim().toUpperCase() : "";
+
+        if (codeSet[code] && (campus === "BOS" || campus === "")) {{
+            if (!results[code]) results[code] = id;
+        }}
+    }}
+
+    return JSON.stringify(results);
+}})();
+'''
+        result = run_js_in_tab("programadmin", js_code, match_by='url', timeout=120)
+        if result and result != 'missing value':
+            try:
+                chunk_results = json.loads(result)
+                for code_lower, boston_id in chunk_results.items():
+                    all_found[code_lower] = boston_id
+                if chunk_results:
+                    print(f"    IDs {start}-{end}: found {len(chunk_results)} matches")
+            except json.JSONDecodeError:
+                print(f"    IDs {start}-{end}: JSON parse error")
+        else:
+            print(f"    IDs {start}-{end}: no response")
+
+    # Normalize keys back to original case
+    code_map = {}
+    for code in banner_codes:
+        boston_id = all_found.get(code.lower())
+        if boston_id:
+            code_map[code] = boston_id
+    print(f"  CIM search found {len(code_map)} of {len(banner_codes)} Boston counterparts")
+    return code_map
+
+
 def _build_boston_counterpart_map(program_ids):
     """For non-Boston programs, find the Boston counterpart's CIM ID.
 
-    Returns a dict: {non_boston_program_id: boston_program_id}
-    Programs that are already Boston or have no counterpart are not included.
+    First checks our database, then searches CIM by banner code for programs
+    that completed the workflow and aren't in the pipeline anymore.
+    Non-Boston programs without a counterpart fall back to their own CIM history.
+
+    Returns two values:
+    - counterpart_map: {non_boston_program_id: boston_program_id}
+    - non_boston_ids: set of all non-Boston program IDs (including unmatched)
     """
     from database import get_db
 
     # Load all known programs (including ones not in current scan)
     with get_db() as conn:
-        rows = conn.execute("SELECT id, name FROM programs").fetchall()
+        rows = conn.execute("SELECT id, name, banner_code FROM programs").fetchall()
         all_programs = {row['id']: row['name'] for row in rows}
+        program_banner_codes = {row['id']: row['banner_code'] for row in rows}
 
     # Build name -> ID map for Boston programs
     boston_by_base_name = {}  # base_name -> program_id
@@ -651,19 +739,43 @@ def _build_boston_counterpart_map(program_ids):
 
     # Map non-Boston programs to their Boston counterparts
     counterpart_map = {}
+    non_boston_ids = set()
+    unmatched_by_code = {}  # banner_code -> [program_ids]
     for pid in program_ids:
         name = all_programs.get(pid, '')
         if not name:
             continue
         base, campus = _parse_campus_from_name(name)
         if campus and campus.lower() != 'boston':
+            non_boston_ids.add(pid)
             boston_id = boston_by_base_name.get(base.lower())
             if boston_id:
                 counterpart_map[pid] = boston_id
             else:
-                print(f"  No Boston counterpart found for: {name} (ID {pid})")
+                # Collect banner code for CIM search
+                code = program_banner_codes.get(pid, '')
+                if code:
+                    if code not in unmatched_by_code:
+                        unmatched_by_code[code] = []
+                    unmatched_by_code[code].append(pid)
+                else:
+                    print(f"  No Boston counterpart for: {name} (ID {pid}) — using own history")
 
-    return counterpart_map
+    # Search CIM for unmatched programs by banner code
+    if unmatched_by_code:
+        cim_results = _search_cim_for_boston_ids(unmatched_by_code)
+        for code, boston_id in cim_results.items():
+            for pid in unmatched_by_code[code]:
+                counterpart_map[pid] = boston_id
+                print(f"  Found in CIM: {all_programs[pid]} -> Boston ID {boston_id}")
+
+        # Report any still unmatched
+        for code, pids in unmatched_by_code.items():
+            if code not in cim_results:
+                for pid in pids:
+                    print(f"  No Boston counterpart for: {all_programs[pid]} (ID {pid}) — using own history")
+
+    return counterpart_map, non_boston_ids
 
 
 def fetch_reference_curricula(program_ids, batch_size=10):
@@ -691,9 +803,12 @@ def fetch_reference_curricula(program_ids, batch_size=10):
         existing_refs = {row['program_id']: row['version_id'] for row in rows}
 
     # Build mapping of non-Boston programs to their Boston counterparts
-    counterpart_map = _build_boston_counterpart_map(program_ids)
+    counterpart_map, non_boston_ids = _build_boston_counterpart_map(program_ids)
     if counterpart_map:
         print(f"  Found {len(counterpart_map)} non-Boston programs with Boston counterparts")
+    if non_boston_ids - set(counterpart_map.keys()):
+        unmatched = non_boston_ids - set(counterpart_map.keys())
+        print(f"  {len(unmatched)} non-Boston programs will use own history as fallback")
 
     print(f"\nFetching reference curricula for {len(program_ids)} programs...")
     batches = [program_ids[i:i+batch_size] for i in range(0, len(program_ids), batch_size)]
