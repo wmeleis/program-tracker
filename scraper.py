@@ -418,14 +418,10 @@ def classify_program_type(name, workflow_steps=None):
 
     if 'plusone' in name_lower:
         return 'Graduate'
-    if 'concentration' in name_lower:
-        return 'Other'
-    if 'half major template' in name_lower:
-        return 'Other'
     if 'certificate' in name_lower:
         return 'Graduate'
 
-    return 'Other'
+    return 'Graduate'
 
 
 def run_full_scan():
