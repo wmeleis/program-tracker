@@ -585,10 +585,10 @@ function cleanCurriculumHtml(html) {
     // Replace "Course Not Found" error elements with plain text (keep the course code)
     div.querySelectorAll('.structuredcontenterror').forEach(el => {
         const text = el.textContent.replace(/\u00a0/g, ' ').trim();
-        // In title column, strip "Course XXX Not Found" → just show the code
-        const notFound = text.match(/^Course\s+(.+)\s+Not Found$/);
+        // In title column, "Course XXX Not Found" → show em dash (code is already in codecol)
+        const notFound = text.match(/^Course\s+.+\s+Not Found$/);
         if (notFound) {
-            el.replaceWith(document.createTextNode(notFound[1]));
+            el.replaceWith(document.createTextNode('—'));
         } else {
             // In code column, just unwrap to plain text
             el.replaceWith(document.createTextNode(text));
