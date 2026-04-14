@@ -739,13 +739,23 @@ function extractCourseLines(html) {
         const hasCode = parts.some(p => courseCodePattern.test(p));
         const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/i.test(p));
 
+        // Skip column-header rows (Code/Title/Hours)
+        if (parts.some(p => /^Code$/i.test(p)) && parts.some(p => /^Title$/i.test(p))) return;
+
         if (isAreaHeader) {
-            // Skip headers — only compare actual courses
+            const text = parts.join(' ');
+            lines.push({key: '', code: '', title: text, hours: '', isHeader: true});
         } else if (hasCode || hasOr) {
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
             lines.push({key: codecol + '\t' + titlecol, code: codecol, title: titlecol, hours: hourscol, isHeader: false});
+        } else {
+            // Non-course context row (e.g. "Complete 16 semester hours...")
+            const text = parts.join(' ');
+            if (text.length > 2) {
+                lines.push({key: '', code: '', title: text, hours: '', isHeader: true});
+            }
         }
     });
     return lines;
@@ -753,10 +763,31 @@ function extractCourseLines(html) {
 
 // Simple diff algorithm (longest common subsequence based)
 // Compares using case-insensitive normalization but preserves original structured data
+// Headers are excluded from diff matching and re-inserted as context rows
 function diffLines(oldLines, newLines) {
-    const oldNorm = oldLines.map(l => normForCompare(l.key));
-    const newNorm = newLines.map(l => normForCompare(l.key));
-    const m = oldLines.length, n = newLines.length;
+    // Separate headers from courses, tracking which header precedes each course
+    function splitHeadersAndCourses(lines) {
+        const courses = [];
+        const headerMap = {}; // courseIndex -> header item
+        let lastHeader = null;
+        for (const line of lines) {
+            if (line.isHeader) {
+                lastHeader = line;
+            } else {
+                headerMap[courses.length] = lastHeader;
+                courses.push(line);
+                lastHeader = null;
+            }
+        }
+        return { courses, headerMap };
+    }
+    const oldSplit = splitHeadersAndCourses(oldLines);
+    const newSplit = splitHeadersAndCourses(newLines);
+    const oldCourses = oldSplit.courses, newCourses = newSplit.courses;
+
+    const oldNorm = oldCourses.map(l => normForCompare(l.key));
+    const newNorm = newCourses.map(l => normForCompare(l.key));
+    const m = oldCourses.length, n = newCourses.length;
     const dp = Array.from({length: m + 1}, () => new Uint16Array(n + 1));
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
@@ -764,19 +795,39 @@ function diffLines(oldLines, newLines) {
             else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
         }
     }
-    const result = [];
+    // Backtrack to build diff of courses only
+    const courseDiff = [];
     let i = m, j = n;
     while (i > 0 || j > 0) {
         if (i > 0 && j > 0 && oldNorm[i-1] === newNorm[j-1]) {
-            result.unshift({type: 'same', left: oldLines[i-1], right: newLines[j-1]});
+            courseDiff.unshift({type: 'same', leftIdx: i-1, rightIdx: j-1, left: oldCourses[i-1], right: newCourses[j-1]});
             i--; j--;
         } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-            result.unshift({type: 'added', left: null, right: newLines[j-1]});
+            courseDiff.unshift({type: 'added', leftIdx: null, rightIdx: j-1, left: null, right: newCourses[j-1]});
             j--;
         } else {
-            result.unshift({type: 'removed', left: oldLines[i-1], right: null});
+            courseDiff.unshift({type: 'removed', leftIdx: i-1, rightIdx: null, left: oldCourses[i-1], right: null});
             i--;
         }
+    }
+    // Re-insert headers before the first course in their section
+    const result = [];
+    const usedLeftHeaders = new Set();
+    const usedRightHeaders = new Set();
+    for (const d of courseDiff) {
+        // Insert header row if this course has one and we haven't shown it yet
+        const lh = d.leftIdx !== null ? oldSplit.headerMap[d.leftIdx] : null;
+        const rh = d.rightIdx !== null ? newSplit.headerMap[d.rightIdx] : null;
+        const lhKey = lh ? lh.title : null;
+        const rhKey = rh ? rh.title : null;
+        if (lhKey && !usedLeftHeaders.has(lhKey) || rhKey && !usedRightHeaders.has(rhKey)) {
+            const headerLeft = (lhKey && !usedLeftHeaders.has(lhKey)) ? lh : rh;
+            const headerRight = (rhKey && !usedRightHeaders.has(rhKey)) ? rh : lh;
+            result.push({type: 'same', left: headerLeft || headerRight, right: headerRight || headerLeft});
+            if (lhKey) usedLeftHeaders.add(lhKey);
+            if (rhKey) usedRightHeaders.add(rhKey);
+        }
+        result.push({type: d.type, left: d.left, right: d.right});
     }
     return result;
 }
