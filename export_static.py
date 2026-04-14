@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from datetime import datetime
 from database import (
     get_all_programs, get_program_workflow, get_pipeline_counts,
@@ -11,6 +12,9 @@ from database import (
     get_current_approvers, get_all_curriculum, get_all_reference_curriculum
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES
+
+STATICRYPT_PASSWORD = 'husky26'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _parse_campus(name):
@@ -153,15 +157,76 @@ def build_static_site():
     # Find the section between "Data Loading" and "Rendering" and replace it
     # Simpler: just prepend a data loader and override the load functions
     static_js = build_static_js(original_js)
-    with open(os.path.join(EXPORT_DIR, 'app.js'), 'w') as f:
-        f.write(static_js)
+
+    # Build self-contained HTML with everything inlined
+    # (CSS, JS, and all JSON data embedded as script variables)
+    css_path = os.path.join(EXPORT_DIR, 'style.css')
+    with open(css_path, 'r') as f:
+        css_content = f.read()
+
+    data_json = json.dumps(data)
+    curriculum_json = json.dumps(curriculum)
+    reference_json = json.dumps(reference)
+    campus_json = json.dumps(campus_groups)
+
+    # Replace external CSS/JS references with inline content
+    # Remove cache-bust references since everything is inlined
+    # Use lambda replacements to avoid re.sub interpreting backslashes in JS/CSS
+    html = re.sub(
+        r'<link[^>]*href="style\.css[^"]*"[^>]*/?>',
+        lambda m: f'<style>{css_content}</style>',
+        html
+    )
+    html = re.sub(
+        r'<script[^>]*src="app\.js[^"]*"[^>]*></script>',
+        lambda m: f'<script>\n{static_js}\n</script>',
+        html
+    )
+
+    # Embed JSON data as script variables so no fetch() calls are needed
+    # Insert before closing </body> tag
+    embedded_data = f'''<script>
+// Embedded data — no external JSON files needed
+window.__EMBEDDED_DATA__ = {data_json};
+window.__EMBEDDED_CURRICULUM__ = {curriculum_json};
+window.__EMBEDDED_REFERENCE__ = {reference_json};
+window.__EMBEDDED_CAMPUS_GROUPS__ = {campus_json};
+</script>'''
+    html = html.replace('</body>', f'{embedded_data}\n</body>')
+
+    # Write the self-contained HTML
+    inline_path = os.path.join(EXPORT_DIR, 'index.html')
+    with open(inline_path, 'w') as f:
+        f.write(html)
+
+    # Encrypt with StatiCrypt
+    print("Encrypting with StatiCrypt...")
+    result = subprocess.run(
+        ['npx', 'staticrypt', inline_path,
+         '-p', STATICRYPT_PASSWORD,
+         '-d', EXPORT_DIR,
+         '--remember', '30',
+         '--config', 'false',
+         '--short',
+         '--template-title', 'Program Approval Tracker',
+         '--template-instructions', 'Enter the password to access the dashboard.'],
+        capture_output=True, text=True, cwd=BASE_DIR
+    )
+    if result.returncode != 0:
+        print(f"StatiCrypt error: {result.stderr}")
+        raise RuntimeError("StatiCrypt encryption failed")
+    print("Encryption complete.")
+
+    # Clean up separate asset files (everything is inlined + encrypted)
+    for f in ['style.css', 'app.js', 'data.json', 'curriculum.json',
+              'reference.json', 'campus_groups.json']:
+        path = os.path.join(EXPORT_DIR, f)
+        if os.path.exists(path):
+            os.remove(path)
 
     print(f"\nStatic site ready in: {EXPORT_DIR}/")
-    print("To deploy to GitHub Pages:")
-    print("  1. cd to project root")
-    print("  2. git init && git add docs/")
-    print("  3. git commit -m 'Deploy dashboard'")
-    print("  4. Push to GitHub and enable Pages from docs/ folder")
+    print("Password-protected with StatiCrypt (password saved in export_static.py)")
+    print("Remember-me cookie lasts 30 days.")
 
 
 def build_static_js(original_js):
@@ -170,13 +235,12 @@ def build_static_js(original_js):
     # The original rendering, filter, and UI code stays intact.
 
     override = r'''/* ======= STATIC SITE DATA LAYER ======= */
-/* Overrides API calls to read from data.json and curriculum.json */
+/* Overrides API calls to use embedded data (inlined by export_static.py) */
 let _cache = null;
 let _curriculumCache = null;
 async function _getData() {
     if (!_cache) {
-        const r = await fetch('data.json');
-        _cache = await r.json();
+        _cache = window.__EMBEDDED_DATA__ || (await (await fetch('data.json')).json());
     }
     return _cache;
 }
@@ -289,8 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
         contentEl.innerHTML = '<div class="workflow-loading">Loading curriculum...</div>';
         if (!_curriculumCache) {
             try {
-                const r = await fetch('curriculum.json');
-                _curriculumCache = await r.json();
+                _curriculumCache = window.__EMBEDDED_CURRICULUM__ || (await (await fetch('curriculum.json')).json());
             } catch(e) {
                 contentEl.innerHTML = '<div class="workflow-meta">Failed to load curriculum data.</div>';
                 return;
@@ -313,8 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
         contentEl.innerHTML = '<div class="workflow-loading">Loading reference curriculum...</div>';
         if (!_referenceCache) {
             try {
-                const r = await fetch('reference.json');
-                _referenceCache = await r.json();
+                _referenceCache = window.__EMBEDDED_REFERENCE__ || (await (await fetch('reference.json')).json());
             } catch(e) {
                 contentEl.innerHTML = '<div class="workflow-meta">Failed to load reference data.</div>';
                 return;
@@ -337,8 +399,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.getCampusGroups = async function() {
         if (_campusGroupsCache) return _campusGroupsCache;
         try {
-            const r = await fetch('campus_groups.json');
-            _campusGroupsCache = await r.json();
+            _campusGroupsCache = window.__EMBEDDED_CAMPUS_GROUPS__ || (await (await fetch('campus_groups.json')).json());
         } catch(e) {
             _campusGroupsCache = {boston_to_deployments: {}, deployment_to_boston: {}};
         }
@@ -352,10 +413,10 @@ document.addEventListener('DOMContentLoaded', () => {
         contentEl.innerHTML = '<div class="workflow-loading">Loading comparison...</div>';
 
         if (!_curriculumCache) {
-            try { const r = await fetch('curriculum.json'); _curriculumCache = await r.json(); } catch(e) {}
+            try { _curriculumCache = window.__EMBEDDED_CURRICULUM__ || (await (await fetch('curriculum.json')).json()); } catch(e) {}
         }
         if (!_referenceCache) {
-            try { const r = await fetch('reference.json'); _referenceCache = await r.json(); } catch(e) {}
+            try { _referenceCache = window.__EMBEDDED_REFERENCE__ || (await (await fetch('reference.json')).json()); } catch(e) {}
         }
         const groups = await getCampusGroups();
         const currHtml = (_curriculumCache || {})[String(programId)] || '';
