@@ -697,11 +697,11 @@ function switchDetailTab(programId, tab) {
 // fix missing spaces around "and"/"or" between course codes, and lowercase for comparison
 function normText(s) {
     let t = s.replace(/[\u00a0\s]+/g, ' ').trim();
-    // Fix missing spaces around "and"/"or" between words
-    // "CS 5001and" -> "CS 5001 and", "Scienceand" -> "Science and"
-    t = t.replace(/([a-z0-9])(and|or)\b/gi, '$1 $2');
-    // "andCS" -> "and CS", "andRecitation" -> "and Recitation"
-    t = t.replace(/\b(and|or)([A-Za-z])/g, '$1 $2');
+    // Fix missing spaces where "and"/"or" run into adjacent text from stripped HTML tags.
+    // Only split when a digit is immediately followed by "and"/"or" (e.g., "5001and" -> "5001 and")
+    t = t.replace(/(\d)(and|or)\b/g, '$1 $2');
+    // Or when "and"/"or" is immediately followed by an uppercase letter (e.g., "andCS" -> "and CS")
+    t = t.replace(/\b(and|or)([A-Z])/g, '$1 $2');
     return t;
 }
 
