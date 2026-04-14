@@ -399,7 +399,7 @@ def classify_program_type(name, workflow_steps=None):
                        ', mps', ', phd', 'graduate certificate', ', mba', ', msf',
                        'doctoral', 'ms—align', ', msw', ', msis']
     undergrad_indicators = [', bs ', ', bs(', ', ba ', ', ba(', ', bfa', ', bsba',
-                           ', bsib', ', bsche', ', bsbioe', 'minor', ', aa ',
+                           ', bsib', ', bsche', ', bsbioe', ', bscs', 'minor', ', aa ',
                            'business concentration', 'half major']
 
     for ind in grad_indicators:
