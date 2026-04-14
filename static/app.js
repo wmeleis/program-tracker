@@ -764,6 +764,18 @@ function extractCourseLines(html) {
     return lines;
 }
 
+// Classify a section header as 'elective', 'required', or 'other'.
+// Used to detect meaningful section moves (required↔elective) without
+// false-flagging different wording for the same category.
+function classifySection(sectionText) {
+    const s = sectionText.toLowerCase();
+    if (/\belective/.test(s) || /\bcomplete\s+one\s+of/.test(s) || /\bchoose\s/.test(s) || /\bselect\s/.test(s)) {
+        return 'elective';
+    }
+    // "required", "core", "complete all", or generic instruction → required/core
+    return 'required';
+}
+
 // Simple diff algorithm (longest common subsequence based)
 // Compares using case-insensitive normalization but preserves original structured data
 // Headers are excluded from diff matching and re-inserted as context rows
@@ -841,10 +853,12 @@ function diffLines(oldLines, newLines) {
                 usedRightHeaders.add(rh.title);
             }
         }
-        // Mark courses that match but moved between sections
+        // Mark courses that match but moved between section categories
+        // (e.g. required → elective). Different wording for the same category
+        // (e.g. "Required Courses" vs "Complete all courses...") is not flagged.
         let type = d.type;
         if (type === 'same' && d.left && d.right && !d.left.isHeader && d.left.section && d.right.section &&
-            normForCompare(d.left.section) !== normForCompare(d.right.section)) {
+            classifySection(d.left.section) !== classifySection(d.right.section)) {
             type = 'moved';
         }
         result.push({type, left: d.left, right: d.right});
