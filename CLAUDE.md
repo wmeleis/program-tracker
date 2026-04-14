@@ -208,7 +208,7 @@ Side-by-side comparison of curriculum content. Uses LCS-based diff algorithm.
 - **Standalone programs** (no campus group): Compare against last approved version
 
 **Key functions in `static/app.js`:**
-- `extractCourseLines(html)` — parses cleaned HTML into structured objects `{key, code, title, hours, isHeader}`. The `key` uses only code+title (hours excluded) to prevent false diffs when hours differ.
+- `extractCourseLines(html)` — parses cleaned HTML into structured course objects `{key, code, title, hours, isHeader: false}`. Area headers are excluded — only lines with course codes are extracted. The `key` uses only code+title (hours excluded) to prevent false diffs when hours differ.
 - `diffLines(oldLines, newLines)` — LCS diff using `normForCompare()` (case-insensitive) on the `.key` property.
 - `renderCourseCell(item, cls)` — renders a course into 3 table cells (code, title, hours) or a header spanning all 3.
 - `renderSideBySide(diff, leftLabel, rightLabel)` — 7-column table layout (3 left + divider + 3 right).
