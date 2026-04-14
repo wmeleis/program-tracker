@@ -589,8 +589,13 @@ function cleanCurriculumHtml(html) {
     // Remove hidden elements (captions, noscript header rows) — CSS display:none doesn't apply in detached DOM
     div.querySelectorAll('.hidden, .noscript, caption').forEach(el => el.remove());
 
-    // Strip all links — replace <a> with plain text
+    // Strip all links — replace <a> with plain text, preserving spacing
     div.querySelectorAll('a').forEach(el => {
+        // Add a space before if the previous node doesn't end with whitespace
+        const prev = el.previousSibling;
+        if (prev && prev.nodeType === 3 && prev.textContent && !/\s$/.test(prev.textContent)) {
+            prev.textContent += ' ';
+        }
         el.replaceWith(document.createTextNode(el.textContent));
     });
 
