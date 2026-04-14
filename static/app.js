@@ -589,6 +589,9 @@ function cleanCurriculumHtml(html) {
     // Remove hidden elements (captions, noscript header rows) — CSS display:none doesn't apply in detached DOM
     div.querySelectorAll('.hidden, .noscript, caption').forEach(el => el.remove());
 
+    // Replace <br> with spaces so text doesn't concatenate across line breaks
+    div.querySelectorAll('br').forEach(el => el.replaceWith(document.createTextNode(' ')));
+
     // Strip all links — replace <a> with plain text, preserving spacing
     div.querySelectorAll('a').forEach(el => {
         // Add a space before if the previous node doesn't end with whitespace
