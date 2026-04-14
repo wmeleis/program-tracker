@@ -749,6 +749,34 @@ function standardizeHeader(text) {
     if (/^supporting courses/i.test(t)) return 'Supporting Courses';
     // "Complete the following:" is just a preamble, not a section
     if (/^complete the following[:.]/i.test(t)) return '';
+    // "Complete one/two/three of the following..." → elective with count
+    const wordCount = s.match(/^complete (one|two|three|four|five|six) of the following/);
+    if (wordCount) {
+        const nums = {one:'1',two:'2',three:'3',four:'4',five:'5',six:'6'};
+        return 'Elective Courses (choose ' + (nums[wordCount[1]] || wordCount[1]) + ')';
+    }
+    // "Complete N semester hours from restricted electives..." → Restricted Electives (N hours)
+    const restrictedHours = s.match(/^complete (\d+) semester hours? from (?:the )?restricted elective/);
+    if (restrictedHours) return 'Restricted Electives (' + restrictedHours[1] + ' hours)';
+    // "Complete N semester hours from other electives..." → Other Electives (N hours)
+    const otherHours = s.match(/^complete (\d+) semester hours? from (?:the )?other elective/);
+    if (otherHours) return 'Other Electives (' + otherHours[1] + ' hours)';
+    // "Complete N semester hours from the following..." or "...of the following..." → Elective Courses (N hours)
+    const semHours = s.match(/^complete (\d+) semester hours? (?:from|of)(?: the| within the)? following/);
+    if (semHours) return 'Elective Courses (' + semHours[1] + ' hours)';
+    // "Complete N semester hours of general electives" → Elective Courses (N hours)
+    const genElec = s.match(/^complete (\d+) semester hours? of (?:general )?elective/);
+    if (genElec) return 'Elective Courses (' + genElec[1] + ' hours)';
+    // "Complete N semester hours from..." (other patterns) → Elective Courses (N hours)
+    const anyHours = s.match(/^complete (\d+) semester hours/);
+    if (anyHours) return 'Elective Courses (' + anyHours[1] + ' hours)';
+    // "Complete at least one of the following..." → elective
+    if (/^complete at least one/i.test(t)) return 'Elective Courses (choose 1+)';
+    // "Complete one of the following options:" → keep as options header
+    if (/^complete one of the following options/i.test(t)) return '';
+    // "In consultation with advisor, complete N..." → Elective Courses (N hours)
+    const advisorHours = s.match(/^in consultation with advisor,? complete (\d+)/);
+    if (advisorHours) return 'Elective Courses (' + advisorHours[1] + ' hours)';
     // Everything else: keep original text
     return t;
 }
