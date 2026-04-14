@@ -697,10 +697,11 @@ function switchDetailTab(programId, tab) {
 // fix missing spaces around "and"/"or" between course codes, and lowercase for comparison
 function normText(s) {
     let t = s.replace(/[\u00a0\s]+/g, ' ').trim();
-    // Fix "CS 5001and" -> "CS 5001 and", "AIand" -> "AI and"
-    t = t.replace(/(\d)(and|or)\b/g, '$1 $2');
-    // Fix "andCS" -> "and CS", "and Recitation" is fine
-    t = t.replace(/\b(and|or)([A-Z])/g, '$1 $2');
+    // Fix missing spaces around "and"/"or" between words
+    // "CS 5001and" -> "CS 5001 and", "Scienceand" -> "Science and"
+    t = t.replace(/([a-z0-9])(and|or)\b/gi, '$1 $2');
+    // "andCS" -> "and CS", "andRecitation" -> "and Recitation"
+    t = t.replace(/\b(and|or)([A-Za-z])/g, '$1 $2');
     return t;
 }
 
