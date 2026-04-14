@@ -693,18 +693,29 @@ function switchDetailTab(programId, tab) {
     else loadCurriculumDetail(programId);
 }
 
-// Normalize whitespace: collapse all whitespace types (including &nbsp;) to single spaces
+// Normalize whitespace: collapse all types (including &nbsp;) to single spaces,
+// fix missing spaces around "and"/"or" between course codes, and lowercase for comparison
 function normText(s) {
-    return s.replace(/[\u00a0\s]+/g, ' ').trim();
+    let t = s.replace(/[\u00a0\s]+/g, ' ').trim();
+    // Fix "CS 5001and" -> "CS 5001 and", "AIand" -> "AI and"
+    t = t.replace(/(\d)(and|or)\b/g, '$1 $2');
+    // Fix "andCS" -> "and CS", "and Recitation" is fine
+    t = t.replace(/\b(and|or)([A-Z])/g, '$1 $2');
+    return t;
+}
+
+// Normalize for comparison: lowercase so case differences don't create false diffs
+function normForCompare(s) {
+    return normText(s).toLowerCase();
 }
 
 // Extract course lines from curriculum HTML for comparison.
-// Returns array of {code, title, hours} objects — only course-related rows.
+// Returns array of objects with display text and normalized comparison key.
 function extractCourseLines(html) {
     const div = document.createElement('div');
     div.innerHTML = cleanCurriculumHtml(html);
     const lines = [];
-    const courseCodePattern = /^[A-Z]{2,5}\s+\d{4}/;
+    const courseCodePattern = /^[A-Z]{2,5}\s+\d{4}/i;
 
     div.querySelectorAll('tr').forEach(tr => {
         const cells = tr.querySelectorAll('td, th');
@@ -714,7 +725,7 @@ function extractCourseLines(html) {
 
         const hasCode = parts.some(p => courseCodePattern.test(p));
         const isAreaHeader = tr.classList.contains('areaheader') || tr.querySelector('.areaheader') !== null;
-        const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/.test(p));
+        const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/i.test(p));
 
         // Only include rows with course codes, area headers, or "or" alternatives
         if (hasCode || isAreaHeader || hasOr) {
@@ -725,19 +736,22 @@ function extractCourseLines(html) {
 }
 
 // Simple diff algorithm (longest common subsequence based)
+// Compares using case-insensitive normalization but preserves original display text
 function diffLines(oldLines, newLines) {
+    const oldNorm = oldLines.map(l => normForCompare(l));
+    const newNorm = newLines.map(l => normForCompare(l));
     const m = oldLines.length, n = newLines.length;
     const dp = Array.from({length: m + 1}, () => new Uint16Array(n + 1));
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
-            if (oldLines[i-1] === newLines[j-1]) dp[i][j] = dp[i-1][j-1] + 1;
+            if (oldNorm[i-1] === newNorm[j-1]) dp[i][j] = dp[i-1][j-1] + 1;
             else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
         }
     }
     const result = [];
     let i = m, j = n;
     while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && oldLines[i-1] === newLines[j-1]) {
+        if (i > 0 && j > 0 && oldNorm[i-1] === newNorm[j-1]) {
             result.unshift({type: 'same', left: oldLines[i-1], right: newLines[j-1]});
             i--; j--;
         } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
