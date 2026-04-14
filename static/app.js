@@ -723,18 +723,34 @@ function normForCompare(s) {
 
 // Standardize section heading text for consistent display in Compare tab.
 // Maps common CIM variations to uniform labels while preserving meaningful distinctions.
+// Returns '' for instructional preambles that don't define a new section.
 function standardizeHeader(text) {
-    const s = text.toLowerCase().trim();
+    const t = text.trim();
+    const s = t.toLowerCase();
+    // Suppress instructional preambles that don't define a new section
+    // (these appear as courselistcomment rows under an existing h2/h3 heading)
+    if (/^complete all courses/i.test(t)) return '';
+    if (/^a grade of/i.test(t)) return '';
+    if (/^(program )?credit\/?gpa require/i.test(s)) return '';
+    if (/^(gpa|major gpa|business gpa) requirement/i.test(s)) return '';
+    if (/^program credit require/i.test(s)) return '';
+    if (/^\d+ total semester hours required/i.test(t)) return '';
+    if (/^minimum \d+\.\d+ gpa required/i.test(t)) return '';
+    if (/^must be taken in alignment/i.test(t)) return '';
+    if (/^students must complete/i.test(t)) return '';
+    if (/^nupath requirements/i.test(s)) return '';
     // Required/core variations → "Required Courses"
-    if (/^(core requirements?|required courses?|program requirements?)$/i.test(text.trim())) return 'Required Courses';
+    if (/^(core requirements?|required courses?|program requirements?)$/i.test(t)) return 'Required Courses';
     // Elective variations → "Elective Courses"
-    if (/^(electives?|general electives?|required general electives?)$/i.test(text.trim())) return 'Elective Courses';
+    if (/^(electives?|general electives?|required general electives?)$/i.test(t)) return 'Elective Courses';
     // Restricted electives → keep distinct
-    if (/^restricted electives?$/i.test(text.trim())) return 'Restricted Electives';
+    if (/^restricted electives?$/i.test(t)) return 'Restricted Electives';
     // Supporting courses → keep
-    if (/^supporting courses/i.test(text.trim())) return 'Supporting Courses';
+    if (/^supporting courses/i.test(t)) return 'Supporting Courses';
+    // "Complete the following:" is just a preamble, not a section
+    if (/^complete the following[:.]/i.test(t)) return '';
     // Everything else: keep original text
-    return text;
+    return t;
 }
 
 // Extract course lines from curriculum HTML for comparison.
@@ -781,19 +797,25 @@ function extractCourseLines(html) {
 
         if (isAreaHeader) {
             const text = standardizeHeader(parts.join(' '));
-            currentSection = text;
-            lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
+            if (text) {
+                currentSection = text;
+                lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
+            }
         } else if (hasCode || hasOr) {
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
             lines.push({key: codecol + '\t' + titlecol, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
         } else {
-            // Non-course context row (e.g. "Complete 16 semester hours...")
-            const text = parts.join(' ');
-            if (text.length > 2) {
-                currentSection = text;
-                lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
+            // Non-course context row — run through standardizeHeader to suppress
+            // instructional preambles (returns '') and normalize meaningful headers
+            const raw = parts.join(' ');
+            if (raw.length > 2) {
+                const text = standardizeHeader(raw);
+                if (text) {
+                    currentSection = text;
+                    lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
+                }
             }
         }
     });
