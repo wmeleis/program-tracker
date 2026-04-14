@@ -746,7 +746,7 @@ function extractCourseLines(html) {
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
-            lines.push({key: parts.join('\t'), code: codecol, title: titlecol, hours: hourscol, isHeader: false});
+            lines.push({key: codecol + '\t' + titlecol, code: codecol, title: titlecol, hours: hourscol, isHeader: false});
         }
     });
     return lines;
