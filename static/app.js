@@ -722,7 +722,7 @@ function normForCompare(s) {
 }
 
 // Extract course lines from curriculum HTML for comparison.
-// Returns array of objects with display text and normalized comparison key.
+// Returns array of {key, code, title, hours, isHeader} objects.
 function extractCourseLines(html) {
     const div = document.createElement('div');
     div.innerHTML = cleanCurriculumHtml(html);
@@ -735,23 +735,28 @@ function extractCourseLines(html) {
         const parts = Array.from(cells).map(c => normText(c.textContent)).filter(Boolean);
         if (parts.length === 0) return;
 
-        const hasCode = parts.some(p => courseCodePattern.test(p));
         const isAreaHeader = tr.classList.contains('areaheader') || tr.querySelector('.areaheader') !== null;
+        const hasCode = parts.some(p => courseCodePattern.test(p));
         const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/i.test(p));
 
-        // Only include rows with course codes, area headers, or "or" alternatives
-        if (hasCode || isAreaHeader || hasOr) {
-            lines.push(parts.join('\t'));
+        if (isAreaHeader) {
+            const text = parts.join(' ');
+            lines.push({key: parts.join('\t'), code: '', title: text, hours: '', isHeader: true});
+        } else if (hasCode || hasOr) {
+            const codecol = parts[0] || '';
+            const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
+            const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
+            lines.push({key: parts.join('\t'), code: codecol, title: titlecol, hours: hourscol, isHeader: false});
         }
     });
     return lines;
 }
 
 // Simple diff algorithm (longest common subsequence based)
-// Compares using case-insensitive normalization but preserves original display text
+// Compares using case-insensitive normalization but preserves original structured data
 function diffLines(oldLines, newLines) {
-    const oldNorm = oldLines.map(l => normForCompare(l));
-    const newNorm = newLines.map(l => normForCompare(l));
+    const oldNorm = oldLines.map(l => normForCompare(l.key));
+    const newNorm = newLines.map(l => normForCompare(l.key));
     const m = oldLines.length, n = newLines.length;
     const dp = Array.from({length: m + 1}, () => new Uint16Array(n + 1));
     for (let i = 1; i <= m; i++) {
@@ -767,34 +772,53 @@ function diffLines(oldLines, newLines) {
             result.unshift({type: 'same', left: oldLines[i-1], right: newLines[j-1]});
             i--; j--;
         } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-            result.unshift({type: 'added', left: '', right: newLines[j-1]});
+            result.unshift({type: 'added', left: null, right: newLines[j-1]});
             j--;
         } else {
-            result.unshift({type: 'removed', left: oldLines[i-1], right: ''});
+            result.unshift({type: 'removed', left: oldLines[i-1], right: null});
             i--;
         }
     }
     return result;
 }
 
+// Render a single side's cell content
+function renderCourseCell(item, cls) {
+    if (!item) return `<td class="${cls}" colspan="3"></td>`;
+    if (item.isHeader) {
+        return `<td class="${cls} cmp-header" colspan="3">${escapeHtml(item.title)}</td>`;
+    }
+    return `<td class="${cls} cmp-code">${escapeHtml(item.code)}</td>` +
+           `<td class="${cls} cmp-title">${escapeHtml(item.title)}</td>` +
+           `<td class="${cls} cmp-hours">${escapeHtml(item.hours)}</td>`;
+}
+
 // Render a side-by-side comparison table
 function renderSideBySide(diff, leftLabel, rightLabel) {
-    function fmtCell(text, cls) {
-        const escaped = escapeHtml(text).replace(/\t/g, '<span class="compare-tab"></span>');
-        return `<td class="${cls}">${escaped || ''}</td>`;
-    }
     let rows = diff.map(d => {
+        const cls = d.type === 'same' ? 'cmp-same' : d.type === 'removed' ? 'cmp-removed' : 'cmp-added';
+        const emptyCls = d.type === 'removed' ? 'cmp-empty-right' : 'cmp-empty-left';
         if (d.type === 'same') {
-            return `<tr>${fmtCell(d.left, 'cmp-same')}${fmtCell(d.right, 'cmp-same')}</tr>`;
+            return `<tr>${renderCourseCell(d.left, 'cmp-same')}` +
+                   `<td class="cmp-divider"></td>` +
+                   `${renderCourseCell(d.right, 'cmp-same')}</tr>`;
         } else if (d.type === 'removed') {
-            return `<tr>${fmtCell(d.left, 'cmp-removed')}${fmtCell('', 'cmp-empty')}</tr>`;
+            return `<tr>${renderCourseCell(d.left, 'cmp-removed')}` +
+                   `<td class="cmp-divider"></td>` +
+                   `${renderCourseCell(null, 'cmp-empty')}</tr>`;
         } else {
-            return `<tr>${fmtCell('', 'cmp-empty')}${fmtCell(d.right, 'cmp-added')}</tr>`;
+            return `<tr>${renderCourseCell(null, 'cmp-empty')}` +
+                   `<td class="cmp-divider"></td>` +
+                   `${renderCourseCell(d.right, 'cmp-added')}</tr>`;
         }
     }).join('');
 
     return `<table class="compare-table">
-        <thead><tr><th>${escapeHtml(leftLabel)}</th><th>${escapeHtml(rightLabel)}</th></tr></thead>
+        <thead><tr>
+            <th colspan="3" class="cmp-left-header">${escapeHtml(leftLabel)}</th>
+            <th class="cmp-divider"></th>
+            <th colspan="3" class="cmp-right-header">${escapeHtml(rightLabel)}</th>
+        </tr></thead>
         <tbody>${rows}</tbody>
     </table>`;
 }

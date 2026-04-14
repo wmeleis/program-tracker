@@ -889,13 +889,11 @@ tr.program-row.expanded td {
 .compare-table {
     width: 100%;
     border-collapse: collapse;
-    font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.5;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
     overflow: hidden;
-    table-layout: fixed;
 }
 
 .compare-table thead th {
@@ -906,15 +904,46 @@ tr.program-row.expanded td {
     color: #475569;
     text-align: left;
     border-bottom: 2px solid #cbd5e1;
-    width: 50%;
+}
+
+.compare-table thead th.cmp-divider {
+    width: 3px;
+    padding: 0;
+    background: #cbd5e1;
 }
 
 .compare-table td {
-    padding: 3px 10px;
+    padding: 4px 8px;
     vertical-align: top;
     border-bottom: 1px solid #f1f5f9;
-    white-space: pre-wrap;
-    word-break: break-word;
+}
+
+.compare-table td.cmp-divider {
+    width: 3px;
+    padding: 0;
+    background: #e2e8f0;
+}
+
+.compare-table td.cmp-code {
+    width: 90px;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.compare-table td.cmp-title {
+    /* flexible width */
+}
+
+.compare-table td.cmp-hours {
+    width: 35px;
+    text-align: right;
+}
+
+.compare-table td.cmp-header {
+    font-weight: 700;
+    font-size: 13px;
+    padding-top: 10px;
+    border-bottom: 1px solid #cbd5e1;
 }
 
 .compare-table td.cmp-same {
@@ -934,11 +963,6 @@ tr.program-row.expanded td {
 
 .compare-table td.cmp-empty {
     background: #f8fafc;
-}
-
-.compare-tab {
-    display: inline-block;
-    width: 24px;
 }
 
 /* Deployment section headers in Boston program Compare view */
