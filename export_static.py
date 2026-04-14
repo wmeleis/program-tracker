@@ -385,7 +385,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const table = renderSideBySide(diff, 'Boston Reference', getProgramName(programId));
                 contentEl.innerHTML = header +
                     '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in reference</span>' +
-                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in this version</span></div>' + table;
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in this version</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
             }
         } else if (deploymentIds && deploymentIds.length > 0) {
             // Boston program
@@ -408,7 +409,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (dep.identical) html += '<div class="compare-identical-small">Identical</div>';
                 else {
                     html += '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in Boston</span>' +
-                        '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ' + escapeHtml(dep.name) + '</span></div>';
+                        '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ' + escapeHtml(dep.name) + '</span>' +
+                        '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>';
                     html += renderSideBySide(dep.diff, 'Boston', dep.name);
                 }
                 html += '</div>';
@@ -430,7 +432,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 const table = renderSideBySide(diff, 'Last Approved', 'Current Proposal');
                 contentEl.innerHTML = '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in approved</span>' +
-                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in proposal</span></div>' + table;
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in proposal</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
             }
         }
     };

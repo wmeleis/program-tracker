@@ -729,6 +729,7 @@ function extractCourseLines(html) {
     const lines = [];
     const courseCodePattern = /^[A-Z]{2,5}\s+\d{4}/i;
 
+    let currentSection = '';
     div.querySelectorAll('tr').forEach(tr => {
         const cells = tr.querySelectorAll('td, th');
         if (cells.length === 0) return;
@@ -744,17 +745,19 @@ function extractCourseLines(html) {
 
         if (isAreaHeader) {
             const text = parts.join(' ');
-            lines.push({key: '', code: '', title: text, hours: '', isHeader: true});
+            currentSection = text;
+            lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
         } else if (hasCode || hasOr) {
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
-            lines.push({key: codecol + '\t' + titlecol, code: codecol, title: titlecol, hours: hourscol, isHeader: false});
+            lines.push({key: codecol + '\t' + titlecol, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
         } else {
             // Non-course context row (e.g. "Complete 16 semester hours...")
             const text = parts.join(' ');
             if (text.length > 2) {
-                lines.push({key: '', code: '', title: text, hours: '', isHeader: true});
+                currentSection = text;
+                lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
             }
         }
     });
@@ -838,7 +841,13 @@ function diffLines(oldLines, newLines) {
                 usedRightHeaders.add(rh.title);
             }
         }
-        result.push({type: d.type, left: d.left, right: d.right});
+        // Mark courses that match but moved between sections
+        let type = d.type;
+        if (type === 'same' && d.left && d.right && !d.left.isHeader && d.left.section && d.right.section &&
+            normForCompare(d.left.section) !== normForCompare(d.right.section)) {
+            type = 'moved';
+        }
+        result.push({type, left: d.left, right: d.right});
     }
     return result;
 }
@@ -857,12 +866,14 @@ function renderCourseCell(item, cls) {
 // Render a side-by-side comparison table
 function renderSideBySide(diff, leftLabel, rightLabel) {
     let rows = diff.map(d => {
-        const cls = d.type === 'same' ? 'cmp-same' : d.type === 'removed' ? 'cmp-removed' : 'cmp-added';
-        const emptyCls = d.type === 'removed' ? 'cmp-empty-right' : 'cmp-empty-left';
         if (d.type === 'same') {
             return `<tr>${renderCourseCell(d.left, 'cmp-same')}` +
                    `<td class="cmp-divider"></td>` +
                    `${renderCourseCell(d.right, 'cmp-same')}</tr>`;
+        } else if (d.type === 'moved') {
+            return `<tr>${renderCourseCell(d.left, 'cmp-moved')}` +
+                   `<td class="cmp-divider"></td>` +
+                   `${renderCourseCell(d.right, 'cmp-moved')}</tr>`;
         } else if (d.type === 'removed') {
             return `<tr>${renderCourseCell(d.left, 'cmp-removed')}` +
                    `<td class="cmp-divider"></td>` +
@@ -962,6 +973,7 @@ async function loadCompareDetail(programId) {
                     <div class="compare-legend">
                         <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in reference</span>
                         <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in this version</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>${table}`;
             }
 
@@ -1005,6 +1017,7 @@ async function loadCompareDetail(programId) {
                     html += `<div class="compare-legend">
                         <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in Boston</span>
                         <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ${escapeHtml(dep.name)}</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>`;
                     html += renderSideBySide(dep.diff, 'Boston', dep.name);
                 }
@@ -1036,6 +1049,7 @@ async function loadCompareDetail(programId) {
                 contentEl.innerHTML = `<div class="compare-legend">
                     <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in approved</span>
                     <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in proposal</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                 </div>${table}`;
             }
         }

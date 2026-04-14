@@ -884,6 +884,7 @@ tr.program-row.expanded td {
 
 .diff-removed-bg { background: #fecaca; }
 .diff-added-bg { background: #bbf7d0; }
+.diff-moved-bg { background: #fde68a; }
 
 /* Side-by-side comparison table */
 .compare-table {
@@ -959,6 +960,11 @@ tr.program-row.expanded td {
 .compare-table td.cmp-added {
     background: #dcfce7;
     color: #166534;
+}
+
+.compare-table td.cmp-moved {
+    background: #fef3c7;
+    color: #92400e;
 }
 
 .compare-table td.cmp-empty {
