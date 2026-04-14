@@ -602,6 +602,9 @@ function cleanCurriculumHtml(html) {
         el.replaceWith(document.createTextNode(el.textContent));
     });
 
+    // Strip all inline styles (removes red borders, cursor:pointer, etc. from CIM HTML)
+    div.querySelectorAll('[style]').forEach(el => el.removeAttribute('style'));
+
     // Replace "Course Not Found" error elements with plain text (keep the course code)
     div.querySelectorAll('.structuredcontenterror').forEach(el => {
         const text = el.textContent.replace(/\u00a0/g, ' ').trim();

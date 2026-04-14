@@ -770,15 +770,18 @@ tr.program-row.expanded td {
 }
 
 /* Area headers within tables (e.g., "Restricted Electives", "Capstone") */
+/* Area headers within tables (e.g., "Required Core", "Electives", "Programming") */
 .curriculum-content .areaheader {
     font-weight: 700;
-    color: #334155;
-    font-size: 13px;
+    color: #1e293b;
+    font-size: 14px;
+    letter-spacing: 0.01em;
 }
 
 .curriculum-content tr.areaheader td {
-    padding-top: 12px;
-    border-bottom: 1px solid #cbd5e1;
+    padding-top: 16px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #94a3b8;
 }
 
 /* Comment rows (e.g., "Complete 4 semester hours from...") */
@@ -791,9 +794,9 @@ tr.program-row.expanded td {
     font-style: normal;
 }
 
-/* Indented sub-items */
+/* Indented sub-items (inline style is stripped, so enforce via CSS) */
 .curriculum-content .blockindent {
-    margin-left: 20px;
+    margin-left: 20px !important;
 }
 
 .curriculum-content h2 {
