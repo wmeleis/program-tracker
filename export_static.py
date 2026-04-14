@@ -131,8 +131,10 @@ def build_static_site():
     with open(tmpl_path, 'r') as f:
         html = f.read()
 
-    html = html.replace('href="/static/style.css"', 'href="style.css"')
-    html = html.replace('src="/static/app.js"', 'src="app.js"')
+    import time
+    cache_bust = int(time.time())
+    html = html.replace('href="/static/style.css"', f'href="style.css?v={cache_bust}"')
+    html = html.replace('src="/static/app.js"', f'src="app.js?v={cache_bust}"')
     html = html.replace(
         '<button id="scan-btn" onclick="triggerScan()">Scan Now</button>',
         ''
