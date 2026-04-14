@@ -810,22 +810,33 @@ function diffLines(oldLines, newLines) {
             i--;
         }
     }
-    // Re-insert headers before the first course in their section
+    // Re-insert headers before the first course in their section.
+    // Each side's headers are shown independently on that side only, so that
+    // courses stay under their correct heading even when sections differ.
     const result = [];
     const usedLeftHeaders = new Set();
     const usedRightHeaders = new Set();
+    const emptyHeader = {key: '', code: '', title: '', hours: '', isHeader: true};
     for (const d of courseDiff) {
-        // Insert header row if this course has one and we haven't shown it yet
         const lh = d.leftIdx !== null ? oldSplit.headerMap[d.leftIdx] : null;
         const rh = d.rightIdx !== null ? newSplit.headerMap[d.rightIdx] : null;
-        const lhKey = lh ? lh.title : null;
-        const rhKey = rh ? rh.title : null;
-        if (lhKey && !usedLeftHeaders.has(lhKey) || rhKey && !usedRightHeaders.has(rhKey)) {
-            const headerLeft = (lhKey && !usedLeftHeaders.has(lhKey)) ? lh : rh;
-            const headerRight = (rhKey && !usedRightHeaders.has(rhKey)) ? rh : lh;
-            result.push({type: 'same', left: headerLeft || headerRight, right: headerRight || headerLeft});
-            if (lhKey) usedLeftHeaders.add(lhKey);
-            if (rhKey) usedRightHeaders.add(rhKey);
+        const showLeft = lh && !usedLeftHeaders.has(lh.title);
+        const showRight = rh && !usedRightHeaders.has(rh.title);
+
+        if (showLeft && showRight && normForCompare(lh.title) === normForCompare(rh.title)) {
+            // Same header on both sides — single row
+            result.push({type: 'same', left: lh, right: rh});
+            usedLeftHeaders.add(lh.title);
+            usedRightHeaders.add(rh.title);
+        } else {
+            if (showLeft) {
+                result.push({type: 'same', left: lh, right: emptyHeader});
+                usedLeftHeaders.add(lh.title);
+            }
+            if (showRight) {
+                result.push({type: 'same', left: emptyHeader, right: rh});
+                usedRightHeaders.add(rh.title);
+            }
         }
         result.push({type: d.type, left: d.left, right: d.right});
     }
