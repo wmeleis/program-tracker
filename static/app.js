@@ -740,8 +740,7 @@ function extractCourseLines(html) {
         const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/i.test(p));
 
         if (isAreaHeader) {
-            const text = parts.join(' ');
-            lines.push({key: parts.join('\t'), code: '', title: text, hours: '', isHeader: true});
+            // Skip headers — only compare actual courses
         } else if (hasCode || hasOr) {
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
