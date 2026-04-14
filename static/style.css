@@ -846,6 +846,18 @@ tr.program-row.expanded td {
     margin-top: 8px;
 }
 
+.compare-identical-small {
+    padding: 8px 12px;
+    background: #dcfce7;
+    border: 1px solid #86efac;
+    border-radius: 4px;
+    color: #166534;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: center;
+    margin: 4px 0;
+}
+
 .compare-legend {
     display: flex;
     gap: 20px;
@@ -870,49 +882,91 @@ tr.program-row.expanded td {
 .diff-removed-bg { background: #fecaca; }
 .diff-added-bg { background: #bbf7d0; }
 
-.compare-content {
+/* Side-by-side comparison table */
+.compare-table {
+    width: 100%;
+    border-collapse: collapse;
     font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
     font-size: 12px;
-    line-height: 1.6;
+    line-height: 1.5;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
     overflow: hidden;
+    table-layout: fixed;
 }
 
-.diff-line {
-    padding: 2px 12px;
+.compare-table thead th {
+    background: #f1f5f9;
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: 12px;
+    color: #475569;
+    text-align: left;
+    border-bottom: 2px solid #cbd5e1;
+    width: 50%;
+}
+
+.compare-table td {
+    padding: 3px 10px;
+    vertical-align: top;
+    border-bottom: 1px solid #f1f5f9;
     white-space: pre-wrap;
-    border-bottom: 1px solid transparent;
+    word-break: break-word;
 }
 
-.diff-same {
+.compare-table td.cmp-same {
     background: #fff;
     color: #334155;
 }
 
-.diff-removed {
+.compare-table td.cmp-removed {
     background: #fee2e2;
     color: #991b1b;
 }
 
-.diff-added {
+.compare-table td.cmp-added {
     background: #dcfce7;
     color: #166534;
 }
 
-.diff-removed::before {
-    content: '− ';
-    font-weight: 700;
-}
-
-.diff-added::before {
-    content: '+ ';
-    font-weight: 700;
+.compare-table td.cmp-empty {
+    background: #f8fafc;
 }
 
 .compare-tab {
     display: inline-block;
-    width: 180px;
+    width: 140px;
+}
+
+/* Deployment section headers in Boston program Compare view */
+.compare-deployment-section {
+    margin: 16px 0 8px;
+}
+
+.compare-deployment-section:first-of-type {
+    margin-top: 8px;
+}
+
+.compare-deployment-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0 0 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+/* Colored Compare button */
+.detail-tab.compare-identical-btn {
+    color: #166534;
+    border-bottom-color: #22c55e;
+    background: #f0fdf4;
+}
+
+.detail-tab.compare-different-btn {
+    color: #991b1b;
+    border-bottom-color: #ef4444;
+    background: #fef2f2;
 }
 
 /* Responsive */

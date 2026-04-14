@@ -15,6 +15,7 @@ from database import (
     get_reference_curriculum
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula
+from export_static import build_campus_groups
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -96,6 +97,17 @@ def api_program_reference(program_id):
     if ref:
         return jsonify(ref)
     return jsonify({'error': 'No reference curriculum found'}), 404
+
+
+@app.route('/api/campus_groups')
+def api_campus_groups():
+    """Get Boston-to-deployment campus relationship mappings."""
+    programs = get_all_programs()
+    boston_to_deployments, deployment_to_boston = build_campus_groups(programs)
+    return jsonify({
+        'boston_to_deployments': {str(k): v for k, v in boston_to_deployments.items()},
+        'deployment_to_boston': {str(k): v for k, v in deployment_to_boston.items()},
+    })
 
 
 @app.route('/api/pipeline')

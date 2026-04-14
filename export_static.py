@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 from datetime import datetime
 from database import (
@@ -10,6 +11,46 @@ from database import (
     get_current_approvers, get_all_curriculum, get_all_reference_curriculum
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES
+
+
+def _parse_campus(name):
+    """Extract campus from 'Program, Degree (Campus)'. Returns (base, campus) or (name, None)."""
+    m = re.search(r'\(([^)]+)\)\s*$', name)
+    if m:
+        return name[:m.start()].strip(), m.group(1).strip()
+    return name, None
+
+
+def build_campus_groups(programs):
+    """Build mapping of Boston programs to their non-Boston deployments.
+
+    Returns dict: { boston_program_id: [deployment_ids], ... }
+    Also returns: { deployment_id: boston_program_id, ... }
+    """
+    # Index Boston programs by base name
+    boston_by_base = {}  # base_name_lower -> program_id
+    all_programs = {}  # id -> {name, base, campus}
+    for p in programs:
+        pid = p['id']
+        name = p['name']
+        base, campus = _parse_campus(name)
+        all_programs[pid] = {'name': name, 'base': base, 'campus': campus}
+        if campus and campus.lower() == 'boston':
+            boston_by_base[base.lower()] = pid
+        elif not campus:
+            # No campus parenthetical = Boston
+            boston_by_base[name.strip().lower()] = pid
+
+    boston_to_deployments = {}  # boston_id -> [deployment_ids]
+    deployment_to_boston = {}  # deployment_id -> boston_id
+    for pid, info in all_programs.items():
+        if info['campus'] and info['campus'].lower() != 'boston':
+            boston_id = boston_by_base.get(info['base'].lower())
+            if boston_id:
+                boston_to_deployments.setdefault(boston_id, []).append(pid)
+                deployment_to_boston[pid] = boston_id
+
+    return boston_to_deployments, deployment_to_boston
 
 EXPORT_DIR = os.path.join(os.path.dirname(__file__), 'docs')
 
@@ -67,6 +108,15 @@ def build_static_site():
     reference = get_all_reference_curriculum()
     with open(os.path.join(EXPORT_DIR, 'reference.json'), 'w') as f:
         json.dump(reference, f)
+
+    # Export campus relationship data
+    boston_to_deployments, deployment_to_boston = build_campus_groups(data['programs'])
+    campus_groups = {
+        'boston_to_deployments': {str(k): v for k, v in boston_to_deployments.items()},
+        'deployment_to_boston': {str(k): v for k, v in deployment_to_boston.items()},
+    }
+    with open(os.path.join(EXPORT_DIR, 'campus_groups.json'), 'w') as f:
+        json.dump(campus_groups, f)
 
     print(f"Exported: {len(data['programs'])} programs, {len(data['workflows'])} workflows, {len(curriculum)} curricula, {len(reference)} references")
 
@@ -280,7 +330,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Patch compare loading to use static data
+    // Patch campus groups to use static data
+    let _campusGroupsCache = null;
+    window.getCampusGroups = async function() {
+        if (_campusGroupsCache) return _campusGroupsCache;
+        try {
+            const r = await fetch('campus_groups.json');
+            _campusGroupsCache = await r.json();
+        } catch(e) {
+            _campusGroupsCache = {boston_to_deployments: {}, deployment_to_boston: {}};
+        }
+        return _campusGroupsCache;
+    };
+
+    // Patch compare to use static curriculum/reference/campus data
     window.loadCompareDetail = async function(programId) {
         const contentEl = document.getElementById(`detail-content-${programId}`);
         if (!contentEl) return;
@@ -292,51 +355,78 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!_referenceCache) {
             try { const r = await fetch('reference.json'); _referenceCache = await r.json(); } catch(e) {}
         }
-
+        const groups = await getCampusGroups();
         const currHtml = (_curriculumCache || {})[String(programId)] || '';
-        const ref = (_referenceCache || {})[String(programId)];
-        const refHtml = ref ? ref.html : '';
+        const bostonId = groups.deployment_to_boston[String(programId)];
+        const deploymentIds = groups.boston_to_deployments[String(programId)];
 
-        if (!currHtml && !refHtml) {
-            contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available for comparison.</div>';
-            return;
+        if (bostonId) {
+            // Non-Boston deployment
+            const ref = (_referenceCache || {})[String(programId)];
+            const refHtml = ref ? ref.html : '';
+            if (!currHtml || !refHtml) {
+                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or reference data not available for comparison.</div>';
+                updateCompareButton(programId, null);
+                return;
+            }
+            const {identical, diff} = compareCurricula(refHtml, currHtml);
+            updateCompareButton(programId, identical);
+            const header = ref.version_date
+                ? '<div class="reference-header">Comparing against: ' + escapeHtml(ref.version_date) + '</div>' : '';
+            if (identical) {
+                contentEl.innerHTML = header + '<div class="compare-identical">Curriculum is identical to the Boston reference.</div>';
+            } else {
+                const table = renderSideBySide(diff, 'Boston Reference', getProgramName(programId));
+                contentEl.innerHTML = header +
+                    '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in reference</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in this version</span></div>' + table;
+            }
+        } else if (deploymentIds && deploymentIds.length > 0) {
+            // Boston program
+            let allIdentical = true;
+            const results = [];
+            for (const depId of deploymentIds) {
+                const depHtml = (_curriculumCache || {})[String(depId)] || '';
+                const depName = getProgramName(depId);
+                if (!currHtml || !depHtml) { results.push({name: depName, noData: true}); continue; }
+                const {identical, diff} = compareCurricula(currHtml, depHtml);
+                if (!identical) allIdentical = false;
+                results.push({name: depName, identical, diff});
+            }
+            updateCompareButton(programId, allIdentical);
+            let html = '<div class="reference-header">Comparing Boston curriculum against ' + deploymentIds.length + ' campus deployment' + (deploymentIds.length > 1 ? 's' : '') + '</div>';
+            if (allIdentical) html += '<div class="compare-identical">All campus deployments are identical to this curriculum.</div>';
+            for (const dep of results) {
+                html += '<div class="compare-deployment-section"><h3 class="compare-deployment-name">' + escapeHtml(dep.name) + '</h3>';
+                if (dep.noData) html += '<div class="workflow-meta">Curriculum data not available.</div>';
+                else if (dep.identical) html += '<div class="compare-identical-small">Identical</div>';
+                else {
+                    html += '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in Boston</span>' +
+                        '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ' + escapeHtml(dep.name) + '</span></div>';
+                    html += renderSideBySide(dep.diff, 'Boston', dep.name);
+                }
+                html += '</div>';
+            }
+            contentEl.innerHTML = html;
+        } else {
+            // Standalone program
+            const ref = (_referenceCache || {})[String(programId)];
+            const refHtml = ref ? ref.html : '';
+            if (!currHtml || !refHtml) {
+                contentEl.innerHTML = '<div class="workflow-meta">No comparison available.</div>';
+                updateCompareButton(programId, null);
+                return;
+            }
+            const {identical, diff} = compareCurricula(refHtml, currHtml);
+            updateCompareButton(programId, identical);
+            if (identical) {
+                contentEl.innerHTML = '<div class="compare-identical">Current curriculum is identical to the last approved version.</div>';
+            } else {
+                const table = renderSideBySide(diff, 'Last Approved', 'Current Proposal');
+                contentEl.innerHTML = '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in approved</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in proposal</span></div>' + table;
+            }
         }
-        if (!refHtml) {
-            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available for comparison. This may be a new program.</div>';
-            return;
-        }
-        if (!currHtml) {
-            contentEl.innerHTML = '<div class="workflow-meta">No current curriculum available for comparison.</div>';
-            return;
-        }
-
-        const refLines = extractCurriculumLines(refHtml);
-        const currLines = extractCurriculumLines(currHtml);
-        const diff = diffLines(refLines, currLines);
-        const hasChanges = diff.some(d => d.type !== 'same');
-
-        let header = ref.version_date
-            ? `<div class="reference-header">Comparing current proposal against: ${escapeHtml(ref.version_date)}</div>`
-            : '';
-
-        if (!hasChanges) {
-            contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the reference version.</div>`;
-            return;
-        }
-
-        const diffHtml = diff.map(d => {
-            const escaped = escapeHtml(d.text).replace(/\\t/g, '<span class="compare-tab"></span>');
-            if (d.type === 'removed') return `<div class="diff-line diff-removed">${escaped}</div>`;
-            if (d.type === 'added') return `<div class="diff-line diff-added">${escaped}</div>`;
-            return `<div class="diff-line diff-same">${escaped}</div>`;
-        }).join('');
-
-        contentEl.innerHTML = `${header}
-            <div class="compare-legend">
-                <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Removed from reference</span>
-                <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Added in current</span>
-            </div>
-            <div class="compare-content">${diffHtml}</div>`;
     };
 
     // Update button tries to reach local Flask server to trigger scan + deploy

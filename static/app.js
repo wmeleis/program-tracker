@@ -693,69 +693,40 @@ function switchDetailTab(programId, tab) {
     else loadCurriculumDetail(programId);
 }
 
-// Extract normalized text lines from curriculum HTML for diffing
-function extractCurriculumLines(html) {
+// Normalize whitespace: collapse all whitespace types (including &nbsp;) to single spaces
+function normText(s) {
+    return s.replace(/[\u00a0\s]+/g, ' ').trim();
+}
+
+// Extract course lines from curriculum HTML for comparison.
+// Returns array of {code, title, hours} objects — only course-related rows.
+function extractCourseLines(html) {
     const div = document.createElement('div');
     div.innerHTML = cleanCurriculumHtml(html);
     const lines = [];
+    const courseCodePattern = /^[A-Z]{2,5}\s+\d{4}/;
 
-    function processNode(node) {
-        if (node.nodeType === 3) {
-            const text = node.textContent.trim();
-            if (text) lines.push(text);
-            return;
+    div.querySelectorAll('tr').forEach(tr => {
+        const cells = tr.querySelectorAll('td, th');
+        if (cells.length === 0) return;
+        const parts = Array.from(cells).map(c => normText(c.textContent)).filter(Boolean);
+        if (parts.length === 0) return;
+
+        const hasCode = parts.some(p => courseCodePattern.test(p));
+        const isAreaHeader = tr.classList.contains('areaheader') || tr.querySelector('.areaheader') !== null;
+        const isComment = tr.querySelector('.courselistcomment') !== null;
+        const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/.test(p));
+
+        if (hasCode || isAreaHeader || isComment || hasOr) {
+            lines.push(parts.join('\t'));
         }
-        if (node.nodeType !== 1) return;
-        const tag = node.tagName;
-
-        // Table rows: extract as "CODE  TITLE  HOURS"
-        if (tag === 'TR') {
-            const cells = node.querySelectorAll('td, th');
-            if (cells.length === 0) return;
-            const parts = Array.from(cells).map(c => c.textContent.replace(/\u00a0/g, ' ').trim()).filter(Boolean);
-            if (parts.length > 0) lines.push(parts.join('\t'));
-            return;
-        }
-
-        // Skip table/tbody/thead — we handle via TR
-        if (['TABLE', 'TBODY', 'THEAD', 'COLGROUP', 'CAPTION', 'COL'].includes(tag)) {
-            node.childNodes.forEach(processNode);
-            return;
-        }
-
-        // Headers
-        if (tag.match(/^H[1-6]$/)) {
-            const text = node.textContent.trim();
-            if (text) lines.push(text);
-            return;
-        }
-
-        // Paragraphs and list items
-        if (['P', 'LI'].includes(tag)) {
-            const text = node.textContent.trim();
-            if (text) lines.push(text);
-            return;
-        }
-
-        // Other block elements
-        if (['DIV', 'UL', 'OL', 'SECTION', 'HR'].includes(tag)) {
-            node.childNodes.forEach(processNode);
-            return;
-        }
-
-        // Inline or unknown: get text
-        const text = node.textContent.trim();
-        if (text) lines.push(text);
-    }
-
-    div.childNodes.forEach(processNode);
+    });
     return lines;
 }
 
 // Simple diff algorithm (longest common subsequence based)
 function diffLines(oldLines, newLines) {
     const m = oldLines.length, n = newLines.length;
-    // Build LCS table
     const dp = Array.from({length: m + 1}, () => new Uint16Array(n + 1));
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
@@ -763,22 +734,72 @@ function diffLines(oldLines, newLines) {
             else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
         }
     }
-    // Backtrack to produce diff
     const result = [];
     let i = m, j = n;
     while (i > 0 || j > 0) {
         if (i > 0 && j > 0 && oldLines[i-1] === newLines[j-1]) {
-            result.unshift({type: 'same', text: oldLines[i-1]});
+            result.unshift({type: 'same', left: oldLines[i-1], right: newLines[j-1]});
             i--; j--;
         } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-            result.unshift({type: 'added', text: newLines[j-1]});
+            result.unshift({type: 'added', left: '', right: newLines[j-1]});
             j--;
         } else {
-            result.unshift({type: 'removed', text: oldLines[i-1]});
+            result.unshift({type: 'removed', left: oldLines[i-1], right: ''});
             i--;
         }
     }
     return result;
+}
+
+// Render a side-by-side comparison table
+function renderSideBySide(diff, leftLabel, rightLabel) {
+    function fmtCell(text, cls) {
+        const escaped = escapeHtml(text).replace(/\t/g, '<span class="compare-tab"></span>');
+        return `<td class="${cls}">${escaped || ''}</td>`;
+    }
+    let rows = diff.map(d => {
+        if (d.type === 'same') {
+            return `<tr>${fmtCell(d.left, 'cmp-same')}${fmtCell(d.right, 'cmp-same')}</tr>`;
+        } else if (d.type === 'removed') {
+            return `<tr>${fmtCell(d.left, 'cmp-removed')}${fmtCell('', 'cmp-empty')}</tr>`;
+        } else {
+            return `<tr>${fmtCell('', 'cmp-empty')}${fmtCell(d.right, 'cmp-added')}</tr>`;
+        }
+    }).join('');
+
+    return `<table class="compare-table">
+        <thead><tr><th>${escapeHtml(leftLabel)}</th><th>${escapeHtml(rightLabel)}</th></tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// Compare two curricula, return {identical, diff}
+function compareCurricula(refHtml, currHtml) {
+    const refLines = extractCourseLines(refHtml);
+    const currLines = extractCourseLines(currHtml);
+    const diff = diffLines(refLines, currLines);
+    const identical = !diff.some(d => d.type !== 'same');
+    return {identical, diff};
+}
+
+// Cache for campus groups
+let _campusGroupsCache = null;
+async function getCampusGroups() {
+    if (_campusGroupsCache) return _campusGroupsCache;
+    try {
+        const res = await fetch('/api/campus_groups');
+        _campusGroupsCache = await res.json();
+    } catch(e) {
+        _campusGroupsCache = {boston_to_deployments: {}, deployment_to_boston: {}};
+    }
+    return _campusGroupsCache;
+}
+
+// Get program name by ID from allPrograms cache
+function getProgramName(id) {
+    if (!allPrograms) return `Program #${id}`;
+    const p = allPrograms.find(p => p.id === id);
+    return p ? p.name : `Program #${id}`;
 }
 
 async function loadCompareDetail(programId) {
@@ -787,60 +808,138 @@ async function loadCompareDetail(programId) {
     contentEl.innerHTML = '<div class="workflow-loading">Loading comparison...</div>';
 
     try {
-        const [currRes, refRes] = await Promise.all([
+        const [currRes, groups] = await Promise.all([
             fetch(`/api/program/${programId}/curriculum`),
-            fetch(`/api/program/${programId}/reference`)
+            getCampusGroups()
         ]);
-
         const currData = currRes.ok ? await currRes.json() : {};
-        const refData = refRes.ok ? await refRes.json() : {};
-
         const currHtml = currData.curriculum_html || '';
-        const refHtml = refData.curriculum_html || '';
 
-        if (!currHtml && !refHtml) {
-            contentEl.innerHTML = '<div class="workflow-meta">No curriculum data available for comparison.</div>';
-            return;
+        const bostonId = groups.deployment_to_boston[String(programId)];
+        const deploymentIds = groups.boston_to_deployments[String(programId)];
+
+        if (bostonId) {
+            // This is a non-Boston deployment — compare against Boston reference
+            const refRes = await fetch(`/api/program/${programId}/reference`);
+            const refData = refRes.ok ? await refRes.json() : {};
+            const refHtml = refData.curriculum_html || '';
+
+            if (!currHtml || !refHtml) {
+                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or reference data not available for comparison.</div>';
+                updateCompareButton(programId, null);
+                return;
+            }
+
+            const {identical, diff} = compareCurricula(refHtml, currHtml);
+            updateCompareButton(programId, identical);
+
+            const header = refData.version_date
+                ? `<div class="reference-header">Comparing against: ${escapeHtml(refData.version_date)}</div>`
+                : '';
+
+            if (identical) {
+                contentEl.innerHTML = `${header}<div class="compare-identical">Curriculum is identical to the Boston reference.</div>`;
+            } else {
+                const table = renderSideBySide(diff, 'Boston Reference', getProgramName(programId));
+                contentEl.innerHTML = `${header}
+                    <div class="compare-legend">
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in reference</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in this version</span>
+                    </div>${table}`;
+            }
+
+        } else if (deploymentIds && deploymentIds.length > 0) {
+            // This is a Boston program — compare against all deployments
+            const deploymentResults = [];
+            let allIdentical = true;
+
+            for (const depId of deploymentIds) {
+                const depRes = await fetch(`/api/program/${depId}/curriculum`);
+                const depData = depRes.ok ? await depRes.json() : {};
+                const depHtml = depData.curriculum_html || '';
+                const depName = getProgramName(depId);
+
+                if (!currHtml || !depHtml) {
+                    deploymentResults.push({name: depName, id: depId, noData: true});
+                    continue;
+                }
+
+                const {identical, diff} = compareCurricula(currHtml, depHtml);
+                if (!identical) allIdentical = false;
+                deploymentResults.push({name: depName, id: depId, identical, diff});
+            }
+
+            updateCompareButton(programId, allIdentical);
+
+            let html = `<div class="reference-header">Comparing Boston curriculum against ${deploymentIds.length} campus deployment${deploymentIds.length > 1 ? 's' : ''}</div>`;
+
+            if (allIdentical) {
+                html += '<div class="compare-identical">All campus deployments are identical to this curriculum.</div>';
+            }
+
+            for (const dep of deploymentResults) {
+                html += `<div class="compare-deployment-section">`;
+                html += `<h3 class="compare-deployment-name">${escapeHtml(dep.name)}</h3>`;
+                if (dep.noData) {
+                    html += '<div class="workflow-meta">Curriculum data not available.</div>';
+                } else if (dep.identical) {
+                    html += '<div class="compare-identical-small">Identical</div>';
+                } else {
+                    html += `<div class="compare-legend">
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in Boston</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ${escapeHtml(dep.name)}</span>
+                    </div>`;
+                    html += renderSideBySide(dep.diff, 'Boston', dep.name);
+                }
+                html += '</div>';
+            }
+
+            contentEl.innerHTML = html;
+
+        } else {
+            // No campus relationships — this is a standalone program
+            // Compare against its own reference if available
+            const refRes = await fetch(`/api/program/${programId}/reference`);
+            const refData = refRes.ok ? await refRes.json() : {};
+            const refHtml = refData.curriculum_html || '';
+
+            if (!currHtml || !refHtml) {
+                contentEl.innerHTML = '<div class="workflow-meta">No comparison available. This program has no campus deployments and no reference curriculum.</div>';
+                updateCompareButton(programId, null);
+                return;
+            }
+
+            const {identical, diff} = compareCurricula(refHtml, currHtml);
+            updateCompareButton(programId, identical);
+
+            if (identical) {
+                contentEl.innerHTML = '<div class="compare-identical">Current curriculum is identical to the last approved version.</div>';
+            } else {
+                const table = renderSideBySide(diff, 'Last Approved', 'Current Proposal');
+                contentEl.innerHTML = `<div class="compare-legend">
+                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in approved</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in proposal</span>
+                </div>${table}`;
+            }
         }
-        if (!refHtml) {
-            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available for comparison. This may be a new program.</div>';
-            return;
-        }
-        if (!currHtml) {
-            contentEl.innerHTML = '<div class="workflow-meta">No current curriculum available for comparison.</div>';
-            return;
-        }
-
-        const refLines = extractCurriculumLines(refHtml);
-        const currLines = extractCurriculumLines(currHtml);
-        const diff = diffLines(refLines, currLines);
-
-        const hasChanges = diff.some(d => d.type !== 'same');
-
-        let header = refData.version_date
-            ? `<div class="reference-header">Comparing current proposal against: ${escapeHtml(refData.version_date)}</div>`
-            : '';
-
-        if (!hasChanges) {
-            contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the reference version.</div>`;
-            return;
-        }
-
-        const diffHtml = diff.map(d => {
-            const escaped = escapeHtml(d.text).replace(/\t/g, '<span class="compare-tab"></span>');
-            if (d.type === 'removed') return `<div class="diff-line diff-removed">${escaped}</div>`;
-            if (d.type === 'added') return `<div class="diff-line diff-added">${escaped}</div>`;
-            return `<div class="diff-line diff-same">${escaped}</div>`;
-        }).join('');
-
-        contentEl.innerHTML = `${header}
-            <div class="compare-legend">
-                <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Removed from reference</span>
-                <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Added in current</span>
-            </div>
-            <div class="compare-content">${diffHtml}</div>`;
     } catch (e) {
         contentEl.innerHTML = '<div class="workflow-meta">Failed to load comparison.</div>';
+        updateCompareButton(programId, null);
+    }
+}
+
+// Update the Compare button color based on comparison result
+function updateCompareButton(programId, identical) {
+    const detailRow = document.getElementById(`detail-${programId}`);
+    if (!detailRow) return;
+    const tabs = detailRow.querySelectorAll('.detail-tab');
+    for (const tab of tabs) {
+        if (tab.textContent.trim() === 'Compare') {
+            tab.classList.remove('compare-identical-btn', 'compare-different-btn');
+            if (identical === true) tab.classList.add('compare-identical-btn');
+            else if (identical === false) tab.classList.add('compare-different-btn');
+            break;
+        }
     }
 }
 
