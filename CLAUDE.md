@@ -207,12 +207,15 @@ Side-by-side comparison of curriculum content. Uses LCS-based diff algorithm.
 - **Non-Boston programs**: Compare current curriculum against the Boston reference version
 - **Standalone programs** (no campus group): Compare against last approved version
 
+**Layout**: The current program/proposal is always on the **left**, the reference (Boston reference, Boston itself, or last approved version) is always on the **right**.
+
 **Key functions in `static/app.js`:**
-- `extractCourseLines(html)` — parses cleaned HTML into structured course objects `{key, code, title, hours, isHeader: false}`. Area headers are excluded — only lines with course codes are extracted. The `key` uses only code+title (hours excluded) to prevent false diffs when hours differ.
+- `extractCourseLines(html)` — parses cleaned HTML into structured course objects `{key, code, title, hours, isHeader, section}`. Walks `h2`, `h3`, `h4`, and `tr` elements in document order to capture both HTML headings (used by many CIM programs) and `areaheader` table rows. The `key` uses only code+title (hours excluded) to prevent false diffs when hours differ.
+- `standardizeHeader(text)` — normalizes common CIM heading variations to consistent labels: "Core Requirements"/"Required Courses"/"Program Requirement" → "Required Courses"; "Electives"/"General Electives" → "Elective Courses"; "Restricted Electives" → "Restricted Electives"; option headers and other specific headings preserved as-is.
 - `diffLines(oldLines, newLines)` — LCS diff using `normForCompare()` (case-insensitive) on the `.key` property.
 - `renderCourseCell(item, cls)` — renders a course into 3 table cells (code, title, hours) or a header spanning all 3.
 - `renderSideBySide(diff, leftLabel, rightLabel)` — 7-column table layout (3 left + divider + 3 right).
-- `compareCurricula(refHtml, currHtml)` — orchestrates extraction, diff, and identical check.
+- `compareCurricula(currHtml, refHtml)` — orchestrates extraction, diff, and identical check. First arg is current (left), second is reference (right).
 - `updateCompareButton(programId, identical)` — colors the Compare tab button green (identical) or red (different).
 - `cleanCurriculumHtml(html)` — sanitizes CIM HTML: removes hidden/noscript/caption elements in JS (CSS display:none doesn't work in detached DOM), replaces `<br>` with spaces, strips all inline styles (removes CIM's red borders on `.structuredcontenterror`), replaces `<a>` tags with space-preserving text, preserves `.blockindent` via CSS `!important`.
 - `normText(s)` — normalizes whitespace, fixes digit+"and"/"or" concatenation.

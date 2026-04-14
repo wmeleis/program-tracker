@@ -375,17 +375,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateCompareButton(programId, null);
                 return;
             }
-            const {identical, diff} = compareCurricula(refHtml, currHtml);
+            const {identical, diff} = compareCurricula(currHtml, refHtml);
             updateCompareButton(programId, identical);
             const header = ref.version_date
                 ? '<div class="reference-header">Comparing against: ' + escapeHtml(ref.version_date) + '</div>' : '';
             if (identical) {
                 contentEl.innerHTML = header + '<div class="compare-identical">Curriculum is identical to the Boston reference.</div>';
             } else {
-                const table = renderSideBySide(diff, 'Boston Reference', getProgramName(programId));
+                const table = renderSideBySide(diff, getProgramName(programId), 'Boston Reference');
                 contentEl.innerHTML = header +
-                    '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in reference</span>' +
-                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in this version</span>' +
+                    '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in this version</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>' +
                     '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
             }
         } else if (deploymentIds && deploymentIds.length > 0) {
@@ -396,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const depHtml = (_curriculumCache || {})[String(depId)] || '';
                 const depName = getProgramName(depId);
                 if (!currHtml || !depHtml) { results.push({name: depName, noData: true}); continue; }
-                const {identical, diff} = compareCurricula(currHtml, depHtml);
+                const {identical, diff} = compareCurricula(depHtml, currHtml);
                 if (!identical) allIdentical = false;
                 results.push({name: depName, identical, diff});
             }
@@ -408,10 +408,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (dep.noData) html += '<div class="workflow-meta">Curriculum data not available.</div>';
                 else if (dep.identical) html += '<div class="compare-identical-small">Identical</div>';
                 else {
-                    html += '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in Boston</span>' +
-                        '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ' + escapeHtml(dep.name) + '</span>' +
+                    html += '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in ' + escapeHtml(dep.name) + '</span>' +
+                        '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in Boston</span>' +
                         '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>';
-                    html += renderSideBySide(dep.diff, 'Boston', dep.name);
+                    html += renderSideBySide(dep.diff, dep.name, 'Boston');
                 }
                 html += '</div>';
             }
@@ -425,14 +425,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateCompareButton(programId, null);
                 return;
             }
-            const {identical, diff} = compareCurricula(refHtml, currHtml);
+            const {identical, diff} = compareCurricula(currHtml, refHtml);
             updateCompareButton(programId, identical);
             if (identical) {
                 contentEl.innerHTML = '<div class="compare-identical">Current curriculum is identical to the last approved version.</div>';
             } else {
-                const table = renderSideBySide(diff, 'Last Approved', 'Current Proposal');
-                contentEl.innerHTML = '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in approved</span>' +
-                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in proposal</span>' +
+                const table = renderSideBySide(diff, 'Current Proposal', 'Last Approved');
+                contentEl.innerHTML = '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in approved</span>' +
                     '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
             }
         }
