@@ -714,10 +714,10 @@ function extractCourseLines(html) {
 
         const hasCode = parts.some(p => courseCodePattern.test(p));
         const isAreaHeader = tr.classList.contains('areaheader') || tr.querySelector('.areaheader') !== null;
-        const isComment = tr.querySelector('.courselistcomment') !== null;
         const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/.test(p));
 
-        if (hasCode || isAreaHeader || isComment || hasOr) {
+        // Only include rows with course codes, area headers, or "or" alternatives
+        if (hasCode || isAreaHeader || hasOr) {
             lines.push(parts.join('\t'));
         }
     });
@@ -818,7 +818,13 @@ async function loadCompareDetail(programId) {
         const bostonId = groups.deployment_to_boston[String(programId)];
         const deploymentIds = groups.boston_to_deployments[String(programId)];
 
-        if (bostonId) {
+        // Also check if this is a non-Boston program by name even if no counterpart in pipeline
+        const progName = getProgramName(programId);
+        const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
+        const campus = campusMatch ? campusMatch[1] : null;
+        const isNonBoston = campus && campus.toLowerCase() !== 'boston';
+
+        if (bostonId || isNonBoston) {
             // This is a non-Boston deployment — compare against Boston reference
             const refRes = await fetch(`/api/program/${programId}/reference`);
             const refData = refRes.ok ? await refRes.json() : {};
