@@ -1300,8 +1300,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const currHtml = (_curriculumCache || {})[String(programId)] || '';
         const bostonId = groups.deployment_to_boston[String(programId)];
         const deploymentIds = groups.boston_to_deployments[String(programId)];
+        const progName = getProgramName(programId);
+        const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
+        const campus = campusMatch ? campusMatch[1] : null;
+        const isNonBoston = campus && campus.toLowerCase() !== 'boston';
 
-        if (bostonId) {
+        if (bostonId || isNonBoston) {
             // Non-Boston deployment
             const ref = (_referenceCache || {})[String(programId)];
             const refHtml = ref ? ref.html : '';
