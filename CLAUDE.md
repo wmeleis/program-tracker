@@ -118,13 +118,18 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 - **Smart views:** Recent Changes = step_entered_date within 14 days; Potentially Stuck = 30+ days at step; New Submissions = date_submitted within 30 days
 
 ### Static Site (GitHub Pages)
-`export_static.py` generates a self-contained site in `docs/`:
-- All data in `data.json` (programs, workflows, pipeline, colleges, approvers, last_scan)
-- `app.js` is the original plus an override layer that patches `loadDashboard`, `loadWorkflowDetail`, `applyFilters`, and `triggerScan` to read from `data.json` instead of API calls
+`export_static.py` generates a password-protected self-contained site in `docs/`:
+- All assets (CSS, JS) and data (programs, workflows, curricula, references, campus groups) are **inlined into a single HTML file**
+- The HTML is then **encrypted with AES-256 via StatiCrypt** — visitors see a password prompt; the page decrypts client-side
+- Password: stored in `STATICRYPT_PASSWORD` in `export_static.py`
+- Remember-me: 30-day localStorage cookie so users don't re-enter password on each visit
+- No separate JSON/JS/CSS files in `docs/` — everything is in the encrypted `index.html` (~97MB)
+- Static JS overrides read from `window.__EMBEDDED_DATA__`, `__EMBEDDED_CURRICULUM__`, `__EMBEDDED_REFERENCE__`, `__EMBEDDED_CAMPUS_GROUPS__` instead of fetch() calls
 - "Update Now" button on static site reaches `localhost:5001` to trigger a local scan (shows "Cannot reach local server" if Flask isn't running)
-- Approver filtering works via static data (searches workflow steps in `data.json` for matching approver_emails)
+- Approver filtering works via embedded data (searches workflow steps for matching approver_emails)
 - Auto-refresh interval is disabled on static site (data doesn't change)
 - Timestamps displayed in Eastern Time (America/New_York) with "ET" suffix
+- **Requires Node.js/npx** for StatiCrypt encryption during export
 
 ## Known Issues / Gotchas
 
