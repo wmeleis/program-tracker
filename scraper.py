@@ -71,6 +71,54 @@ COLLEGE_ROLES = [
 # All roles to scan
 ALL_ROLES = TRACKED_ROLES + COLLEGE_ROLES
 
+# Course pipeline: centralized workflow roles for courses (not college/department level)
+# Everything not in this list is considered a college-level course role
+COURSE_TRACKED_ROLES = [
+    "Checkpoint",
+    "Provost Initial Review",
+    "Course Review 2",
+    "Course Review 3",
+    "Course Review Group",
+    "Course GRA Regulatory Validation",
+    "PS Course Review",
+    "Graduate Curriculum Committee Chair",
+    "Graduate Council Subcommittee One",
+    "Graduate Council Subcommittee Two",
+    "Data Entry 1",
+    "Data Entry 3",
+    "Data Entry 3 - Awaiting Course Approval",
+    "Data Entry 5 - Awaiting Program Approval",
+    "Data Entry 8 - Hold PA courses",
+    "Data Entry 9",
+    "REGISTRAR Continuing Education Level Discussion",
+    "Banner - Prereq 2 Letter Course Number",
+    "Banner",
+    "Editor",
+]
+
+COURSE_ROLE_SHORT_NAMES = {
+    "Checkpoint": "Checkpoint",
+    "Provost Initial Review": "Provost Init",
+    "Course Review 2": "Review 2",
+    "Course Review 3": "Review 3",
+    "Course Review Group": "Review Grp",
+    "Course GRA Regulatory Validation": "GRA Reg",
+    "PS Course Review": "PS Review",
+    "Graduate Curriculum Committee Chair": "Grad Curric",
+    "Graduate Council Subcommittee One": "Grad Sub 1",
+    "Graduate Council Subcommittee Two": "Grad Sub 2",
+    "Data Entry 1": "DE 1",
+    "Data Entry 3": "DE 3",
+    "Data Entry 3 - Awaiting Course Approval": "DE 3 (Await)",
+    "Data Entry 5 - Awaiting Program Approval": "DE 5 (Await)",
+    "Data Entry 8 - Hold PA courses": "DE 8 (Hold)",
+    "Data Entry 9": "DE 9",
+    "REGISTRAR Continuing Education Level Discussion": "Reg CE",
+    "Banner - Prereq 2 Letter Course Number": "Banner Preq",
+    "Banner": "Banner",
+    "Editor": "Editor",
+}
+
 # Short display names for the pipeline summary
 ROLE_SHORT_NAMES = {
     "Program PR Graduate Dean's Office": "PR Grad Dean",
