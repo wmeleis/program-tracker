@@ -71,6 +71,21 @@ COLLEGE_ROLES = [
 # All roles to scan
 ALL_ROLES = TRACKED_ROLES + COLLEGE_ROLES
 
+# Map CourseLeaf 2-letter college codes to full names (used by programs and courses).
+COLLEGE_NAMES = {
+    'AM': "Coll of Arts, Media & Design",
+    'BA': "D'Amore-McKim School Business",
+    'BV': "Bouve College of Hlth Sciences",
+    'CS': "Khoury Coll of Comp Sciences",
+    'EN': "College of Engineering",
+    'LW': "School of Law",
+    'MI': "Mills College at NU",
+    'PR': "Office of the Provost",
+    'PS': "Coll of Professional Studies",
+    'SC': "College of Science",
+    'SH': "Coll of Soc Sci & Humanities",
+}
+
 # Course pipeline: centralized workflow roles for courses (not college/department level)
 # Everything not in this list is considered a college-level course role
 COURSE_TRACKED_ROLES = [
@@ -565,19 +580,6 @@ def run_full_scan():
             status = 'Edited'
 
         college_code = meta.get('college', '')
-        COLLEGE_NAMES = {
-            'AM': "Coll of Arts, Media & Design",
-            'BA': "D'Amore-McKim School Business",
-            'BV': "Bouve College of Hlth Sciences",
-            'CS': "Khoury Coll of Comp Sciences",
-            'EN': "College of Engineering",
-            'LW': "School of Law",
-            'MI': "Mills College at NU",
-            'PR': "Office of the Provost",
-            'PS': "Coll of Professional Studies",
-            'SC': "College of Science",
-            'SH': "Coll of Soc Sci & Humanities",
-        }
         college = COLLEGE_NAMES.get(college_code, college_code)
         department = meta.get('department', '')
         degree = meta.get('degree', '')
@@ -1164,16 +1166,131 @@ def scrape_courses():
     return list(all_courses.values())
 
 
+def batch_fetch_course_details(course_ids, batch_size=25):
+    """Fetch workflow + metadata for multiple courses via XHR.
+
+    Parallel to batch_fetch_program_details but targets /courseadmin/{id}/.
+    Returns { course_id (str): { steps: [...], meta: {...} } }.
+    """
+    all_results = {}
+    batches = [course_ids[i:i+batch_size] for i in range(0, len(course_ids), batch_size)]
+
+    for batch_num, batch in enumerate(batches):
+        ids_json = json.dumps(batch)
+        js_code = f'''
+(function() {{
+    var ids = {ids_json};
+    var results = {{}};
+    var parser = new DOMParser();
+
+    for (var i = 0; i < ids.length; i++) {{
+        var id = ids[i];
+        var result = {{steps: [], meta: {{}}}};
+
+        try {{
+            var xhr1 = new XMLHttpRequest();
+            xhr1.open("GET", "/courseadmin/" + id + "/", false);
+            xhr1.send();
+
+            if (xhr1.status === 200) {{
+                var doc = parser.parseFromString(xhr1.responseText, "text/html");
+                var wfDiv = doc.getElementById("workflow");
+                if (wfDiv) {{
+                    var items = wfDiv.querySelectorAll("li");
+                    items.forEach(function(li, idx) {{
+                        var link = li.querySelector("a");
+                        result.steps.push({{
+                            order: idx,
+                            name: (li.textContent || "").trim(),
+                            status: li.className.trim() || "pending",
+                            emails: link ? link.getAttribute("href").replace("mailto:", "") : ""
+                        }});
+                    }});
+                }}
+                var text = doc.body ? doc.body.textContent : "";
+                var dsMatch = text.match(/Date Submitted:\\s*([^\\n]+)/);
+                if (dsMatch) result.meta.date_submitted = dsMatch[1].trim();
+            }}
+        }} catch(e) {{
+            result.html_error = e.message;
+        }}
+
+        try {{
+            var xhr2 = new XMLHttpRequest();
+            xhr2.open("GET", "/courseadmin/" + id + "/index.xml", false);
+            xhr2.send();
+
+            result.meta.xml_status = xhr2.status;
+            if (xhr2.status === 200) {{
+                var xmlDoc = parser.parseFromString(xhr2.responseText, "text/xml");
+                var getXml = function(tag) {{
+                    var el = xmlDoc.querySelector(tag);
+                    return el ? el.textContent.trim() : "";
+                }};
+                result.meta.college = getXml("college");
+                result.meta.department = getXml("department");
+                result.meta.subject = getXml("subject") || getXml("subjectcode") || getXml("prefix");
+                result.meta.course_number = getXml("number") || getXml("courseNumber") || getXml("coursenumber");
+                result.meta.course_title = getXml("title") || getXml("courseTitle");
+                // Dump tag names from the first course in the first batch for debugging
+                if (batch_num === 0 && i === 0) {{
+                    var tags = [];
+                    var els = xmlDoc.querySelectorAll("*");
+                    for (var t = 0; t < Math.min(els.length, 80); t++) {{
+                        var tn = els[t].tagName;
+                        if (tags.indexOf(tn) === -1) tags.push(tn);
+                    }}
+                    result.meta._xml_tags = tags.join(",");
+                }}
+            }}
+        }} catch(e) {{
+            result.xml_error = e.message;
+        }}
+
+        results[id] = result;
+    }}
+
+    return JSON.stringify(results);
+}})()
+'''.replace("batch_num === 0", f"{batch_num} === 0")
+        # Reuse the programadmin tab — it's on the same CourseLeaf origin as
+        # /courseadmin/, so same-origin XHRs work and we don't require a
+        # separate Course Inventory Management tab to be open.
+        result = run_js_in_tab("programadmin", js_code, match_by='url', timeout=120)
+        if not result or result == 'missing value':
+            print(f"    Batch {batch_num+1}/{len(batches)}: FAILED (no response)", flush=True)
+            continue
+        try:
+            batch_results = json.loads(result)
+            for cid_str, data in batch_results.items():
+                all_results[cid_str] = data
+            print(f"    Batch {batch_num+1}/{len(batches)}: fetched {len(batch_results)} courses", flush=True)
+        except json.JSONDecodeError as e:
+            print(f"    Batch {batch_num+1}/{len(batches)}: FAILED (JSON error: {e})", flush=True)
+
+    return all_results
+
+
 def process_course_scans(courses):
-    """Store scraped courses in the database."""
+    """Store scraped courses in the database, including workflow + college."""
     print("\nProcessing course scans...", flush=True)
     now = datetime.now().isoformat()
     existing = {c['id']: c for c in get_all_courses()}
     changes = 0
 
+    course_ids = [c['id'] for c in courses]
+    details = batch_fetch_course_details(course_ids) if course_ids else {}
+
+    # Surface XML-tag debug info once so we can confirm field names.
+    for cid, d in details.items():
+        tags = (d.get('meta') or {}).get('_xml_tags')
+        if tags:
+            print(f"  [debug] sample course XML tags: {tags}", flush=True)
+            break
+
+    with_workflow = 0
     for c in courses:
         cid = c['id']
-        # Extract course code from name if possible (pattern: "CODE NNNN: Title")
         name = c['name']
         course_code = cid
         title = name
@@ -1182,29 +1299,58 @@ def process_course_scans(courses):
             course_code = m.group(1)
             title = m.group(2)
 
+        detail = details.get(cid, {})
+        steps = detail.get('steps', [])
+        meta = detail.get('meta', {})
+
+        total_steps = len(steps)
+        completed_steps = sum(1 for s in steps if s.get('status') == 'approved')
+        current_step_from_wf = ''
+        current_emails = ''
+        for s in steps:
+            if s.get('status') == 'current':
+                current_step_from_wf = s.get('name', '')
+                current_emails = s.get('emails', '')
+                break
+
+        college_code = meta.get('college', '')
+        college_name = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
+
         course_data = {
             'id': cid,
             'code': course_code,
-            'title': title,
+            'title': meta.get('course_title') or title,
             'status': 'Active',
-            'current_step': c.get('current_step', ''),
-            'total_steps': 0,
-            'completed_steps': 0,
-            'current_approver_emails': '',
-            'college': '',
-            'date_submitted': '',
+            'current_step': current_step_from_wf or c.get('current_step', ''),
+            'total_steps': total_steps,
+            'completed_steps': completed_steps,
+            'current_approver_emails': current_emails,
+            'college': college_name,
+            'date_submitted': meta.get('date_submitted', ''),
         }
 
         if upsert_course(course_data):
             changes += 1
             old_step = existing.get(cid, {}).get('current_step', '')
-            new_step = c.get('current_step', '')
+            new_step = course_data['current_step']
             if old_step and old_step != new_step:
                 record_course_change(now, cid, old_step, new_step, 'step_transition')
 
-    record_course_scan(now, len(courses), len(courses), changes)
-    print(f"  Courses processed: {len(courses)}, changes: {changes}", flush=True)
-    return len(courses), len(courses), changes
+        if steps:
+            upsert_course_workflow_steps(cid, [
+                {
+                    'order': s.get('order', i),
+                    'name': s.get('name', ''),
+                    'status': s.get('status', 'pending'),
+                    'emails': s.get('emails', ''),
+                }
+                for i, s in enumerate(steps)
+            ])
+            with_workflow += 1
+
+    record_course_scan(now, len(courses), with_workflow, changes)
+    print(f"  Courses processed: {len(courses)}, with workflow: {with_workflow}, changes: {changes}", flush=True)
+    return len(courses), with_workflow, changes
 
 
 def run_course_scan():
@@ -1217,7 +1363,7 @@ def run_course_scan():
         return 0, 0, 0
     scanned, with_workflow, changes = process_course_scans(courses)
     print(f"\n=== COURSE SCAN COMPLETE ===")
-    print(f"Courses: {scanned} | Changes: {changes}")
+    print(f"Courses: {scanned} | With workflow: {with_workflow} | Changes: {changes}")
     return scanned, with_workflow, changes
 
 
