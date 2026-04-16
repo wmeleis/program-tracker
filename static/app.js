@@ -710,7 +710,9 @@ function renderTable(items) {
     `;
 
     for (const item of items) {
-        const id = isCourseView ? item.id : item.id;
+        // Normalize to string so the set lookup matches the string passed
+        // via the onclick handler (toggleRow('${id}') always stringifies).
+        const id = String(item.id);
         const expanded = expandedRows.has(id);
         const itemTitle = isCourseView ? item.code : item.name;
         const itemDisplay = isCourseView ? `${item.code}: ${item.title}` : item.name;
