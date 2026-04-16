@@ -9,7 +9,9 @@ import tempfile
 from datetime import datetime
 from database import (
     init_db, upsert_program, upsert_workflow_steps,
-    record_change, record_scan, get_all_programs
+    record_change, record_scan, get_all_programs,
+    upsert_course, upsert_course_workflow_steps,
+    record_course_change, record_course_scan, get_all_courses
 )
 
 # The 14 tracked workflow roles (from user's bookmarks)
@@ -1001,6 +1003,174 @@ def fetch_reference_curricula(program_ids, batch_size=10):
 
     print(f"Reference curricula: {fetched} fetched, {skipped} skipped")
     return fetched
+
+
+def scrape_courses_from_role(role_name):
+    """Select a role on Approve Pages and extract pending courses.
+
+    Returns list of dicts with course id, name, user (approver).
+    """
+    # Select the role and trigger the pending-list display
+    js_select = f'''
+(function() {{
+    var select = document.querySelector("select");
+    if (!select) return JSON.stringify({{error: "no select"}});
+    select.value = "{role_name}";
+    if (typeof showPendingList === "function") {{
+        showPendingList(select.value);
+    }} else {{
+        select.dispatchEvent(new Event("change", {{bubbles: true}}));
+    }}
+    return "selected";
+}})()
+'''
+    result = run_js_in_tab("courseleaf/approve", js_select, match_by='url')
+    if not result or result == 'missing value':
+        return []
+
+    time.sleep(2)
+
+    # Extract courses using the /courseadmin/NNNNN: pattern
+    js_extract = '''
+(function() {
+    var text = document.body.innerText;
+    var lines = text.split("\\n");
+    var courses = [];
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        var match = line.match(/^\\/courseadmin\\/(\\d+):\\s*(.+)/);
+        if (match) {
+            var id = match[1];
+            var rest = match[2];
+            var parts = rest.split("\\t");
+            var nameRaw = parts[0].trim();
+            var user = parts.length > 1 ? parts[1].trim() : "";
+            courses.push({ id: id, name: nameRaw, user: user });
+        }
+    }
+    return JSON.stringify(courses);
+})()
+'''
+    result = run_js_in_tab("courseleaf/approve", js_extract, match_by='url')
+    if not result or result == 'missing value':
+        return []
+
+    try:
+        return json.loads(result)
+    except json.JSONDecodeError:
+        return []
+
+
+def get_all_approve_roles():
+    """Fetch every role option from the Approve Pages dropdown."""
+    js_code = '''
+(function() {
+    var select = document.querySelector("select[name='role']") ||
+                 document.querySelector("select");
+    if (!select) return JSON.stringify([]);
+    var options = select.querySelectorAll("option");
+    var roles = [];
+    options.forEach(function(opt) {
+        var t = (opt.textContent || "").trim();
+        if (t && t !== "Select a role") roles.push(t);
+    });
+    return JSON.stringify(roles);
+})();
+'''
+    result = run_js_in_tab("courseleaf/approve", js_code, match_by='url', timeout=30)
+    if not result or result == 'missing value':
+        return []
+    try:
+        return json.loads(result)
+    except json.JSONDecodeError:
+        return []
+
+
+def scrape_courses():
+    """Scrape all courses from Approve Pages across every dropdown role."""
+    print("\n=== COURSE SCRAPING ===", flush=True)
+
+    roles = get_all_approve_roles()
+    print(f"  Scanning {len(roles)} roles for courses...", flush=True)
+
+    all_courses = {}  # id -> {id, name, current_step, user}
+
+    for role in roles:
+        courses = scrape_courses_from_role(role)
+        if courses:
+            print(f"    {role}: {len(courses)} courses", flush=True)
+            for c in courses:
+                cid = c['id']
+                if cid not in all_courses:
+                    all_courses[cid] = {
+                        'id': cid,
+                        'name': c['name'],
+                        'user': c.get('user', ''),
+                        'current_step': role,
+                    }
+                else:
+                    # Update to latest role where the course was found
+                    all_courses[cid]['current_step'] = role
+
+    print(f"  Total unique courses found: {len(all_courses)}", flush=True)
+    return list(all_courses.values())
+
+
+def process_course_scans(courses):
+    """Store scraped courses in the database."""
+    print("\nProcessing course scans...", flush=True)
+    now = datetime.now().isoformat()
+    existing = {c['id']: c for c in get_all_courses()}
+    changes = 0
+
+    for c in courses:
+        cid = c['id']
+        # Extract course code from name if possible (pattern: "CODE NNNN: Title")
+        name = c['name']
+        course_code = cid
+        title = name
+        m = re.match(r'^([A-Z]+\s+\d+):\s*(.+)$', name)
+        if m:
+            course_code = m.group(1)
+            title = m.group(2)
+
+        course_data = {
+            'id': cid,
+            'code': course_code,
+            'title': title,
+            'status': 'Active',
+            'current_step': c.get('current_step', ''),
+            'total_steps': 0,
+            'completed_steps': 0,
+            'current_approver_emails': '',
+            'college': '',
+            'date_submitted': '',
+        }
+
+        if upsert_course(course_data):
+            changes += 1
+            old_step = existing.get(cid, {}).get('current_step', '')
+            new_step = c.get('current_step', '')
+            if old_step and old_step != new_step:
+                record_course_change(now, cid, old_step, new_step, 'step_transition')
+
+    record_course_scan(now, len(courses), len(courses), changes)
+    print(f"  Courses processed: {len(courses)}, changes: {changes}", flush=True)
+    return len(courses), len(courses), changes
+
+
+def run_course_scan():
+    """Run a full course scan across all roles."""
+    print("\n=== STARTING COURSE SCAN ===")
+    init_db()
+    courses = scrape_courses()
+    if not courses:
+        print("No courses found")
+        return 0, 0, 0
+    scanned, with_workflow, changes = process_course_scans(courses)
+    print(f"\n=== COURSE SCAN COMPLETE ===")
+    print(f"Courses: {scanned} | Changes: {changes}")
+    return scanned, with_workflow, changes
 
 
 if __name__ == '__main__':
