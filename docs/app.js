@@ -1657,11 +1657,43 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     };
 
-    // Patch workflow detail loading
-    window._origLoadWorkflowDetail = loadWorkflowDetail;
-    window.loadWorkflowDetail = async function(programId) {
+    // Patch courses dashboard + loaders to use embedded data (no server).
+    window.loadCoursesDashboard = async function() {
         const D = await _getData();
-        const steps = D.workflows[String(programId)] || [];
+        allCourses = D.courses || [];
+        cachedCoursePipeline = collapseCoursePipeline(D.course_pipeline || []);
+        renderPipeline(cachedCoursePipeline, allCourses);
+        populateCourseStepFilter();
+        const cSel = document.getElementById('filter-college');
+        cSel.innerHTML = '<option value="">All Colleges</option>' +
+            (D.course_colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        updateCourseSmartViewCounts();
+        applyFilters();
+    };
+    window.loadCoursePipeline = async function() {
+        const D = await _getData();
+        cachedCoursePipeline = collapseCoursePipeline(D.course_pipeline || []);
+        renderPipeline(cachedCoursePipeline);
+    };
+    window.loadCourses = async function() {
+        const D = await _getData();
+        allCourses = D.courses || [];
+        populateCourseStepFilter();
+        applyFilters();
+    };
+    window.loadCourseColleges = async function() {
+        const D = await _getData();
+        const select = document.getElementById('filter-college');
+        const options = (D.course_colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        select.innerHTML = '<option value="">All Colleges</option>' + options;
+    };
+
+    // Patch workflow detail loading (handles both programs and courses).
+    window._origLoadWorkflowDetail = loadWorkflowDetail;
+    window.loadWorkflowDetail = async function(programId, isCourseView) {
+        const D = await _getData();
+        const source = isCourseView ? (D.course_workflows || {}) : (D.workflows || {});
+        const steps = source[String(programId)] || [];
         const contentEl = document.getElementById(`detail-content-${programId}`);
         if (!contentEl) return;
 
