@@ -9,12 +9,21 @@
 <body>
     <header>
         <div class="header-left">
-            <h1>Program Approval Tracker</h1>
+            <h1>Approval Tracker</h1>
             <span class="subtitle">CourseLeaf CIM Dashboard</span>
+        </div>
+        <div class="header-middle">
+            <div class="view-toggle">
+                <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
+                <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">Courses</button>
+            </div>
         </div>
         <div class="header-right">
             <span id="last-updated" class="last-updated"></span>
             <span id="scan-status" class="scan-status"></span>
+            <div id="progress-container" class="progress-container" style="display: none;">
+                <span id="progress-phase" class="progress-phase"></span>
+            </div>
             <button id="scan-btn" onclick="triggerScan()">Update Now</button>
         </div>
     </header>
