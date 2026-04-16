@@ -94,6 +94,58 @@ def init_db():
                 fetched_at TIMESTAMP,
                 FOREIGN KEY (program_id) REFERENCES programs(id)
             );
+
+            CREATE TABLE IF NOT EXISTS courses (
+                id TEXT PRIMARY KEY,
+                code TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT,
+                current_step TEXT,
+                total_steps INTEGER DEFAULT 0,
+                completed_steps INTEGER DEFAULT 0,
+                current_approver_emails TEXT,
+                college TEXT,
+                date_submitted TEXT,
+                step_entered_date TEXT,
+                first_seen TIMESTAMP,
+                last_updated TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS course_workflow_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                course_id TEXT NOT NULL,
+                step_order INTEGER NOT NULL,
+                step_name TEXT NOT NULL,
+                step_status TEXT DEFAULT 'pending',
+                approver_emails TEXT,
+                FOREIGN KEY (course_id) REFERENCES courses(id),
+                UNIQUE(course_id, step_order)
+            );
+
+            CREATE TABLE IF NOT EXISTS course_scan_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_time TIMESTAMP NOT NULL,
+                course_id TEXT NOT NULL,
+                previous_step TEXT,
+                new_step TEXT,
+                change_type TEXT,
+                FOREIGN KEY (course_id) REFERENCES courses(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS course_scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_time TIMESTAMP NOT NULL,
+                courses_scanned INTEGER DEFAULT 0,
+                courses_with_workflow INTEGER DEFAULT 0,
+                changes_detected INTEGER DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_courses_college ON courses(college);
+            CREATE INDEX IF NOT EXISTS idx_courses_current_step ON courses(current_step);
+            CREATE INDEX IF NOT EXISTS idx_courses_status ON courses(status);
+            CREATE INDEX IF NOT EXISTS idx_course_workflow_steps_course ON course_workflow_steps(course_id);
+            CREATE INDEX IF NOT EXISTS idx_course_scan_history_time ON course_scan_history(scan_time);
+            CREATE INDEX IF NOT EXISTS idx_course_scan_history_course ON course_scan_history(course_id);
         """)
 
 
@@ -387,6 +439,183 @@ def get_all_reference_curriculum():
             "SELECT program_id, version_date, curriculum_html FROM reference_curriculum"
         ).fetchall()
         return {str(row['program_id']): {'version_date': row['version_date'], 'html': row['curriculum_html']} for row in rows}
+
+
+def upsert_course(course_data):
+    """Insert or update a course. Returns True if the course changed."""
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT current_step, status, step_entered_date FROM courses WHERE id = ?",
+            (course_data['id'],)
+        ).fetchone()
+
+        now = datetime.now().isoformat()
+        changed = False
+
+        if existing is None:
+            conn.execute("""
+                INSERT INTO courses (id, code, title, status, current_step,
+                    total_steps, completed_steps, current_approver_emails,
+                    college, date_submitted, step_entered_date, first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                course_data['id'],
+                course_data.get('code', ''),
+                course_data['title'],
+                course_data.get('status', ''),
+                course_data.get('current_step', ''),
+                course_data.get('total_steps', 0),
+                course_data.get('completed_steps', 0),
+                course_data.get('current_approver_emails', ''),
+                course_data.get('college', ''),
+                course_data.get('date_submitted', ''),
+                course_data.get('step_entered_date', now),
+                now, now
+            ))
+            changed = True
+        else:
+            old_step = existing['current_step']
+            new_step = course_data.get('current_step', '')
+            if old_step != new_step or existing['status'] != course_data.get('status', ''):
+                changed = True
+
+            step_entered = course_data.get('step_entered_date', '')
+            if old_step == new_step:
+                step_entered = existing['step_entered_date'] or now
+
+            conn.execute("""
+                UPDATE courses SET
+                    code = ?, title = ?, status = ?, current_step = ?,
+                    total_steps = ?, completed_steps = ?,
+                    current_approver_emails = ?, college = ?,
+                    date_submitted = ?, step_entered_date = ?,
+                    last_updated = ?
+                WHERE id = ?
+            """, (
+                course_data.get('code', ''),
+                course_data['title'],
+                course_data.get('status', ''),
+                course_data.get('current_step', ''),
+                course_data.get('total_steps', 0),
+                course_data.get('completed_steps', 0),
+                course_data.get('current_approver_emails', ''),
+                course_data.get('college', ''),
+                course_data.get('date_submitted', ''),
+                step_entered,
+                now,
+                course_data['id']
+            ))
+
+        return changed
+
+
+def upsert_course_workflow_steps(course_id, steps):
+    """Replace workflow steps for a course."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM course_workflow_steps WHERE course_id = ?", (course_id,))
+        for step in steps:
+            conn.execute("""
+                INSERT INTO course_workflow_steps (course_id, step_order, step_name, step_status, approver_emails)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                course_id,
+                step['order'],
+                step['name'],
+                step['status'],
+                step.get('emails', '')
+            ))
+
+
+def record_course_change(scan_time, course_id, previous_step, new_step, change_type):
+    """Record a course workflow step change."""
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO course_scan_history (scan_time, course_id, previous_step, new_step, change_type)
+            VALUES (?, ?, ?, ?, ?)
+        """, (scan_time, course_id, previous_step, new_step, change_type))
+
+
+def record_course_scan(scan_time, courses_scanned, courses_with_workflow, changes_detected):
+    """Record course scan metadata."""
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO course_scans (scan_time, courses_scanned, courses_with_workflow, changes_detected)
+            VALUES (?, ?, ?, ?)
+        """, (scan_time, courses_scanned, courses_with_workflow, changes_detected))
+
+
+def get_all_courses():
+    """Get all courses with active workflows."""
+    with get_db() as conn:
+        return [dict(row) for row in conn.execute("""
+            SELECT * FROM courses
+            WHERE current_step IS NOT NULL AND current_step != ''
+            ORDER BY code
+        """).fetchall()]
+
+
+def get_course_workflow(course_id):
+    """Get workflow steps for a specific course."""
+    with get_db() as conn:
+        return [dict(row) for row in conn.execute("""
+            SELECT * FROM course_workflow_steps
+            WHERE course_id = ?
+            ORDER BY step_order
+        """, (course_id,)).fetchall()]
+
+
+def get_course_pipeline_counts(tracked_roles):
+    """Get count of courses at each tracked workflow step."""
+    with get_db() as conn:
+        counts = {}
+        for role in tracked_roles:
+            result = conn.execute("""
+                SELECT COUNT(*) as cnt FROM courses
+                WHERE current_step = ? AND current_step != ''
+            """, (role,)).fetchone()
+            counts[role] = result['cnt']
+        return counts
+
+
+def get_recent_course_changes(limit=50):
+    """Get recent changes across all courses."""
+    with get_db() as conn:
+        return [dict(row) for row in conn.execute("""
+            SELECT sh.*, c.code, c.title
+            FROM course_scan_history sh
+            JOIN courses c ON sh.course_id = c.id
+            ORDER BY sh.scan_time DESC
+            LIMIT ?
+        """, (limit,)).fetchall()]
+
+
+def get_last_course_scan():
+    """Get the most recent course scan info."""
+    with get_db() as conn:
+        result = conn.execute("""
+            SELECT * FROM course_scans ORDER BY scan_time DESC LIMIT 1
+        """).fetchone()
+        return dict(result) if result else None
+
+
+def get_courses_by_step(step_name):
+    """Get all courses currently at a specific step."""
+    with get_db() as conn:
+        return [dict(row) for row in conn.execute("""
+            SELECT * FROM courses WHERE current_step = ?
+            ORDER BY code
+        """, (step_name,)).fetchall()]
+
+
+def get_course_colleges():
+    """Get all distinct colleges with courses."""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT college FROM courses
+            WHERE college IS NOT NULL AND college != ''
+            ORDER BY college
+        """).fetchall()
+        return [row['college'] for row in rows]
 
 
 def migrate_db():

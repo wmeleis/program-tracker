@@ -132,6 +132,54 @@ function isCourseCollegeStep(step) {
     return !COURSE_PIPELINE_STEPS.has(step);
 }
 
+// Course pipeline buckets: several raw workflow steps collapse to one button.
+// Display only — underlying DB step names are unchanged.
+const COURSE_BUCKETS = [
+    {
+        role: 'Data Entry',
+        short_name: 'Data Entry',
+        match: step => typeof step === 'string' && step.startsWith('Data Entry'),
+    },
+    {
+        role: 'Banner',
+        short_name: 'Banner',
+        match: step => typeof step === 'string' && (step === 'Banner' || step.startsWith('Banner ') || step.startsWith('Banner-')),
+    },
+    {
+        role: 'Course Review',
+        short_name: 'Course Review',
+        match: step => step === 'Course Review 2' || step === 'Course Review 3',
+    },
+];
+
+function getCourseBucket(step) {
+    for (const b of COURSE_BUCKETS) {
+        if (b.match(step)) return b.role;
+    }
+    return null;
+}
+
+// Collapse raw pipeline entries into bucket entries (first occurrence holds position, count is summed).
+function collapseCoursePipeline(pipeline) {
+    const seen = new Set();
+    const result = [];
+    for (const step of pipeline) {
+        const bucket = getCourseBucket(step.role);
+        if (bucket) {
+            if (seen.has(bucket)) continue;
+            seen.add(bucket);
+            const def = COURSE_BUCKETS.find(b => b.role === bucket);
+            const total = pipeline
+                .filter(s => getCourseBucket(s.role) === bucket)
+                .reduce((n, s) => n + (s.count || 0), 0);
+            result.push({ role: def.role, short_name: def.short_name, count: total, _bucket: true });
+        } else {
+            result.push(step);
+        }
+    }
+    return result;
+}
+
 // ==================== Data Loading ====================
 
 async function loadDashboard() {
@@ -196,7 +244,7 @@ async function loadCoursePipeline() {
     try {
         const res = await fetch('/api/course_pipeline');
         const data = await res.json();
-        cachedCoursePipeline = data.pipeline;
+        cachedCoursePipeline = collapseCoursePipeline(data.pipeline || []);
         renderPipeline(cachedCoursePipeline);
     } catch (e) {
         console.error('Failed to load course pipeline:', e);
@@ -421,10 +469,19 @@ function updatePipelineCounts(baseFiltered) {
         const step = item.current_step;
         if (step) stepCounts[step] = (stepCounts[step] || 0) + 1;
     });
-    const updated = pipeline.map(step => ({
-        ...step,
-        count: stepCounts[step.role] || 0
-    }));
+    const isCourses = currentView === 'courses';
+    const updated = pipeline.map(step => {
+        let count;
+        if (isCourses && step._bucket) {
+            const def = COURSE_BUCKETS.find(b => b.role === step.role);
+            count = Object.keys(stepCounts)
+                .filter(s => def.match(s))
+                .reduce((n, s) => n + stepCounts[s], 0);
+        } else {
+            count = stepCounts[step.role] || 0;
+        }
+        return { ...step, count };
+    });
     renderPipeline(updated, baseFiltered);
 }
 
@@ -568,9 +625,17 @@ async function applyFilters() {
 
     // Now apply pipeline filter for the table (college already applied in baseFiltered)
     const collegeDetector = currentView === 'courses' ? isCourseCollegeStep : isCollegeStep;
+    const isCoursesView = currentView === 'courses';
+    const bucketDef = isCoursesView && pipelineFilter
+        ? COURSE_BUCKETS.find(b => b.role === pipelineFilter)
+        : null;
     let filtered = baseFiltered.filter(p => {
         if (pipelineFilter === '__college__' && !collegeDetector(p.current_step)) return false;
-        if (pipelineFilter && pipelineFilter !== '__college__' && p.current_step !== pipelineFilter) return false;
+        if (pipelineFilter && pipelineFilter !== '__college__') {
+            if (bucketDef) {
+                if (!bucketDef.match(p.current_step)) return false;
+            } else if (p.current_step !== pipelineFilter) return false;
+        }
         return true;
     });
 
@@ -648,7 +713,7 @@ function renderTable(items) {
         const id = isCourseView ? item.id : item.id;
         const expanded = expandedRows.has(id);
         const itemTitle = isCourseView ? item.code : item.name;
-        const itemDisplay = isCourseView ? item.title : item.name;
+        const itemDisplay = isCourseView ? `${item.code}: ${item.title}` : item.name;
         const collegeDisplay = isCourseView ? item.college : abbreviateCollege(item.college);
         const progress = item.total_steps > 0 ? (item.completed_steps / item.total_steps * 100) : 0;
         const progressClass = progress < 33 ? 'early' : progress < 66 ? 'mid' : 'late';

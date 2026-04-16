@@ -9,7 +9,8 @@ from datetime import datetime
 from database import (
     get_all_programs, get_program_workflow, get_pipeline_counts,
     get_recent_changes, get_last_scan, get_colleges,
-    get_current_approvers, get_all_curriculum, get_all_reference_curriculum
+    get_current_approvers, get_all_curriculum, get_all_reference_curriculum,
+    get_all_courses
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES
 
@@ -62,6 +63,7 @@ EXPORT_DIR = os.path.join(os.path.dirname(__file__), 'docs')
 def export_data():
     """Export all dashboard data to a single JSON file."""
     programs = get_all_programs()
+    courses = get_all_courses()
     pipeline_counts = get_pipeline_counts(TRACKED_ROLES)
     changes = get_recent_changes(limit=100)
     last_scan = get_last_scan()
@@ -85,6 +87,7 @@ def export_data():
     return {
         'exported_at': datetime.now().isoformat(),
         'programs': programs,
+        'courses': courses,
         'pipeline': pipeline,
         'changes': changes,
         'last_scan': last_scan,
@@ -95,15 +98,31 @@ def export_data():
 
 
 def build_static_site():
-    """Build a complete static site in the docs/ directory."""
+    """Build a complete static site in the docs/ directory.
+
+    Encryption is currently OFF. All assets and JSON are served as plain files.
+    The frontend loads them via fetch(); the static override in build_static_js
+    already falls back to fetch when window.__EMBEDDED_*__ is undefined.
+    """
     os.makedirs(EXPORT_DIR, exist_ok=True)
+
+    # Remove any stale artifacts from the previous (encrypted) build. StatiCrypt
+    # used to emit an encrypted index.html that inlined everything; make sure
+    # old single-file copies don't stick around.
+    stale = os.path.join(EXPORT_DIR, 'index.html')
+    if os.path.exists(stale):
+        os.remove(stale)
 
     # Export data
     data = export_data()
+    # Strip curriculum_html from program rows — it's served separately via
+    # curriculum.json and would otherwise double the size of data.json.
+    for p in data.get('programs', []):
+        p.pop('curriculum_html', None)
     with open(os.path.join(EXPORT_DIR, 'data.json'), 'w') as f:
         json.dump(data, f)
 
-    # Export curriculum data separately (can be large)
+    # Export curriculum data separately (can be large; lazy-fetched on expand)
     curriculum = get_all_curriculum()
     with open(os.path.join(EXPORT_DIR, 'curriculum.json'), 'w') as f:
         json.dump(curriculum, f)
@@ -122,7 +141,7 @@ def build_static_site():
     with open(os.path.join(EXPORT_DIR, 'campus_groups.json'), 'w') as f:
         json.dump(campus_groups, f)
 
-    print(f"Exported: {len(data['programs'])} programs, {len(data['workflows'])} workflows, {len(curriculum)} curricula, {len(reference)} references")
+    print(f"Exported: {len(data['programs'])} programs, {len(data['courses'])} courses, {len(data['workflows'])} workflows, {len(curriculum)} curricula, {len(reference)} references")
 
     # Copy CSS
     shutil.copy2(
@@ -130,7 +149,15 @@ def build_static_site():
         os.path.join(EXPORT_DIR, 'style.css')
     )
 
-    # Generate index.html
+    # Build static app.js (overrides API calls to use data.json)
+    src_js_path = os.path.join(os.path.dirname(__file__), 'static', 'app.js')
+    with open(src_js_path, 'r') as f:
+        original_js = f.read()
+    static_js = build_static_js(original_js)
+    with open(os.path.join(EXPORT_DIR, 'app.js'), 'w') as f:
+        f.write(static_js)
+
+    # Generate index.html from template, pointing at the local asset files
     tmpl_path = os.path.join(os.path.dirname(__file__), 'templates', 'dashboard.html')
     with open(tmpl_path, 'r') as f:
         html = f.read()
@@ -147,86 +174,7 @@ def build_static_site():
     with open(os.path.join(EXPORT_DIR, 'index.html'), 'w') as f:
         f.write(html)
 
-    # Generate static app.js
-    # Read original and keep all the rendering/filter/UI logic,
-    # but replace data loading to use data.json
-    src_js_path = os.path.join(os.path.dirname(__file__), 'static', 'app.js')
-    with open(src_js_path, 'r') as f:
-        original_js = f.read()
-
-    # Find the section between "Data Loading" and "Rendering" and replace it
-    # Simpler: just prepend a data loader and override the load functions
-    static_js = build_static_js(original_js)
-
-    # Build self-contained HTML with everything inlined
-    # (CSS, JS, and all JSON data embedded as script variables)
-    css_path = os.path.join(EXPORT_DIR, 'style.css')
-    with open(css_path, 'r') as f:
-        css_content = f.read()
-
-    data_json = json.dumps(data)
-    curriculum_json = json.dumps(curriculum)
-    reference_json = json.dumps(reference)
-    campus_json = json.dumps(campus_groups)
-
-    # Replace external CSS/JS references with inline content
-    # Remove cache-bust references since everything is inlined
-    # Use lambda replacements to avoid re.sub interpreting backslashes in JS/CSS
-    html = re.sub(
-        r'<link[^>]*href="style\.css[^"]*"[^>]*/?>',
-        lambda m: f'<style>{css_content}</style>',
-        html
-    )
-    html = re.sub(
-        r'<script[^>]*src="app\.js[^"]*"[^>]*></script>',
-        lambda m: f'<script>\n{static_js}\n</script>',
-        html
-    )
-
-    # Embed JSON data as script variables so no fetch() calls are needed
-    # Insert before closing </body> tag
-    embedded_data = f'''<script>
-// Embedded data — no external JSON files needed
-window.__EMBEDDED_DATA__ = {data_json};
-window.__EMBEDDED_CURRICULUM__ = {curriculum_json};
-window.__EMBEDDED_REFERENCE__ = {reference_json};
-window.__EMBEDDED_CAMPUS_GROUPS__ = {campus_json};
-</script>'''
-    html = html.replace('</body>', f'{embedded_data}\n</body>')
-
-    # Write the self-contained HTML
-    inline_path = os.path.join(EXPORT_DIR, 'index.html')
-    with open(inline_path, 'w') as f:
-        f.write(html)
-
-    # Encrypt with StatiCrypt
-    print("Encrypting with StatiCrypt...")
-    result = subprocess.run(
-        ['npx', 'staticrypt', inline_path,
-         '-p', STATICRYPT_PASSWORD,
-         '-d', EXPORT_DIR,
-         '--remember', '30',
-         '--config', 'false',
-         '--short',
-         '--template-title', 'Program Approval Tracker',
-         '--template-instructions', 'Enter the password to access the dashboard.'],
-        capture_output=True, text=True, cwd=BASE_DIR
-    )
-    if result.returncode != 0:
-        print(f"StatiCrypt error: {result.stderr}")
-        raise RuntimeError("StatiCrypt encryption failed")
-    print("Encryption complete.")
-
-    # Clean up separate asset files (everything is inlined + encrypted)
-    for f in ['style.css', 'app.js', 'data.json', 'curriculum.json',
-              'reference.json', 'campus_groups.json']:
-        path = os.path.join(EXPORT_DIR, f)
-        if os.path.exists(path):
-            os.remove(path)
-
-    print(f"\nStatic site ready in: {EXPORT_DIR}/")
-    print("Password-protected with StatiCrypt (password saved in export_static.py)")
-    print("Remember-me cookie lasts 30 days.")
+    print(f"\nStatic site ready in: {EXPORT_DIR}/  (no encryption)")
 
 
 def build_static_js(original_js):
