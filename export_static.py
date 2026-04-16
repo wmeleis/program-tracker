@@ -10,9 +10,13 @@ from database import (
     get_all_programs, get_program_workflow, get_pipeline_counts,
     get_recent_changes, get_last_scan, get_colleges,
     get_current_approvers, get_all_curriculum, get_all_reference_curriculum,
-    get_all_courses
+    get_all_courses, get_course_workflow, get_course_pipeline_counts,
+    get_course_colleges
 )
-from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES
+from scraper import (
+    TRACKED_ROLES, ROLE_SHORT_NAMES,
+    COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES,
+)
 
 STATICRYPT_PASSWORD = 'husky26'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +88,23 @@ def export_data():
             'count': pipeline_counts.get(role, 0)
         })
 
+    # Course-side data parallel to the program side
+    course_pipeline_counts = get_course_pipeline_counts(COURSE_TRACKED_ROLES)
+    course_pipeline = [
+        {
+            'role': role,
+            'short_name': COURSE_ROLE_SHORT_NAMES.get(role, role),
+            'count': course_pipeline_counts.get(role, 0),
+        }
+        for role in COURSE_TRACKED_ROLES
+    ]
+    course_workflows = {}
+    for c in courses:
+        steps = get_course_workflow(c['id'])
+        if steps:
+            course_workflows[str(c['id'])] = steps
+    course_colleges = get_course_colleges()
+
     return {
         'exported_at': datetime.now().isoformat(),
         'programs': programs,
@@ -94,6 +115,9 @@ def export_data():
         'colleges': colleges,
         'approvers': approvers,
         'workflows': workflows,
+        'course_pipeline': course_pipeline,
+        'course_workflows': course_workflows,
+        'course_colleges': course_colleges,
     }
 
 
@@ -239,11 +263,43 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFilters();
     };
 
-    // Patch workflow detail loading
-    window._origLoadWorkflowDetail = loadWorkflowDetail;
-    window.loadWorkflowDetail = async function(programId) {
+    // Patch courses dashboard + loaders to use embedded data (no server).
+    window.loadCoursesDashboard = async function() {
         const D = await _getData();
-        const steps = D.workflows[String(programId)] || [];
+        allCourses = D.courses || [];
+        cachedCoursePipeline = collapseCoursePipeline(D.course_pipeline || []);
+        renderPipeline(cachedCoursePipeline, allCourses);
+        populateCourseStepFilter();
+        const cSel = document.getElementById('filter-college');
+        cSel.innerHTML = '<option value="">All Colleges</option>' +
+            (D.course_colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        updateCourseSmartViewCounts();
+        applyFilters();
+    };
+    window.loadCoursePipeline = async function() {
+        const D = await _getData();
+        cachedCoursePipeline = collapseCoursePipeline(D.course_pipeline || []);
+        renderPipeline(cachedCoursePipeline);
+    };
+    window.loadCourses = async function() {
+        const D = await _getData();
+        allCourses = D.courses || [];
+        populateCourseStepFilter();
+        applyFilters();
+    };
+    window.loadCourseColleges = async function() {
+        const D = await _getData();
+        const select = document.getElementById('filter-college');
+        const options = (D.course_colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        select.innerHTML = '<option value="">All Colleges</option>' + options;
+    };
+
+    // Patch workflow detail loading (handles both programs and courses).
+    window._origLoadWorkflowDetail = loadWorkflowDetail;
+    window.loadWorkflowDetail = async function(programId, isCourseView) {
+        const D = await _getData();
+        const source = isCourseView ? (D.course_workflows || {}) : (D.workflows || {});
+        const steps = source[String(programId)] || [];
         const contentEl = document.getElementById(`detail-content-${programId}`);
         if (!contentEl) return;
 
