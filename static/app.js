@@ -1,8 +1,10 @@
 /* Program Approval Tracker - Frontend Logic */
 
 let allPrograms = [];
+let allCourses = [];
+let currentView = 'programs'; // 'programs' or 'courses'
 let expandedRows = new Set();
-let detailTabState = {}; // programId -> 'workflow' | 'curriculum'
+let detailTabState = {}; // programId/courseId -> 'workflow' | 'curriculum'
 let currentSort = { column: 'name', direction: 'asc' };
 let pipelineFilter = null;
 let smartView = 'all';
@@ -10,7 +12,51 @@ let typeFilter = '';
 let proposalFilter = '';
 let approverPrograms = null;
 let cachedPipeline = [];
+let cachedCoursePipeline = [];
 const STUCK_THRESHOLD_DAYS = 30;
+
+function switchView(view) {
+    currentView = view;
+
+    // Update button states
+    document.getElementById('btn-programs').classList.toggle('active', view === 'programs');
+    document.getElementById('btn-courses').classList.toggle('active', view === 'courses');
+
+    // Reset filters when switching views
+    pipelineFilter = null;
+    typeFilter = '';
+    proposalFilter = '';
+    document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.proposal-btn').forEach(btn => btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact'));
+    document.querySelectorAll('.smart-view-btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById('filter-college').value = '';
+    document.getElementById('filter-campus').value = '';
+    document.getElementById('filter-approver').value = '';
+    document.getElementById('filter-step').value = '';
+    document.getElementById('filter-search').value = '';
+
+    // Hide/show sections based on view
+    const typeSection = document.querySelector('.view-group');
+    const proposalSection = document.querySelectorAll('.view-group')[1];
+    const campusFilter = document.getElementById('filter-campus');
+
+    if (view === 'courses') {
+        typeSection.style.display = 'none';
+        proposalSection.style.display = 'none';
+        campusFilter.parentElement.parentElement.style.display = 'none';
+    } else {
+        typeSection.style.display = 'flex';
+        proposalSection.style.display = 'flex';
+        campusFilter.parentElement.parentElement.style.display = 'flex';
+    }
+
+    // Reload appropriate data
+    if (view === 'programs') {
+        loadDashboard();
+    } else {
+        loadCoursesDashboard();
+    }
+}
 
 function clearFilter(id) {
     const el = document.getElementById(id);
@@ -54,6 +100,36 @@ function isCollegeStep(step) {
     if (PIPELINE_STEPS.has(step)) return false;
     // College steps have department codes like EN, SC, SH, AM, BA, etc.
     return step.match(/^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )/);
+}
+
+// Course pipeline steps (centralized, non-college course workflow roles)
+const COURSE_PIPELINE_STEPS = new Set([
+    "Checkpoint",
+    "Provost Initial Review",
+    "Course Review 2",
+    "Course Review 3",
+    "Course Review Group",
+    "Course GRA Regulatory Validation",
+    "PS Course Review",
+    "Graduate Curriculum Committee Chair",
+    "Graduate Council Subcommittee One",
+    "Graduate Council Subcommittee Two",
+    "Data Entry 1",
+    "Data Entry 3",
+    "Data Entry 3 - Awaiting Course Approval",
+    "Data Entry 5 - Awaiting Program Approval",
+    "Data Entry 8 - Hold PA courses",
+    "Data Entry 9",
+    "REGISTRAR Continuing Education Level Discussion",
+    "Banner - Prereq 2 Letter Course Number",
+    "Banner",
+    "Editor",
+]);
+
+function isCourseCollegeStep(step) {
+    if (!step) return false;
+    // Anything not in the central course pipeline is a college/department role
+    return !COURSE_PIPELINE_STEPS.has(step);
 }
 
 // ==================== Data Loading ====================
@@ -101,6 +177,85 @@ async function loadPrograms() {
 
 async function loadChanges() {
     // Changes are now shown via the "Recent Changes" smart view button
+}
+
+// ==================== Course Loading ====================
+
+async function loadCoursesDashboard() {
+    await Promise.all([
+        loadCoursePipeline(),
+        loadCourses(),
+        loadScanStatus(),
+        loadCourseColleges()
+    ]);
+    if (cachedCoursePipeline.length) renderPipeline(cachedCoursePipeline, allCourses);
+    updateCourseSmartViewCounts();
+}
+
+async function loadCoursePipeline() {
+    try {
+        const res = await fetch('/api/course_pipeline');
+        const data = await res.json();
+        cachedCoursePipeline = data.pipeline;
+        renderPipeline(cachedCoursePipeline);
+    } catch (e) {
+        console.error('Failed to load course pipeline:', e);
+    }
+}
+
+async function loadCourses() {
+    try {
+        const res = await fetch('/api/courses');
+        const data = await res.json();
+        allCourses = data.courses || [];
+        populateCourseStepFilter();
+        applyFilters();
+    } catch (e) {
+        console.error('Failed to load courses:', e);
+    }
+}
+
+async function loadCourseColleges() {
+    try {
+        const res = await fetch('/api/course_colleges');
+        const data = await res.json();
+        const select = document.getElementById('filter-college');
+        const options = (data.colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        select.innerHTML = '<option value="">All Colleges</option>' + options;
+    } catch (e) {
+        console.error('Failed to load course colleges:', e);
+    }
+}
+
+function populateCourseStepFilter() {
+    const select = document.getElementById('filter-step');
+    const steps = new Set();
+    allCourses.forEach(c => {
+        if (c.current_step) steps.add(c.current_step);
+    });
+    const sorted = Array.from(steps).sort();
+    const options = sorted.map(s => `<option value="${s}">${s}</option>`).join('');
+    select.innerHTML = '<option value="">All Steps</option>' + options;
+}
+
+function updateCourseSmartViewCounts() {
+    const now = new Date();
+    const recentCount = allCourses.filter(c => {
+        const entered = c.step_entered_date ? new Date(c.step_entered_date) : null;
+        return entered && (now - entered) < 14 * 86400000;
+    }).length;
+    const stuckCount = allCourses.filter(c => getDaysAtStep(c) >= STUCK_THRESHOLD_DAYS).length;
+    const newCount = allCourses.filter(c => {
+        const submitted = c.date_submitted ? new Date(c.date_submitted) : null;
+        return submitted && (now - submitted) < 30 * 86400000;
+    }).length;
+
+    document.querySelectorAll('.smart-view-btn').forEach(btn => {
+        const view = btn.getAttribute('onclick').match(/'(\w+)'/)[1];
+        if (view === 'recent') btn.innerHTML = `Recent Changes <span class="view-count">${recentCount}</span>`;
+        else if (view === 'stuck') btn.innerHTML = `Potentially Stuck <span class="view-count">${stuckCount}</span>`;
+        else if (view === 'new') btn.innerHTML = `New Submissions <span class="view-count">${newCount}</span>`;
+    });
 }
 
 async function loadApprovers() {
@@ -227,15 +382,25 @@ async function loadScanStatus() {
         const data = await res.json();
         const statusEl = document.getElementById('scan-status');
         const updatedEl = document.getElementById('last-updated');
+        const progressContainer = document.getElementById('progress-container');
+
         if (data.running) {
             statusEl.innerHTML = '<span class="spinner"></span> Updating...';
             statusEl.className = 'scan-status running';
             document.getElementById('scan-btn').disabled = true;
+
+            // Show progress phase text
+            progressContainer.style.display = 'block';
+            document.getElementById('progress-phase').textContent = data.phase || 'Scanning...';
         } else {
             statusEl.textContent = '';
             statusEl.className = 'scan-status';
             document.getElementById('scan-btn').disabled = false;
+
+            // Hide progress phase
+            progressContainer.style.display = 'none';
         }
+
         if (data.last_scan) {
             const d = new Date(data.last_scan.scan_time);
             updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
@@ -248,14 +413,15 @@ async function loadScanStatus() {
 // ==================== Rendering ====================
 
 function updatePipelineCounts(baseFiltered) {
-    if (!cachedPipeline.length) return;
+    const pipeline = currentView === 'courses' ? cachedCoursePipeline : cachedPipeline;
+    if (!pipeline.length) return;
     // Recount each pipeline step from filtered data
     const stepCounts = {};
-    baseFiltered.forEach(p => {
-        const step = p.current_step;
+    baseFiltered.forEach(item => {
+        const step = item.current_step;
         if (step) stepCounts[step] = (stepCounts[step] || 0) + 1;
     });
-    const updated = cachedPipeline.map(step => ({
+    const updated = pipeline.map(step => ({
         ...step,
         count: stepCounts[step.role] || 0
     }));
@@ -266,8 +432,8 @@ function updateCollegeOptions(baseFiltered) {
     const select = document.getElementById('filter-college');
     const current = select.value;
     const counts = {};
-    baseFiltered.forEach(p => {
-        if (p.college) counts[p.college] = (counts[p.college] || 0) + 1;
+    baseFiltered.forEach(item => {
+        if (item.college) counts[item.college] = (counts[item.college] || 0) + 1;
     });
     const sorted = Object.keys(counts).sort();
     select.innerHTML = '<option value="">All Colleges</option>' +
@@ -278,14 +444,17 @@ function updateCollegeOptions(baseFiltered) {
 
 function renderPipeline(pipeline, baseFiltered) {
     const bar = document.getElementById('pipeline-bar');
+    const isCourseView = currentView === 'courses';
     // Add College Review as the first step in the pipeline
-    const source = baseFiltered || allPrograms;
-    const collegeCount = source.filter(p => isCollegeStep(p.current_step)).length;
+    const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
+    const detector = isCourseView ? isCourseCollegeStep : isCollegeStep;
+    const collegeCount = source.filter(p => detector(p.current_step)).length;
     const collegeActive = pipelineFilter === '__college__' ? ' active' : '';
+    const itemLabel = isCourseView ? 'courses' : 'programs';
     let html = `
         <div class="pipeline-step ${collegeCount > 0 ? 'has-items' : 'empty'}${collegeActive}"
              onclick="togglePipelineFilter('__college__')"
-             title="College Review: ${collegeCount} programs">
+             title="College Review: ${collegeCount} ${itemLabel}">
             <span class="step-count">${collegeCount}</span>
             <span class="step-name">College</span>
         </div>
@@ -338,24 +507,32 @@ function getBaseFiltered(approverProgramIds, exclude) {
     const search = document.getElementById('filter-search').value.toLowerCase();
     const now = new Date();
 
-    return allPrograms.filter(p => {
+    const sourceData = currentView === 'courses' ? allCourses : allPrograms;
+
+    return sourceData.filter(item => {
         if (smartView === 'recent') {
-            const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
+            const entered = item.step_entered_date ? new Date(item.step_entered_date) : null;
             if (!entered || (now - entered) >= 14 * 86400000) return false;
         } else if (smartView === 'stuck') {
-            if (getDaysAtStep(p) < STUCK_THRESHOLD_DAYS) return false;
+            if (getDaysAtStep(item) < STUCK_THRESHOLD_DAYS) return false;
         } else if (smartView === 'new') {
-            const submitted = p.date_submitted ? new Date(p.date_submitted) : null;
+            const submitted = item.date_submitted ? new Date(item.date_submitted) : null;
             if (!submitted || (now - submitted) >= 30 * 86400000) return false;
         }
-        if (!ex.type && typeFilter && p.program_type !== typeFilter) return false;
-        if (!ex.proposal && proposalFilter && p.status !== proposalFilter) return false;
-        if (!ex.college && collegeFilter && p.college !== collegeFilter) return false;
-        if (stepFilter && p.current_step !== stepFilter) return false;
-        if (campusFilter && extractCampus(p.name) !== campusFilter) return false;
-        if (approverProgramIds && !approverProgramIds.has(p.id)) return false;
-        if (search && !p.name.toLowerCase().includes(search) &&
-            !(p.banner_code && p.banner_code.toLowerCase().includes(search))) return false;
+        if (!ex.type && typeFilter && item.program_type !== typeFilter) return false;
+        if (!ex.proposal && proposalFilter && item.status !== proposalFilter) return false;
+        if (!ex.college && collegeFilter && item.college !== collegeFilter) return false;
+        if (stepFilter && item.current_step !== stepFilter) return false;
+        if (currentView === 'programs' && campusFilter && extractCampus(item.name) !== campusFilter) return false;
+        if (approverProgramIds && !approverProgramIds.has(item.id)) return false;
+
+        // Search in name/title and code/banner_code
+        if (search) {
+            const searchField = currentView === 'courses' ? item.code : item.name;
+            const searchSecond = currentView === 'courses' ? item.title : item.banner_code;
+            if (!searchField.toLowerCase().includes(search) &&
+                !(searchSecond && searchSecond.toLowerCase().includes(search))) return false;
+        }
         return true;
     });
 }
@@ -390,8 +567,9 @@ async function applyFilters() {
     updateProposalCounts(getBaseFiltered(approverProgramIds, {proposal: true}));
 
     // Now apply pipeline filter for the table (college already applied in baseFiltered)
+    const collegeDetector = currentView === 'courses' ? isCourseCollegeStep : isCollegeStep;
     let filtered = baseFiltered.filter(p => {
-        if (pipelineFilter === '__college__' && !isCollegeStep(p.current_step)) return false;
+        if (pipelineFilter === '__college__' && !collegeDetector(p.current_step)) return false;
         if (pipelineFilter && pipelineFilter !== '__college__' && p.current_step !== pipelineFilter) return false;
         return true;
     });
@@ -416,33 +594,41 @@ async function applyFilters() {
         return 0;
     });
 
-    document.getElementById('result-count').textContent = `${filtered.length} programs`;
-    renderProgramTable(filtered);
+    const itemType = currentView === 'courses' ? 'courses' : 'programs';
+    document.getElementById('result-count').textContent = `${filtered.length} ${itemType}`;
+    renderTable(filtered);
 }
 
-function renderProgramTable(programs) {
+function renderTable(items) {
     const container = document.getElementById('programs-table-container');
+    const isCourseView = currentView === 'courses';
 
-    if (!programs || programs.length === 0) {
-        container.innerHTML = '<p class="empty-state">No programs match your filters. Try adjusting your selections.</p>';
-        expandedRows.forEach(id => loadWorkflowDetail(id));
+    if (!items || items.length === 0) {
+        const emptyMsg = isCourseView ? 'No courses match your filters.' : 'No programs match your filters.';
+        container.innerHTML = `<p class="empty-state">${emptyMsg} Try adjusting your selections.</p>`;
+        expandedRows.forEach(id => loadWorkflowDetail(id, isCourseView));
         return;
     }
 
-    let html = `
+    const headerColLabel = isCourseView ? 'Code' : 'College';
+    const titleLabel = isCourseView ? 'Course Title' : 'Program Name';
+    const titleCol = isCourseView ? 'code' : 'name';
+    const statusLabel = isCourseView ? '' : `
         <div class="table-legend">
             <span class="legend-item"><span class="legend-swatch new"></span> New program</span>
             <span class="legend-item"><span class="legend-swatch change"></span> Program change</span>
             <span class="legend-item"><span class="legend-swatch inactivation"></span> Inactivation</span>
-        </div>
+        </div>`;
+
+    let html = statusLabel + `
         <table class="program-table">
             <thead>
                 <tr>
-                    <th onclick="sortBy('name')">
-                        Program Name ${sortIcon('name')}
+                    <th onclick="sortBy('${titleCol}')">
+                        ${titleLabel} ${sortIcon(titleCol)}
                     </th>
-                    <th onclick="sortBy('college')" style="width: 70px">
-                        College ${sortIcon('college')}
+                    <th onclick="sortBy('${isCourseView ? 'college' : 'college'}')" style="width: 70px">
+                        ${headerColLabel} ${sortIcon('college')}
                     </th>
                     <th onclick="sortBy('current_step')">
                         Current Step ${sortIcon('current_step')}
@@ -458,28 +644,34 @@ function renderProgramTable(programs) {
             <tbody>
     `;
 
-    for (const p of programs) {
-        const expanded = expandedRows.has(p.id);
-        const progress = p.total_steps > 0 ? (p.completed_steps / p.total_steps * 100) : 0;
+    for (const item of items) {
+        const id = isCourseView ? item.id : item.id;
+        const expanded = expandedRows.has(id);
+        const itemTitle = isCourseView ? item.code : item.name;
+        const itemDisplay = isCourseView ? item.title : item.name;
+        const collegeDisplay = isCourseView ? item.college : abbreviateCollege(item.college);
+        const progress = item.total_steps > 0 ? (item.completed_steps / item.total_steps * 100) : 0;
         const progressClass = progress < 33 ? 'early' : progress < 66 ? 'mid' : 'late';
-        const rowClass = p.status === 'Added' ? 'row-added' : p.status === 'Edited' ? 'row-edited' : p.status === 'Deactivated' ? 'row-deactivated' : 'row-edited';
-        const days = getDaysAtStep(p);
+        const rowClass = isCourseView ? 'row-edited' :
+            item.status === 'Added' ? 'row-added' :
+            item.status === 'Edited' ? 'row-edited' :
+            item.status === 'Deactivated' ? 'row-deactivated' : 'row-edited';
+        const days = getDaysAtStep(item);
         const daysClass = days < 14 ? 'fresh' : days < STUCK_THRESHOLD_DAYS ? 'aging' : 'stuck';
-        const collegeShort = abbreviateCollege(p.college);
 
         html += `
             <tr class="program-row ${rowClass} ${expanded ? 'expanded' : ''}"
-                onclick="toggleRow(${p.id})">
-                <td><strong>${escapeHtml(p.name)}</strong></td>
-                <td title="${escapeHtml(p.college || '')}">${escapeHtml(collegeShort)}</td>
-                <td>${escapeHtml(p.current_step || '—')}</td>
+                onclick="toggleRow('${id}')">
+                <td><strong>${escapeHtml(itemDisplay)}</strong></td>
+                <td title="${escapeHtml(item.college || '')}">${escapeHtml(collegeDisplay)}</td>
+                <td>${escapeHtml(item.current_step || '—')}</td>
                 <td>
                     <div class="progress-container">
                         <div class="progress-bar">
                             <div class="progress-fill ${progressClass}"
                                  style="width: ${progress}%"></div>
                         </div>
-                        <span class="progress-text">${p.completed_steps}/${p.total_steps}</span>
+                        <span class="progress-text">${item.completed_steps}/${item.total_steps}</span>
                     </div>
                 </td>
                 <td><span class="days-at-step ${daysClass}" title="Days at current step">${days}d</span></td>
@@ -487,21 +679,26 @@ function renderProgramTable(programs) {
         `;
 
         if (expanded) {
-            const activeTab = detailTabState[p.id] || 'workflow';
+            const activeTab = detailTabState[id] || 'workflow';
+            const tabs = isCourseView ?
+                `<button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); switchDetailTab('${id}', 'workflow')">Workflow</button>` :
+                `<button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'workflow')">Workflow</button>
+                <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'curriculum')">Curriculum</button>
+                <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Reference</button>
+                <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Compare</button>`;
+
             html += `
-                <tr class="workflow-detail" id="detail-${p.id}">
+                <tr class="workflow-detail" id="detail-${id}">
                     <td colspan="5">
                         <div class="detail-tabs">
-                            <button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}"
-                                onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'workflow')">Workflow</button>
-                            <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}"
-                                onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'curriculum')">Curriculum</button>
-                            <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}"
-                                onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'reference')">Reference</button>
-                            <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}"
-                                onclick="event.stopPropagation(); switchDetailTab(${p.id}, 'compare')">Compare</button>
+                            ${tabs}
                         </div>
-                        <div class="detail-content" id="detail-content-${p.id}">
+                        <div class="detail-content" id="detail-content-${id}">
                             <div class="workflow-loading">Loading...</div>
                         </div>
                     </td>
@@ -516,19 +713,22 @@ function renderProgramTable(programs) {
     // Load details for expanded rows
     expandedRows.forEach(id => {
         const tab = detailTabState[id] || 'workflow';
-        if (tab === 'workflow') loadWorkflowDetail(id);
-        else if (tab === 'reference') loadReferenceDetail(id);
-        else if (tab === 'compare') loadCompareDetail(id);
-        else loadCurriculumDetail(id);
+        if (tab === 'workflow') loadWorkflowDetail(id, isCourseView);
+        else if (!isCourseView) {
+            if (tab === 'reference') loadReferenceDetail(id);
+            else if (tab === 'compare') loadCompareDetail(id);
+            else loadCurriculumDetail(id);
+        }
     });
 }
 
-async function loadWorkflowDetail(programId) {
-    const contentEl = document.getElementById(`detail-content-${programId}`);
+async function loadWorkflowDetail(id, isCourseView) {
+    const contentEl = document.getElementById(`detail-content-${id}`);
     if (!contentEl) return;
 
     try {
-        const res = await fetch(`/api/program/${programId}/workflow`);
+        const endpoint = isCourseView ? `/api/course/${id}/workflow` : `/api/program/${id}/workflow`;
+        const res = await fetch(endpoint);
         const data = await res.json();
         const steps = data.steps || [];
 
