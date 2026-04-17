@@ -1700,8 +1700,10 @@ async function _getData() {
     return _cache;
 }
 
-// Override all load* functions AFTER the original script defines them
-document.addEventListener('DOMContentLoaded', () => {
+// Override all load* functions AFTER the original script defines them.
+// Run immediately if DOM is already ready (app.js may be injected after
+// DOMContentLoaded has fired, e.g. by the password gate).
+function __staticInit() {
     // Patch the load functions to use static data
     window._origLoadDashboard = loadDashboard;
 
@@ -2054,4 +2056,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial load
     loadDashboard();
-});
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __staticInit);
+} else {
+    __staticInit();
+}

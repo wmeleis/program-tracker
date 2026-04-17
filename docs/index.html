@@ -4,9 +4,224 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1776439273">
+    <link rel="stylesheet" href="style.css?v=1776445063">
 </head>
 <body>
+
+<style>
+  #password-gate {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #f5f5f5;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #password-gate .gate-card {
+    background: white; padding: 2.5rem; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    width: 360px; max-width: 90vw;
+  }
+  #password-gate h1 { margin: 0 0 0.25rem 0; font-size: 1.4rem; color: #333; }
+  #password-gate .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; display: block; }
+  #password-gate form { display: flex; gap: 0.5rem; }
+  #password-gate input {
+    flex: 1; padding: 0.6rem 0.8rem; font-size: 1rem;
+    border: 1px solid #ccc; border-radius: 4px; outline: none;
+  }
+  #password-gate input:focus { border-color: #C8102E; }
+  #password-gate button {
+    padding: 0.6rem 1.2rem; font-size: 1rem; font-weight: 600;
+    background: #C8102E; color: white; border: 0; border-radius: 4px; cursor: pointer;
+  }
+  #password-gate button:disabled { opacity: 0.6; cursor: default; }
+  #password-gate .gate-error { color: #C8102E; font-size: 0.9rem; margin-top: 0.75rem; min-height: 1.2em; }
+  #password-gate .gate-remember { font-size: 0.85rem; color: #666; margin-top: 0.75rem; }
+  #password-gate .gate-remember input { flex: 0; width: auto; margin-right: 0.4rem; vertical-align: middle; }
+</style>
+<div id="password-gate">
+  <div class="gate-card">
+    <h1>Program Approval Tracker</h1>
+    <span class="subtitle">Enter password to access the dashboard.</span>
+    <form id="gate-form" autocomplete="off">
+      <input type="password" id="gate-password" placeholder="Password" autofocus required>
+      <button type="submit" id="gate-submit">Unlock</button>
+    </form>
+    <label class="gate-remember">
+      <input type="checkbox" id="gate-remember" checked>
+      Remember me for 30 days on this device
+    </label>
+    <div id="gate-error" class="gate-error"></div>
+  </div>
+</div>
+<script>
+(function() {
+  const CACHE_BUST = 1776445063;
+  const REMEMBER_KEY = 'cim-tracker-key-v1';
+  const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+  const gate = document.getElementById('password-gate');
+  const form = document.getElementById('gate-form');
+  const input = document.getElementById('gate-password');
+  const submit = document.getElementById('gate-submit');
+  const errEl = document.getElementById('gate-error');
+  const remember = document.getElementById('gate-remember');
+
+  const textDecoder = new TextDecoder();
+
+  const ENC_FILES = new Set([
+    'data.json', 'curriculum.json', 'reference.json', 'campus_groups.json',
+  ]);
+
+  let cryptoKey = null;
+  const cache = new Map(); // path -> parsed JSON
+
+  async function loadCryptoParams() {
+    const r = await fetch('crypto.json?v=' + CACHE_BUST);
+    if (!r.ok) throw new Error('crypto.json missing');
+    return r.json();
+  }
+
+  function b64ToBytes(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function bytesToB64(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  async function deriveKey(password, salt, iterations) {
+    const baseKey = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(password), {name: 'PBKDF2'}, false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      {name: 'PBKDF2', salt, iterations, hash: 'SHA-256'},
+      baseKey,
+      {name: 'AES-GCM', length: 256},
+      true,  // extractable (so we can stash it for remember-me)
+      ['decrypt']
+    );
+  }
+
+  async function decryptBlob(key, blob) {
+    // Layout: iv(12) || ciphertext+tag
+    const iv = blob.slice(0, 12);
+    const ct = blob.slice(12);
+    const pt = await crypto.subtle.decrypt({name: 'AES-GCM', iv}, key, ct);
+    return textDecoder.decode(pt);
+  }
+
+  async function fetchAndDecrypt(path) {
+    if (cache.has(path)) return cache.get(path);
+    const r = await fetch(path + '.enc?v=' + CACHE_BUST);
+    if (!r.ok) throw new Error('fetch ' + path + '.enc failed');
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(cryptoKey, blob);
+    const obj = JSON.parse(plaintext);
+    cache.set(path, obj);
+    return obj;
+  }
+
+  // Monkey-patch fetch so existing app.js paths (fetch('data.json') etc.)
+  // transparently go through the decryptor.
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async function(url, opts) {
+    const name = typeof url === 'string'
+      ? url.replace(/^\.\//, '').split('?')[0]
+      : null;
+    if (name && ENC_FILES.has(name)) {
+      const obj = await fetchAndDecrypt(name);
+      return new Response(JSON.stringify(obj), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+    return origFetch(url, opts);
+  };
+
+  async function tryRememberedKey() {
+    try {
+      const raw = localStorage.getItem(REMEMBER_KEY);
+      if (!raw) return null;
+      const {jwk, expires} = JSON.parse(raw);
+      if (Date.now() > expires) { localStorage.removeItem(REMEMBER_KEY); return null; }
+      return await crypto.subtle.importKey(
+        'jwk', jwk, {name: 'AES-GCM'}, true, ['decrypt']
+      );
+    } catch (e) { return null; }
+  }
+
+  async function stashKeyForRemember(key) {
+    const jwk = await crypto.subtle.exportKey('jwk', key);
+    localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+      jwk, expires: Date.now() + REMEMBER_TTL_MS,
+    }));
+  }
+
+  async function verifyKey(key) {
+    // Try decrypting data.json.enc as a password check. AES-GCM throws if tag mismatches.
+    const r = await fetch('data.json.enc?v=' + CACHE_BUST);
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(key, blob);
+    const obj = JSON.parse(plaintext);
+    cache.set('data.json', obj);
+    return obj;
+  }
+
+  function bootDashboard() {
+    gate.style.display = 'none';
+    document.getElementById('app-root').style.display = '';
+    const s = document.createElement('script');
+    s.src = 'app.js?v=' + CACHE_BUST;
+    document.head.appendChild(s);
+  }
+
+  async function attemptUnlock(password) {
+    const params = await loadCryptoParams();
+    const salt = b64ToBytes(params.salt);
+    const key = await deriveKey(password, salt, params.iterations);
+    await verifyKey(key);  // throws on bad password
+    cryptoKey = key;
+    if (remember.checked) {
+      try { await stashKeyForRemember(key); } catch (e) { /* ignore */ }
+    }
+    bootDashboard();
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.textContent = '';
+    submit.disabled = true;
+    submit.textContent = 'Unlocking...';
+    try {
+      await attemptUnlock(input.value);
+    } catch (err) {
+      errEl.textContent = 'Wrong password.';
+      submit.disabled = false;
+      submit.textContent = 'Unlock';
+      input.select();
+    }
+  });
+
+  // Try remembered key silently
+  (async () => {
+    const key = await tryRememberedKey();
+    if (!key) return;
+    try {
+      await verifyKey(key);
+      cryptoKey = key;
+      bootDashboard();
+    } catch (e) {
+      localStorage.removeItem(REMEMBER_KEY);
+    }
+  })();
+})();
+</script>
+
+<div id="app-root" style="display:none">
     <header>
         <div class="header-left">
             <h1>Approval Tracker</h1>
@@ -116,8 +331,6 @@
             <!-- Populated by JS -->
         </div>
     </section>
-
-
-    <script src="app.js?v=1776439273"></script>
+</div>
 </body>
 </html>
