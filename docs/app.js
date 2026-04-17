@@ -53,6 +53,9 @@ function switchView(view) {
     // Update proposal button labels for Programs vs Courses
     const newBtn = document.getElementById('btn-proposal-new');
     if (newBtn) newBtn.textContent = view === 'courses' ? 'New Courses' : 'New Programs';
+    // Continuing only applies to courses
+    const contBtn = document.getElementById('btn-type-continuing');
+    if (contBtn) contBtn.style.display = view === 'courses' ? 'inline-block' : 'none';
 
     // Reload appropriate data
     if (view === 'programs') {
@@ -410,9 +413,14 @@ function updateProposalCounts(programs) {
 // Uses academic_level field from XML if present, else course number heuristic:
 // 1000-4999 -> Undergraduate, 5000+ -> Graduate.
 function classifyCourseLevel(course) {
-    const lvl = (course.academic_level || '').toLowerCase();
-    if (lvl.includes('undergrad')) return 'Undergraduate';
-    if (lvl.includes('grad')) return 'Graduate';
+    const lvl = (course.academic_level || '').toUpperCase();
+    // CIM uses codes: UG = Undergraduate, GR = Graduate, CP = Continuing Professional, GR-UG = both
+    if (lvl === 'UG') return 'Undergraduate';
+    if (lvl === 'GR') return 'Graduate';
+    if (lvl === 'CP') return 'Continuing';
+    if (lvl === 'GR-UG' || lvl === 'UG-GR') return 'Graduate';
+    if (lvl.includes('UNDERGRAD')) return 'Undergraduate';
+    if (lvl.includes('GRAD')) return 'Graduate';
     const m = (course.code || '').match(/\b(\d{4})\b/);
     if (m) {
         const n = parseInt(m[1], 10);
