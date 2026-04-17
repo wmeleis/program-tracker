@@ -649,8 +649,12 @@ def run_full_scan():
             record_change(scan_time, prog_id, '', current_step, 'new_program')
             changes += 1
 
-    # Record scan
-    record_scan(scan_time, len(all_discovered), len(details), changes)
+    # NB: we intentionally do NOT record the scan here. The caller
+    # (app.py do_scan) records it with a fresh timestamp after the
+    # entire scan cycle finishes — programs + courses + reference +
+    # export + deploy — so the dashboard's "Updated" header only
+    # changes when the whole pipeline is actually done, not when this
+    # first phase completes.
 
     # Validation: spot-check a few tracked roles against live Approve Pages
     print(f"\nValidating scan results against live data...")
@@ -877,8 +881,41 @@ def fetch_reference_curricula(program_ids, batch_size=10):
         unmatched = non_boston_ids - set(counterpart_map.keys())
         print(f"  {len(unmatched)} non-Boston programs will use own history as fallback")
 
-    print(f"\nFetching reference curricula for {len(program_ids)} programs...")
-    batches = [program_ids[i:i+batch_size] for i in range(0, len(program_ids), batch_size)]
+    # Special case: if the Boston counterpart is ITSELF in the current
+    # workflow (being revised), use its in-workflow curriculum as the
+    # reference rather than its last-approved history version. This lets
+    # non-Boston deployments compare against the up-to-date proposed
+    # Boston curriculum when one exists.
+    scanning_set = set(program_ids)
+    boston_in_workflow = {
+        non_boston_id: boston_id
+        for non_boston_id, boston_id in counterpart_map.items()
+        if boston_id in scanning_set
+    }
+    if boston_in_workflow:
+        print(f"  {len(boston_in_workflow)} non-Boston programs will use the Boston workflow-revised curriculum as reference")
+        with get_db() as conn:
+            for non_boston_id, boston_id in boston_in_workflow.items():
+                row = conn.execute(
+                    "SELECT curriculum_html FROM programs WHERE id = ?",
+                    (boston_id,),
+                ).fetchone()
+                if row and row['curriculum_html']:
+                    # Sentinel version_id=0 marks this as an in-workflow
+                    # reference so later scans always replace it (the
+                    # curriculum may change while Boston is being edited).
+                    upsert_reference_curriculum(
+                        non_boston_id,
+                        0,
+                        "current proposal (Boston, in workflow)",
+                        row['curriculum_html'],
+                    )
+
+    # Remove those programs from the JS-history path — already handled above.
+    fetch_ids = [pid for pid in program_ids if pid not in boston_in_workflow]
+
+    print(f"\nFetching reference curricula for {len(fetch_ids)} programs (via CIM history)...")
+    batches = [fetch_ids[i:i+batch_size] for i in range(0, len(fetch_ids), batch_size)]
     fetched = 0
     skipped = 0
 
@@ -1234,6 +1271,11 @@ def batch_fetch_course_details(course_ids, batch_size=25):
                 // Match a GMT-formatted date close to "Date Submitted:"
                 var dsMatch = html.match(/Date Submitted:[\\s\\S]{{0,120}}?([A-Z][a-z]{{2}},\\s*\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}[\\d:\\s]*GMT)/i);
                 if (dsMatch) result.meta.date_submitted = dsMatch[1].replace(/\\s+/g, " ").trim();
+                // Many already-approved courses under revision lack a "Date
+                // Submitted" label entirely; fall back to "Last edit" (when
+                // the revision was last saved, ~= when it entered workflow).
+                var leMatch = html.match(/Last edit[\\s\\S]{{0,300}}?([A-Z][a-z]{{2}},\\s*\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}[\\d:\\s]*GMT)/i);
+                if (leMatch) result.meta.last_edit = leMatch[1].replace(/\\s+/g, " ").trim();
                 // Detect proposal type from raw HTML
                 var proposalKeywords = ["New Course Proposal", "Inactivation Proposal", "Course Inactivation", "Course Revision", "Revise Course"];
                 result.meta._proposal_hits = [];
@@ -1414,7 +1456,12 @@ def process_course_scans(courses):
             'credits': meta.get('credits', ''),
             'description': meta.get('description', ''),
             'academic_level': meta.get('acad_level', ''),
-            'step_entered_date': meta.get('last_approval_date') or meta.get('date_submitted', ''),
+            'step_entered_date': (
+                meta.get('last_approval_date')
+                or meta.get('date_submitted')
+                or meta.get('last_edit')
+                or ''
+            ),
         }
 
         if upsert_course(course_data):

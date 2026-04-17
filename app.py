@@ -14,7 +14,8 @@ from database import (
     get_reference_curriculum, get_all_courses, get_course_workflow,
     get_course_pipeline_counts, get_recent_course_changes, get_last_course_scan,
     get_courses_by_step, get_course_colleges,
-    get_course_current_approvers, get_courses_by_approver
+    get_course_current_approvers, get_courses_by_approver,
+    record_scan,
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan
 from export_static import build_campus_groups
@@ -190,6 +191,22 @@ def api_scan_trigger():
                 scan_status['progress'] = 100
             except Exception as e:
                 print(f"Deploy error: {e}")
+
+            # Record scan completion only now (after the whole pipeline:
+            # programs + courses + reference + export + deploy). The
+            # dashboard's "Updated" header reads from this row, so this
+            # keeps it pinned to the previous scan's timestamp until the
+            # current one is fully done.
+            try:
+                completion_time = datetime.now().isoformat()
+                record_scan(
+                    completion_time,
+                    result.get('programs_scanned', 0) if result else 0,
+                    result.get('programs_with_workflow', 0) if result else 0,
+                    result.get('changes', 0) if result else 0,
+                )
+            except Exception as e:
+                print(f"Failed to record scan completion: {e}")
         except Exception as e:
             scan_status['error'] = str(e)
         finally:
