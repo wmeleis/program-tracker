@@ -41,14 +41,18 @@ function switchView(view) {
     const campusFilter = document.getElementById('filter-campus');
 
     if (view === 'courses') {
-        typeSection.style.display = 'none';
-        proposalSection.style.display = 'none';
+        typeSection.style.display = 'flex';
+        proposalSection.style.display = 'flex';
         campusFilter.parentElement.parentElement.style.display = 'none';
     } else {
         typeSection.style.display = 'flex';
         proposalSection.style.display = 'flex';
         campusFilter.parentElement.parentElement.style.display = 'flex';
     }
+
+    // Update proposal button labels for Programs vs Courses
+    const newBtn = document.getElementById('btn-proposal-new');
+    if (newBtn) newBtn.textContent = view === 'courses' ? 'New Courses' : 'New Programs';
 
     // Reload appropriate data
     if (view === 'programs') {
@@ -106,9 +110,13 @@ function isCollegeStep(step) {
 const COURSE_PIPELINE_STEPS = new Set([
     "Checkpoint",
     "Provost Initial Review",
+    "Provost Committee Assignment",
+    "Provost Continuing Education Module Oversight Group",
+    "Provost Continuing Education Module Oversight Group Hold",
     "Course Review 2",
     "Course Review 3",
     "Course Review Group",
+    "Course Review Group Complete - Hold",
     "Course GRA Regulatory Validation",
     "PS Course Review",
     "Graduate Curriculum Committee Chair",
@@ -121,6 +129,9 @@ const COURSE_PIPELINE_STEPS = new Set([
     "Data Entry 8 - Hold PA courses",
     "Data Entry 9",
     "REGISTRAR Continuing Education Level Discussion",
+    "REGISTRAR Digital Badge Setup",
+    "REGISTRAR Digital Badge Setup Hold",
+    "REGISTRAR Scheduling Office",
     "Banner - Prereq 2 Letter Course Number",
     "Banner",
     "Editor",
@@ -128,8 +139,12 @@ const COURSE_PIPELINE_STEPS = new Set([
 
 function isCourseCollegeStep(step) {
     if (!step) return false;
-    // Anything not in the central course pipeline is a college/department role
-    return !COURSE_PIPELINE_STEPS.has(step);
+    if (COURSE_PIPELINE_STEPS.has(step)) return false;
+    // Anything starting with "Provost" is a provost-level step, not a college step
+    if (step.startsWith('Provost')) return false;
+    if (step.startsWith('REGISTRAR')) return false;
+    if (step.startsWith('Course Review Group')) return false;
+    return true;
 }
 
 // Course pipeline buckets: several raw workflow steps collapse to one button.
@@ -149,6 +164,21 @@ const COURSE_BUCKETS = [
         role: 'Course Review',
         short_name: 'Course Review',
         match: step => step === 'Course Review 2' || step === 'Course Review 3',
+    },
+    {
+        role: 'Course Review Group',
+        short_name: 'Review Grp',
+        match: step => typeof step === 'string' && step.startsWith('Course Review Group'),
+    },
+    {
+        role: 'OTP',
+        short_name: 'OTP',
+        match: step => typeof step === 'string' && step.startsWith('Provost'),
+    },
+    {
+        role: 'Registrar',
+        short_name: 'Registrar',
+        match: step => typeof step === 'string' && step.startsWith('REGISTRAR'),
     },
 ];
 
@@ -361,7 +391,7 @@ function setProposalFilter(status) {
 }
 
 function updateProposalCounts(programs) {
-    const src = programs || allPrograms;
+    const src = programs || (currentView === 'courses' ? allCourses : allPrograms);
     const counts = { '': src.length, 'Added': 0, 'Edited': 0, 'Deactivated': 0 };
     src.forEach(p => {
         const s = p.status || '';
@@ -370,16 +400,33 @@ function updateProposalCounts(programs) {
     document.querySelectorAll('.proposal-btn').forEach(btn => {
         const s = btn.getAttribute('onclick').match(/'([^']*)'/)[1];
         const count = counts[s] || 0;
-        const labels = { '': 'All', 'Added': 'New Programs', 'Edited': 'Changes', 'Deactivated': 'Inactivations' };
+        const newLabel = currentView === 'courses' ? 'New Courses' : 'New Programs';
+        const labels = { '': 'All', 'Added': newLabel, 'Edited': 'Changes', 'Deactivated': 'Inactivations' };
         btn.textContent = `${labels[s]} (${count})`;
     });
 }
 
+// Classify a course as 'Undergraduate', 'Graduate', or 'Other'.
+// Uses academic_level field from XML if present, else course number heuristic:
+// 1000-4999 -> Undergraduate, 5000+ -> Graduate.
+function classifyCourseLevel(course) {
+    const lvl = (course.academic_level || '').toLowerCase();
+    if (lvl.includes('undergrad')) return 'Undergraduate';
+    if (lvl.includes('grad')) return 'Graduate';
+    const m = (course.code || '').match(/\b(\d{4})\b/);
+    if (m) {
+        const n = parseInt(m[1], 10);
+        if (n >= 1000 && n < 5000) return 'Undergraduate';
+        if (n >= 5000) return 'Graduate';
+    }
+    return 'Other';
+}
+
 function updateTypeCounts(programs) {
-    const src = programs || allPrograms;
+    const src = programs || (currentView === 'courses' ? allCourses : allPrograms);
     const counts = { '': src.length };
     src.forEach(p => {
-        const t = p.program_type || 'Other';
+        const t = currentView === 'courses' ? classifyCourseLevel(p) : (p.program_type || 'Other');
         counts[t] = (counts[t] || 0) + 1;
     });
     document.querySelectorAll('.type-btn').forEach(btn => {
@@ -591,7 +638,10 @@ function getBaseFiltered(approverProgramIds, exclude) {
             const submitted = item.date_submitted ? new Date(item.date_submitted) : null;
             if (!submitted || (now - submitted) >= 30 * 86400000) return false;
         }
-        if (!ex.type && typeFilter && item.program_type !== typeFilter) return false;
+        if (!ex.type && typeFilter) {
+            const lvl = currentView === 'courses' ? classifyCourseLevel(item) : item.program_type;
+            if (lvl !== typeFilter) return false;
+        }
         if (!ex.proposal && proposalFilter && item.status !== proposalFilter) return false;
         if (!ex.college && collegeFilter && item.college !== collegeFilter) return false;
         if (stepFilter && item.current_step !== stepFilter) return false;
@@ -735,10 +785,10 @@ function renderTable(items) {
         const expanded = expandedRows.has(id);
         const itemTitle = isCourseView ? item.code : item.name;
         const itemDisplay = isCourseView ? `${item.code}: ${item.title}` : item.name;
-        const collegeDisplay = isCourseView ? item.college : abbreviateCollege(item.college);
+        const collegeDisplay = abbreviateCollege(item.college);
         const progress = item.total_steps > 0 ? (item.completed_steps / item.total_steps * 100) : 0;
         const progressClass = progress < 33 ? 'early' : progress < 66 ? 'mid' : 'late';
-        const rowClass = isCourseView ? 'row-edited' :
+        const rowClass =
             item.status === 'Added' ? 'row-added' :
             item.status === 'Edited' ? 'row-edited' :
             item.status === 'Deactivated' ? 'row-deactivated' : 'row-edited';

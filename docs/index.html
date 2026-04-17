@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1776385736">
+    <link rel="stylesheet" href="style.css?v=1776398254">
 </head>
 <body>
     <header>
@@ -14,8 +14,8 @@
         </div>
         <div class="header-middle">
             <div class="view-toggle">
-                <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
                 <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">Courses</button>
+                <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
             </div>
         </div>
         <div class="header-right">
@@ -46,7 +46,7 @@
         <div class="view-divider"></div>
         <div class="view-group">
             <button class="proposal-btn active-all" onclick="setProposalFilter('')">All</button>
-            <button class="proposal-btn" onclick="setProposalFilter('Added')">New Programs</button>
+            <button class="proposal-btn" id="btn-proposal-new" onclick="setProposalFilter('Added')">New Programs</button>
             <button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button>
             <button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button>
         </div>
@@ -117,6 +117,6 @@
     </section>
 
 
-    <script src="app.js?v=1776385736"></script>
+    <script src="app.js?v=1776398254"></script>
 </body>
 </html>
