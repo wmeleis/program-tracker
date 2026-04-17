@@ -1417,14 +1417,20 @@ async function loadCompareDetail(programId) {
             const {identical, diff} = compareCurricula(currHtml, refHtml);
             updateCompareButton(programId, identical);
 
+            const inWorkflow = refData.version_date && refData.version_date.toLowerCase().includes('in workflow');
+            const refLabel = inWorkflow ? 'Boston (in workflow)' : 'Boston Reference';
+            const identicalMsg = inWorkflow
+                ? 'Curriculum is identical to the current Boston proposal (in workflow).'
+                : 'Curriculum is identical to the Boston reference.';
+
             const header = refData.version_date
                 ? `<div class="reference-header">Comparing against: ${escapeHtml(refData.version_date)}</div>`
                 : '';
 
             if (identical) {
-                contentEl.innerHTML = `${header}<div class="compare-identical">Curriculum is identical to the Boston reference.</div>`;
+                contentEl.innerHTML = `${header}<div class="compare-identical">${identicalMsg}</div>`;
             } else {
-                const table = renderSideBySide(diff, getProgramName(programId), 'Boston Reference');
+                const table = renderSideBySide(diff, getProgramName(programId), refLabel);
                 contentEl.innerHTML = `${header}
                     <div class="compare-legend">
                         <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in this version</span>

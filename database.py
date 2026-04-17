@@ -1,9 +1,22 @@
 """SQLite database layer for Program Approval Status Tracker."""
 
+import re
 import sqlite3
 import os
 from datetime import datetime
 from contextlib import contextmanager
+
+# A step_entered_date matching this pattern was written by a prior-scan
+# fallback (datetime.now().isoformat()), not extracted from CourseLeaf.
+# Example: "2026-04-16T21:14:13.042753". Real dates come in RFC-822 GMT
+# format ("Thu, 05 May 2022 17:50:38 GMT"). Treat these as "no real date
+# available" so a later scan that does extract a real date can replace
+# them (and so we fall back to first_seen rather than preserving junk).
+_STALE_ISO_FALLBACK = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+$')
+
+
+def _is_stale_fallback(value):
+    return bool(value) and bool(_STALE_ISO_FALLBACK.match(value))
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'tracker.db')
 
@@ -448,7 +461,7 @@ def upsert_course(course_data):
     """Insert or update a course. Returns True if the course changed."""
     with get_db() as conn:
         existing = conn.execute(
-            "SELECT current_step, status, step_entered_date FROM courses WHERE id = ?",
+            "SELECT current_step, status, step_entered_date, first_seen FROM courses WHERE id = ?",
             (course_data['id'],)
         ).fetchone()
 
@@ -456,6 +469,10 @@ def upsert_course(course_data):
         changed = False
 
         if existing is None:
+            # New course: prefer a real date from scraper; else use `now` so we
+            # at least have *something*. Subsequent scans can replace this via
+            # the stale-fallback detection in the update path.
+            step_entered = course_data.get('step_entered_date') or now
             conn.execute("""
                 INSERT INTO courses (id, code, title, status, current_step,
                     total_steps, completed_steps, current_approver_emails,
@@ -473,7 +490,7 @@ def upsert_course(course_data):
                 course_data.get('current_approver_emails', ''),
                 course_data.get('college', ''),
                 course_data.get('date_submitted', ''),
-                course_data.get('step_entered_date', now),
+                step_entered,
                 course_data.get('credits', ''),
                 course_data.get('description', ''),
                 course_data.get('academic_level', ''),
@@ -486,13 +503,22 @@ def upsert_course(course_data):
             if old_step != new_step or existing['status'] != course_data.get('status', ''):
                 changed = True
 
-            # Prefer historical date from scraper; else preserve existing; else now
+            # Step-entered-date resolution order:
+            #   1. Real date from this scrape (scraper returns non-empty).
+            #   2. If step didn't change AND existing value is a real date
+            #      (not a stale datetime.now() fallback), preserve it.
+            #   3. Otherwise fall back to first_seen, so the user sees
+            #      "days since we first observed this course" instead of a
+            #      counter that resets every scan.
             step_entered = course_data.get('step_entered_date', '')
             if not step_entered:
-                if old_step == new_step:
-                    step_entered = existing['step_entered_date'] or now
+                existing_date = existing['step_entered_date']
+                if (old_step == new_step
+                        and existing_date
+                        and not _is_stale_fallback(existing_date)):
+                    step_entered = existing_date
                 else:
-                    step_entered = now
+                    step_entered = existing['first_seen'] or now
 
             conn.execute("""
                 UPDATE courses SET
