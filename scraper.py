@@ -90,15 +90,20 @@ COLLEGE_NAMES = {
 # Everything not in this list is considered a college-level course role
 COURSE_TRACKED_ROLES = [
     "Checkpoint",
-    "Provost Initial Review",
     "Course Review 2",
     "Course Review 3",
+    "Editor",
     "Course Review Group",
-    "Course GRA Regulatory Validation",
-    "PS Course Review",
-    "Graduate Curriculum Committee Chair",
+    "Course Review Group Complete - Hold",
+    "Provost Initial Review",
+    "Provost Committee Assignment",
+    "Provost Continuing Education Module Oversight Group",
+    "Provost Continuing Education Module Oversight Group Hold",
     "Graduate Council Subcommittee One",
     "Graduate Council Subcommittee Two",
+    "Graduate Curriculum Committee Chair",
+    "Course GRA Regulatory Validation",
+    "PS Course Review",
     "Data Entry 1",
     "Data Entry 3",
     "Data Entry 3 - Awaiting Course Approval",
@@ -106,20 +111,26 @@ COURSE_TRACKED_ROLES = [
     "Data Entry 8 - Hold PA courses",
     "Data Entry 9",
     "REGISTRAR Continuing Education Level Discussion",
+    "REGISTRAR Digital Badge Setup",
+    "REGISTRAR Digital Badge Setup Hold",
+    "REGISTRAR Scheduling Office",
     "Banner - Prereq 2 Letter Course Number",
     "Banner",
-    "Editor",
 ]
 
 COURSE_ROLE_SHORT_NAMES = {
     "Checkpoint": "Checkpoint",
     "Provost Initial Review": "Provost Init",
+    "Provost Committee Assignment": "Provost Committee",
+    "Provost Continuing Education Module Oversight Group": "Provost CE",
+    "Provost Continuing Education Module Oversight Group Hold": "Provost CE Hold",
     "Course Review 2": "Review 2",
     "Course Review 3": "Review 3",
     "Course Review Group": "Review Grp",
+    "Course Review Group Complete - Hold": "Review Grp Hold",
     "Course GRA Regulatory Validation": "GRA Reg",
     "PS Course Review": "PS Review",
-    "Graduate Curriculum Committee Chair": "Grad Curric",
+    "Graduate Curriculum Committee Chair": "UGCC Chair",
     "Graduate Council Subcommittee One": "Grad Sub 1",
     "Graduate Council Subcommittee Two": "Grad Sub 2",
     "Data Entry 1": "DE 1",
@@ -129,6 +140,9 @@ COURSE_ROLE_SHORT_NAMES = {
     "Data Entry 8 - Hold PA courses": "DE 8 (Hold)",
     "Data Entry 9": "DE 9",
     "REGISTRAR Continuing Education Level Discussion": "Reg CE",
+    "REGISTRAR Digital Badge Setup": "Reg Badge",
+    "REGISTRAR Digital Badge Setup Hold": "Reg Badge Hold",
+    "REGISTRAR Scheduling Office": "Reg Sched",
     "Banner - Prereq 2 Letter Course Number": "Banner Preq",
     "Banner": "Banner",
     "Editor": "Editor",
@@ -1206,10 +1220,42 @@ def batch_fetch_course_details(course_ids, batch_size=25):
                             emails: link ? link.getAttribute("href").replace("mailto:", "") : ""
                         }});
                     }});
+                    if (items.length === 0) {{
+                        result.meta._wf_empty = true;
+                        result.meta._wf_html = wfDiv.outerHTML.substring(0, 600);
+                    }}
+                }} else {{
+                    result.meta._wf_missing = true;
+                    result.meta._html_len = xhr1.responseText.length;
                 }}
-                var text = doc.body ? doc.body.textContent : "";
-                var dsMatch = text.match(/Date Submitted:\\s*([^\\n]+)/);
-                if (dsMatch) result.meta.date_submitted = dsMatch[1].trim();
+                // Search raw HTML source (parseFromString's textContent loses newlines/whitespace)
+                var html = xhr1.responseText;
+                var stripTags = function(s) {{ return s.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\\s+/g, " ").trim(); }};
+                // Match a GMT-formatted date close to "Date Submitted:"
+                var dsMatch = html.match(/Date Submitted:[\\s\\S]{{0,120}}?([A-Z][a-z]{{2}},\\s*\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}[\\d:\\s]*GMT)/i);
+                if (dsMatch) result.meta.date_submitted = dsMatch[1].replace(/\\s+/g, " ").trim();
+                // Detect proposal type from raw HTML
+                var proposalKeywords = ["New Course Proposal", "Inactivation Proposal", "Course Inactivation", "Course Revision", "Revise Course"];
+                result.meta._proposal_hits = [];
+                for (var pk = 0; pk < proposalKeywords.length; pk++) {{
+                    if (html.indexOf(proposalKeywords[pk]) !== -1) result.meta._proposal_hits.push(proposalKeywords[pk]);
+                }}
+                if (html.indexOf("New Course Proposal") !== -1) result.meta.proposal_type = "New Course Proposal";
+                else if (html.indexOf("Inactivation") !== -1) result.meta.proposal_type = "Inactivation Proposal";
+                else result.meta.proposal_type = "Course Revision Proposal";
+                // Capture a sample of the raw HTML for diagnostics
+                result.meta._body_sample = html.substring(0, 500);
+                // Extract approval dates from raw HTML - last one is when current step was entered
+                var approvalDates = [];
+                var apMatch;
+                var apPattern = /([A-Z][a-z]{{2}},\\s+\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}\\s+[\\d:]+\\s+GMT)[\\s\\S]{{0,400}}?Approved for ([^<\\n]+)/g;
+                while ((apMatch = apPattern.exec(html)) !== null) {{
+                    approvalDates.push({{date: apMatch[1], step: stripTags(apMatch[2])}});
+                }}
+                result.meta._approval_count = approvalDates.length;
+                if (approvalDates.length > 0) {{
+                    result.meta.last_approval_date = approvalDates[approvalDates.length - 1].date;
+                }}
             }}
         }} catch(e) {{
             result.html_error = e.message;
@@ -1232,6 +1278,9 @@ def batch_fetch_course_details(course_ids, batch_size=25):
                 result.meta.subject = getXml("subject") || getXml("subjectcode") || getXml("prefix");
                 result.meta.course_number = getXml("number") || getXml("courseNumber") || getXml("coursenumber");
                 result.meta.course_title = getXml("title") || getXml("courseTitle");
+                result.meta.credits = getXml("credits") || getXml("credithoursmin") || getXml("credit_hours") || getXml("credithours");
+                result.meta.description = getXml("description") || getXml("coursedescription") || getXml("catalogdescription");
+                result.meta.acad_level = getXml("acad_level") || getXml("level") || getXml("courselevel");
                 // Dump tag names from the first course in the first batch for debugging
                 if (batch_num === 0 && i === 0) {{
                     var tags = [];
@@ -1281,6 +1330,31 @@ def process_course_scans(courses):
     course_ids = [c['id'] for c in courses]
     details = batch_fetch_course_details(course_ids) if course_ids else {}
 
+    # Debug: dump info for first few courses missing workflow
+    missing_dumped = 0
+    for cid, d in details.items():
+        if missing_dumped >= 3:
+            break
+        if not d.get('steps'):
+            meta = d.get('meta', {})
+            print(f"  [debug] no steps for course {cid}:", flush=True)
+            print(f"    empty={meta.get('_wf_empty')}, missing={meta.get('_wf_missing')}, html_len={meta.get('_html_len')}", flush=True)
+            if meta.get('_wf_html'):
+                print(f"    wf_html: {meta['_wf_html'][:300]!r}", flush=True)
+            missing_dumped += 1
+
+    # Debug: show proposal hits + body sample for first 2 courses
+    debug_shown = 0
+    for cid, d in details.items():
+        if debug_shown >= 2:
+            break
+        meta = d.get('meta', {})
+        hits = meta.get('_proposal_hits')
+        if hits is not None:
+            print(f"  [debug] course {cid} proposal_hits={hits}, type={meta.get('proposal_type')}", flush=True)
+            print(f"    body_sample: {meta.get('_body_sample','')[:300]!r}", flush=True)
+            debug_shown += 1
+
     # Surface XML-tag debug info once so we can confirm field names.
     for cid, d in details.items():
         tags = (d.get('meta') or {}).get('_xml_tags')
@@ -1316,17 +1390,31 @@ def process_course_scans(courses):
         college_code = meta.get('college', '')
         college_name = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
 
+        # Map proposal type to status used for row coloring.
+        # Matches program convention: Added / Edited / Deactivated.
+        ptype = meta.get('proposal_type', '')
+        if 'New Course' in ptype:
+            status = 'Added'
+        elif 'Inactivation' in ptype:
+            status = 'Deactivated'
+        else:
+            status = 'Edited'
+
         course_data = {
             'id': cid,
             'code': course_code,
             'title': meta.get('course_title') or title,
-            'status': 'Active',
+            'status': status,
             'current_step': current_step_from_wf or c.get('current_step', ''),
             'total_steps': total_steps,
             'completed_steps': completed_steps,
             'current_approver_emails': current_emails,
             'college': college_name,
             'date_submitted': meta.get('date_submitted', ''),
+            'credits': meta.get('credits', ''),
+            'description': meta.get('description', ''),
+            'academic_level': meta.get('acad_level', ''),
+            'step_entered_date': meta.get('last_approval_date') or meta.get('date_submitted', ''),
         }
 
         if upsert_course(course_data):

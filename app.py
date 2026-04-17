@@ -14,7 +14,8 @@ from database import (
     get_programs_by_approver, get_program_curriculum,
     get_reference_curriculum, get_all_courses, get_course_workflow,
     get_course_pipeline_counts, get_recent_course_changes, get_last_course_scan,
-    get_courses_by_step, get_course_colleges
+    get_courses_by_step, get_course_colleges,
+    get_course_current_approvers, get_courses_by_approver
 )
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan
 from export_static import build_campus_groups
@@ -305,6 +306,19 @@ def api_course_changes():
 def api_course_colleges():
     """Get list of all colleges with courses."""
     return jsonify({'colleges': get_course_colleges()})
+
+
+@app.route('/api/course_approvers')
+def api_course_approvers():
+    """Get all current course approvers with course counts."""
+    return jsonify({'approvers': get_course_current_approvers()})
+
+
+@app.route('/api/course_approver/<path:email>')
+def api_course_approver_courses(email):
+    """Get courses waiting on a specific approver."""
+    courses = get_courses_by_approver(email)
+    return jsonify({'courses': courses, 'email': email})
 
 
 @app.route('/api/course/<path:step_name>')
