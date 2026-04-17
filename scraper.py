@@ -603,14 +603,23 @@ def run_full_scan():
         # Calculate progress
         total = len(steps)
         completed = sum(1 for s in steps if s.get('status') == 'approved')
+        # Trust the Approve Pages queue (Phase 1) for current_step. The
+        # per-program workflow HTML's `<li class="current">` marker can
+        # stay stale after a program has been approved through — CourseLeaf
+        # appears to cache those pages server-side — which causes the
+        # pipeline bucket counts to overcount early steps.
         current_step = info.get('current_step', '')
         current_emails = ''
-
-        for s in steps:
-            if s.get('status') == 'current':
-                current_emails = s.get('emails', '')
-                current_step = s.get('name', current_step)
-                break
+        matched = next((s for s in steps if s.get('name') == current_step), None)
+        if matched:
+            current_emails = matched.get('emails', '')
+        elif not current_step:
+            # Approve Pages had no assignment; fall back to workflow div.
+            for s in steps:
+                if s.get('status') == 'current':
+                    current_emails = s.get('emails', '')
+                    current_step = s.get('name', '')
+                    break
 
         prog_type = classify_program_type(prog_name, steps)
 
@@ -1421,13 +1430,21 @@ def process_course_scans(courses):
 
         total_steps = len(steps)
         completed_steps = sum(1 for s in steps if s.get('status') == 'approved')
-        current_step_from_wf = ''
+        # Same caveat as the programs path: CourseLeaf's per-course
+        # workflow HTML can lag the Approve Pages queue, so we prefer
+        # the Approve Pages role assignment (Phase 1 discovery) and
+        # only use the workflow div as a fallback.
+        current_step_from_aq = c.get('current_step', '')
         current_emails = ''
-        for s in steps:
-            if s.get('status') == 'current':
-                current_step_from_wf = s.get('name', '')
-                current_emails = s.get('emails', '')
-                break
+        matched = next((s for s in steps if s.get('name') == current_step_from_aq), None)
+        if matched:
+            current_emails = matched.get('emails', '')
+        elif not current_step_from_aq:
+            for s in steps:
+                if s.get('status') == 'current':
+                    current_step_from_aq = s.get('name', '')
+                    current_emails = s.get('emails', '')
+                    break
 
         college_code = meta.get('college', '')
         college_name = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
@@ -1447,7 +1464,7 @@ def process_course_scans(courses):
             'code': course_code,
             'title': meta.get('course_title') or title,
             'status': status,
-            'current_step': current_step_from_wf or c.get('current_step', ''),
+            'current_step': current_step_from_aq,
             'total_steps': total_steps,
             'completed_steps': completed_steps,
             'current_approver_emails': current_emails,
