@@ -234,10 +234,25 @@ async function loadCoursesDashboard() {
         loadCoursePipeline(),
         loadCourses(),
         loadScanStatus(),
-        loadCourseColleges()
+        loadCourseColleges(),
+        loadCourseApprovers()
     ]);
     if (cachedCoursePipeline.length) renderPipeline(cachedCoursePipeline, allCourses);
     updateCourseSmartViewCounts();
+}
+
+async function loadCourseApprovers() {
+    try {
+        const res = await fetch('/api/course_approvers');
+        const data = await res.json();
+        const select = document.getElementById('filter-approver');
+        const options = (data.approvers || []).map(a =>
+            `<option value="${a.email}">${a.display} (${a.count})</option>`
+        ).join('');
+        select.innerHTML = '<option value="">All Approvers</option>' + options;
+    } catch (e) {
+        console.error('Failed to load course approvers:', e);
+    }
 }
 
 async function loadCoursePipeline() {
@@ -598,15 +613,19 @@ async function applyFilters() {
     const collegeFilter = document.getElementById('filter-college').value;
     const approverFilter = document.getElementById('filter-approver').value;
 
-    // If approver filter is active, fetch programs from API (or use static cache)
+    // If approver filter is active, fetch programs/courses from API (or use static cache)
     let approverProgramIds = window._staticApproverIds || null;
     if (approverFilter && !approverProgramIds) {
         try {
-            const res = await fetch(`/api/approver/${encodeURIComponent(approverFilter)}`);
+            const endpoint = currentView === 'courses'
+                ? `/api/course_approver/${encodeURIComponent(approverFilter)}`
+                : `/api/approver/${encodeURIComponent(approverFilter)}`;
+            const res = await fetch(endpoint);
             const data = await res.json();
-            approverProgramIds = new Set((data.programs || []).map(p => p.id));
+            const items = currentView === 'courses' ? (data.courses || []) : (data.programs || []);
+            approverProgramIds = new Set(items.map(p => p.id));
         } catch (e) {
-            console.error('Failed to load approver programs:', e);
+            console.error('Failed to load approver items:', e);
         }
     }
 
@@ -820,9 +839,21 @@ async function loadWorkflowDetail(id, isCourseView) {
             metaHtml = `<div class="workflow-meta">Current approver(s): ${emailLinks}</div>`;
         }
 
+        let courseMetaHtml = '';
+        if (isCourseView) {
+            const course = allCourses.find(c => String(c.id) === String(id));
+            if (course) {
+                const parts = [];
+                if (course.credits) parts.push(`<div class="workflow-meta"><strong>Credits:</strong> ${escapeHtml(course.credits)}</div>`);
+                if (course.description) parts.push(`<div class="workflow-meta"><strong>Description:</strong> ${escapeHtml(course.description)}</div>`);
+                courseMetaHtml = parts.join('');
+            }
+        }
+
         contentEl.innerHTML = `
             <div class="workflow-steps">${stepsHtml}</div>
             ${metaHtml}
+            ${courseMetaHtml}
         `;
     } catch (e) {
         contentEl.innerHTML = '<div class="workflow-meta">Failed to load workflow details.</div>';
@@ -1667,8 +1698,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const cSel = document.getElementById('filter-college');
         cSel.innerHTML = '<option value="">All Colleges</option>' +
             (D.course_colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        const aSel = document.getElementById('filter-approver');
+        aSel.innerHTML = '<option value="">All Approvers</option>' +
+            (D.course_approvers || []).map(a =>
+                `<option value="${a.email}">${a.display} (${a.count})</option>`
+            ).join('');
         updateCourseSmartViewCounts();
         applyFilters();
+    };
+    window.loadCourseApprovers = async function() {
+        const D = await _getData();
+        const select = document.getElementById('filter-approver');
+        const options = (D.course_approvers || []).map(a =>
+            `<option value="${a.email}">${a.display} (${a.count})</option>`
+        ).join('');
+        select.innerHTML = '<option value="">All Approvers</option>' + options;
     };
     window.loadCoursePipeline = async function() {
         const D = await _getData();
@@ -1718,25 +1762,46 @@ document.addEventListener('DOMContentLoaded', () => {
             metaHtml = `<div class="workflow-meta">Current approver(s): ${emailLinks}</div>`;
         }
 
+        let courseMetaHtml = '';
+        if (isCourseView) {
+            const course = allCourses.find(c => String(c.id) === String(programId));
+            if (course) {
+                const parts = [];
+                if (course.credits) parts.push(`<div class="workflow-meta"><strong>Credits:</strong> ${escapeHtml(course.credits)}</div>`);
+                if (course.description) parts.push(`<div class="workflow-meta"><strong>Description:</strong> ${escapeHtml(course.description)}</div>`);
+                courseMetaHtml = parts.join('');
+            }
+        }
+
         contentEl.innerHTML = `
             <div class="workflow-steps">${stepsHtml}</div>
             ${metaHtml}
+            ${courseMetaHtml}
         `;
     };
 
-    // Patch approver filter to use static data
+    // Patch approver filter to use static data (branches on programs vs courses view)
     const _origApplyFilters = applyFilters;
     window.applyFilters = async function() {
         const approverFilter = document.getElementById('filter-approver').value;
         if (approverFilter) {
             const D = await _getData();
             const ids = new Set();
-            D.programs.forEach(p => {
-                const wf = D.workflows[String(p.id)] || [];
-                if (wf.some(s => s.step_status === 'current' && s.approver_emails && s.approver_emails.includes(approverFilter))) {
-                    ids.add(p.id);
-                }
-            });
+            if (currentView === 'courses') {
+                (D.courses || []).forEach(c => {
+                    const wf = (D.course_workflows || {})[String(c.id)] || [];
+                    if (wf.some(s => s.step_status === 'current' && s.approver_emails && s.approver_emails.includes(approverFilter))) {
+                        ids.add(c.id);
+                    }
+                });
+            } else {
+                (D.programs || []).forEach(p => {
+                    const wf = (D.workflows || {})[String(p.id)] || [];
+                    if (wf.some(s => s.step_status === 'current' && s.approver_emails && s.approver_emails.includes(approverFilter))) {
+                        ids.add(p.id);
+                    }
+                });
+            }
             window._staticApproverIds = ids;
         } else {
             window._staticApproverIds = null;
