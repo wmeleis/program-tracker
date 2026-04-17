@@ -31,7 +31,7 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 |------|---------|
 | `scraper.py` | Scrapes CourseLeaf via AppleScript executing JS in Chrome tabs. Two data sources: Approve Pages (role dropdown, matched by URL `courseleaf/approve`) for program discovery, and per-program XHR fetches (HTML + XML API) for workflow/metadata. |
 | `database.py` | SQLite layer. Tables: `programs`, `workflow_steps`, `scan_history`, `scans`. Uses WAL mode. |
-| `app.py` | Flask server on port 5001. REST API + background scanner thread (30 min). After each scan, auto-exports static site and pushes to GitHub. |
+| `app.py` | Flask server on port 5001. REST API. Scans are driven externally by `update.sh` (launched by launchd), not on a Flask-side timer. After each triggered scan, auto-exports static site and pushes to GitHub. |
 | `export_static.py` | Generates `docs/` directory: `data.json`, `index.html`, `app.js`, `style.css`. The static `app.js` overrides API calls to read from `data.json`. |
 | `static/app.js` | Frontend: pipeline bar, filters (type/proposal/smart views/college/campus/approver/step/search), sortable table with expandable workflow detail rows. |
 | `static/style.css` | Dashboard styling. Colored left borders: green=new, blue=change, red=inactivation. |
@@ -40,9 +40,14 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 
 ### Scheduled Execution
 - **launchd agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
-- **Schedule:** `StartCalendarInterval` at 2am, 7am, 11am, 3pm, 7pm ET (5 scans/day covering MA+CA working hours)
-- **Runs:** `update.sh` which triggers scan via Flask API
-- **Requirement:** Chrome must be open with valid CourseLeaf session
+- **Schedule:** `StartCalendarInterval` at 9am, 1pm, 5pm ET (every 4 hours, starting at 9am). macOS fires any missed firing on wake.
+- **Runs:** `update.sh`, which decides whether to actually scan based on these rules:
+  1. Current time must be inside the 9am–8pm ET window (exclusive on 8pm).
+  2. At least 4 hours must have passed since the last successful scan, recorded in `data/last_scan_unix`.
+  3. Chrome must be running with a live CourseLeaf session.
+
+  This layered design is deliberate: launchd's scheduled times are just *opportunities*; the gap check in `update.sh` is what enforces the rule, so waking from sleep (which causes launchd to fire missed intervals in a cluster) won't cause duplicate scans. If a scan is skipped, the next firing reconsiders.
+- **Requirement:** Chrome must be open with valid CourseLeaf session when a scan fires.
 
 ### How the Scraper Works
 

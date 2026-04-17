@@ -2,7 +2,6 @@
 
 import os
 import threading
-import time
 from datetime import datetime
 from flask import Flask, render_template, jsonify
 from flask_cors import CORS
@@ -32,28 +31,6 @@ scan_status = {
     'phase': '',
     'progress': 0,  # 0-100
 }
-
-SCAN_INTERVAL_MINUTES = 30
-
-
-def background_scanner():
-    """Background thread that runs scans periodically."""
-    while True:
-        time.sleep(SCAN_INTERVAL_MINUTES * 60)
-        if not scan_status['running']:
-            try:
-                scan_status['running'] = True
-                scan_status['error'] = None
-                result = run_full_scan()
-                scan_status['last_result'] = result
-            except Exception as e:
-                scan_status['error'] = str(e)
-                import traceback
-                print(f"Scan error: {e}")
-                traceback.print_exc()
-            finally:
-                scan_status['running'] = False
-
 
 @app.route('/')
 def dashboard():
@@ -331,10 +308,5 @@ def api_step_courses(step_name):
 if __name__ == '__main__':
     init_db()
     migrate_db()
-
-    # Start background scanner
-    scanner_thread = threading.Thread(target=background_scanner, daemon=True)
-    scanner_thread.start()
-    print(f"Background scanner started (every {SCAN_INTERVAL_MINUTES} minutes)")
-
+    # Scans are driven externally by launchd/update.sh, not on a Flask timer.
     app.run(debug=True, port=5001, use_reloader=False)
