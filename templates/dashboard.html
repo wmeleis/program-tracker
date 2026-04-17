@@ -14,8 +14,8 @@
         </div>
         <div class="header-middle">
             <div class="view-toggle">
-                <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
                 <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">Courses</button>
+                <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
             </div>
         </div>
         <div class="header-right">
@@ -42,11 +42,12 @@
             <button class="type-btn active" onclick="setTypeFilter('')">All</button>
             <button class="type-btn" onclick="setTypeFilter('Undergraduate')">Undergraduate</button>
             <button class="type-btn" onclick="setTypeFilter('Graduate')">Graduate</button>
+            <button class="type-btn" id="btn-type-continuing" onclick="setTypeFilter('Continuing')">Continuing</button>
         </div>
         <div class="view-divider"></div>
         <div class="view-group">
             <button class="proposal-btn active-all" onclick="setProposalFilter('')">All</button>
-            <button class="proposal-btn" onclick="setProposalFilter('Added')">New Programs</button>
+            <button class="proposal-btn" id="btn-proposal-new" onclick="setProposalFilter('Added')">New Programs</button>
             <button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button>
             <button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button>
         </div>

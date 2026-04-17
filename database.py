@@ -107,6 +107,9 @@ def init_db():
                 college TEXT,
                 date_submitted TEXT,
                 step_entered_date TEXT,
+                credits TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                academic_level TEXT DEFAULT '',
                 first_seen TIMESTAMP,
                 last_updated TIMESTAMP
             );
@@ -456,8 +459,9 @@ def upsert_course(course_data):
             conn.execute("""
                 INSERT INTO courses (id, code, title, status, current_step,
                     total_steps, completed_steps, current_approver_emails,
-                    college, date_submitted, step_entered_date, first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    college, date_submitted, step_entered_date,
+                    credits, description, academic_level, first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 course_data['id'],
                 course_data.get('code', ''),
@@ -470,6 +474,9 @@ def upsert_course(course_data):
                 course_data.get('college', ''),
                 course_data.get('date_submitted', ''),
                 course_data.get('step_entered_date', now),
+                course_data.get('credits', ''),
+                course_data.get('description', ''),
+                course_data.get('academic_level', ''),
                 now, now
             ))
             changed = True
@@ -479,9 +486,13 @@ def upsert_course(course_data):
             if old_step != new_step or existing['status'] != course_data.get('status', ''):
                 changed = True
 
+            # Prefer historical date from scraper; else preserve existing; else now
             step_entered = course_data.get('step_entered_date', '')
-            if old_step == new_step:
-                step_entered = existing['step_entered_date'] or now
+            if not step_entered:
+                if old_step == new_step:
+                    step_entered = existing['step_entered_date'] or now
+                else:
+                    step_entered = now
 
             conn.execute("""
                 UPDATE courses SET
@@ -489,6 +500,7 @@ def upsert_course(course_data):
                     total_steps = ?, completed_steps = ?,
                     current_approver_emails = ?, college = ?,
                     date_submitted = ?, step_entered_date = ?,
+                    credits = ?, description = ?, academic_level = ?,
                     last_updated = ?
                 WHERE id = ?
             """, (
@@ -502,6 +514,9 @@ def upsert_course(course_data):
                 course_data.get('college', ''),
                 course_data.get('date_submitted', ''),
                 step_entered,
+                course_data.get('credits', ''),
+                course_data.get('description', ''),
+                course_data.get('academic_level', ''),
                 now,
                 course_data['id']
             ))
@@ -618,6 +633,55 @@ def get_course_colleges():
         return [row['college'] for row in rows]
 
 
+def get_course_current_approvers():
+    """Get all people who are current approvers for courses, with course counts."""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT ws.approver_emails, c.id, c.code
+            FROM course_workflow_steps ws
+            JOIN courses c ON ws.course_id = c.id
+            WHERE ws.step_status = 'current'
+              AND ws.approver_emails IS NOT NULL
+              AND ws.approver_emails != ''
+              AND c.current_step IS NOT NULL AND c.current_step != ''
+        """).fetchall()
+
+        approver_map = {}
+        for row in rows:
+            for email in row['approver_emails'].split(';'):
+                email = email.strip()
+                if not email or '@' not in email:
+                    continue
+                if email not in approver_map:
+                    prefix = email.split('@')[0]
+                    parts = prefix.split('.')
+                    if len(parts) >= 2:
+                        first_initial = parts[0][0].upper() + '.'
+                        last_name = parts[-1].capitalize()
+                        display = f"{last_name}, {first_initial}"
+                    else:
+                        display = parts[0].capitalize()
+                    approver_map[email] = {'email': email, 'display': display, 'count': 0}
+                approver_map[email]['count'] += 1
+
+        return sorted(approver_map.values(), key=lambda x: x['display'])
+
+
+def get_courses_by_approver(email):
+    """Get all courses where the given email is the current approver."""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT c.*
+            FROM courses c
+            JOIN course_workflow_steps ws ON ws.course_id = c.id
+            WHERE ws.step_status = 'current'
+              AND ws.approver_emails LIKE ?
+              AND c.current_step IS NOT NULL AND c.current_step != ''
+            ORDER BY c.code
+        """, (f'%{email}%',)).fetchall()
+        return [dict(row) for row in rows]
+
+
 def migrate_db():
     """Add new columns to existing database if needed."""
     with get_db() as conn:
@@ -636,6 +700,14 @@ def migrate_db():
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE programs ADD COLUMN {col} {typedef}")
                 print(f"  Added column: {col}")
+
+        # Courses table: add credits + description if missing
+        cursor = conn.execute("PRAGMA table_info(courses)")
+        existing_course_cols = {row['name'] for row in cursor.fetchall()}
+        for col, typedef in {'credits': 'TEXT DEFAULT ""', 'description': 'TEXT DEFAULT ""', 'academic_level': 'TEXT DEFAULT ""'}.items():
+            if col not in existing_course_cols:
+                conn.execute(f"ALTER TABLE courses ADD COLUMN {col} {typedef}")
+                print(f"  Added courses column: {col}")
 
         # Create reference_curriculum table if it doesn't exist
         conn.execute("""

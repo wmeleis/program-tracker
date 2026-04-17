@@ -11,7 +11,7 @@ from database import (
     get_recent_changes, get_last_scan, get_colleges,
     get_current_approvers, get_all_curriculum, get_all_reference_curriculum,
     get_all_courses, get_course_workflow, get_course_pipeline_counts,
-    get_course_colleges
+    get_course_colleges, get_course_current_approvers
 )
 from scraper import (
     TRACKED_ROLES, ROLE_SHORT_NAMES,
@@ -104,6 +104,7 @@ def export_data():
         if steps:
             course_workflows[str(c['id'])] = steps
     course_colleges = get_course_colleges()
+    course_approvers = get_course_current_approvers()
 
     return {
         'exported_at': datetime.now().isoformat(),
@@ -118,6 +119,7 @@ def export_data():
         'course_pipeline': course_pipeline,
         'course_workflows': course_workflows,
         'course_colleges': course_colleges,
+        'course_approvers': course_approvers,
     }
 
 
@@ -273,8 +275,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const cSel = document.getElementById('filter-college');
         cSel.innerHTML = '<option value="">All Colleges</option>' +
             (D.course_colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        const aSel = document.getElementById('filter-approver');
+        aSel.innerHTML = '<option value="">All Approvers</option>' +
+            (D.course_approvers || []).map(a =>
+                `<option value="${a.email}">${a.display} (${a.count})</option>`
+            ).join('');
         updateCourseSmartViewCounts();
         applyFilters();
+    };
+    window.loadCourseApprovers = async function() {
+        const D = await _getData();
+        const select = document.getElementById('filter-approver');
+        const options = (D.course_approvers || []).map(a =>
+            `<option value="${a.email}">${a.display} (${a.count})</option>`
+        ).join('');
+        select.innerHTML = '<option value="">All Approvers</option>' + options;
     };
     window.loadCoursePipeline = async function() {
         const D = await _getData();
@@ -324,25 +339,46 @@ document.addEventListener('DOMContentLoaded', () => {
             metaHtml = `<div class="workflow-meta">Current approver(s): ${emailLinks}</div>`;
         }
 
+        let courseMetaHtml = '';
+        if (isCourseView) {
+            const course = allCourses.find(c => String(c.id) === String(programId));
+            if (course) {
+                const parts = [];
+                if (course.credits) parts.push(`<div class="workflow-meta"><strong>Credits:</strong> ${escapeHtml(course.credits)}</div>`);
+                if (course.description) parts.push(`<div class="workflow-meta"><strong>Description:</strong> ${escapeHtml(course.description)}</div>`);
+                courseMetaHtml = parts.join('');
+            }
+        }
+
         contentEl.innerHTML = `
             <div class="workflow-steps">${stepsHtml}</div>
             ${metaHtml}
+            ${courseMetaHtml}
         `;
     };
 
-    // Patch approver filter to use static data
+    // Patch approver filter to use static data (branches on programs vs courses view)
     const _origApplyFilters = applyFilters;
     window.applyFilters = async function() {
         const approverFilter = document.getElementById('filter-approver').value;
         if (approverFilter) {
             const D = await _getData();
             const ids = new Set();
-            D.programs.forEach(p => {
-                const wf = D.workflows[String(p.id)] || [];
-                if (wf.some(s => s.step_status === 'current' && s.approver_emails && s.approver_emails.includes(approverFilter))) {
-                    ids.add(p.id);
-                }
-            });
+            if (currentView === 'courses') {
+                (D.courses || []).forEach(c => {
+                    const wf = (D.course_workflows || {})[String(c.id)] || [];
+                    if (wf.some(s => s.step_status === 'current' && s.approver_emails && s.approver_emails.includes(approverFilter))) {
+                        ids.add(c.id);
+                    }
+                });
+            } else {
+                (D.programs || []).forEach(p => {
+                    const wf = (D.workflows || {})[String(p.id)] || [];
+                    if (wf.some(s => s.step_status === 'current' && s.approver_emails && s.approver_emails.includes(approverFilter))) {
+                        ids.add(p.id);
+                    }
+                });
+            }
             window._staticApproverIds = ids;
         } else {
             window._staticApproverIds = null;
