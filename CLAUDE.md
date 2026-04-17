@@ -118,18 +118,20 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 - **Smart views:** Recent Changes = step_entered_date within 14 days; Potentially Stuck = 30+ days at step; New Submissions = date_submitted within 30 days
 
 ### Static Site (GitHub Pages)
-`export_static.py` generates a password-protected self-contained site in `docs/`:
-- All assets (CSS, JS) and data (programs, workflows, curricula, references, campus groups) are **inlined into a single HTML file**
-- The HTML is then **encrypted with AES-256 via StatiCrypt** — visitors see a password prompt; the page decrypts client-side
-- Password: stored in `STATICRYPT_PASSWORD` in `export_static.py`
-- Remember-me: 30-day localStorage cookie so users don't re-enter password on each visit
-- No separate JSON/JS/CSS files in `docs/` — everything is in the encrypted `index.html` (~97MB)
-- Static JS overrides read from `window.__EMBEDDED_DATA__`, `__EMBEDDED_CURRICULUM__`, `__EMBEDDED_REFERENCE__`, `__EMBEDDED_CAMPUS_GROUPS__` instead of fetch() calls
+`export_static.py` generates a plain static site in `docs/` (no encryption, publicly accessible):
+- `index.html` — built from `templates/dashboard.html`, with cache-busting `?v={timestamp}` query strings appended to CSS/JS URLs
+- `style.css` — copied from `static/style.css`
+- `app.js` — built from `static/app.js` with a static-mode override that points API calls at the sibling JSON files
+- `data.json` — programs, courses, workflows, colleges, approvers, course pipeline (curriculum_html stripped out)
+- `curriculum.json` — current curriculum HTML per program (split out so `data.json` stays small)
+- `reference.json` — reference curriculum data per program
+- `campus_groups.json` — Boston↔deployment mappings for the Compare tab
+- Static JS reads from these JSON files via `fetch()` (no `window.__EMBEDDED_*__` — that was only used by the prior encrypted/inlined build)
 - "Update Now" button on static site reaches `localhost:5001` to trigger a local scan (shows "Cannot reach local server" if Flask isn't running)
-- Approver filtering works via embedded data (searches workflow steps for matching approver_emails)
 - Auto-refresh interval is disabled on static site (data doesn't change)
 - Timestamps displayed in Eastern Time (America/New_York) with "ET" suffix
-- **Requires Node.js/npx** for StatiCrypt encryption during export
+
+**Historical note:** The site used to be StatiCrypt-encrypted with everything inlined into a single ~97MB `index.html` (password in `STATICRYPT_PASSWORD`, 30-day remember-me cookie). That path was removed; the `STATICRYPT_PASSWORD` constant still sits at the top of `export_static.py` but is unused.
 
 ## Known Issues / Gotchas
 
