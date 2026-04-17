@@ -118,20 +118,43 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 - **Smart views:** Recent Changes = step_entered_date within 14 days; Potentially Stuck = 30+ days at step; New Submissions = date_submitted within 30 days
 
 ### Static Site (GitHub Pages)
-`export_static.py` generates a plain static site in `docs/` (no encryption, publicly accessible):
-- `index.html` — built from `templates/dashboard.html`, with cache-busting `?v={timestamp}` query strings appended to CSS/JS URLs
+`export_static.py` generates a password-gated static site in `docs/` using client-side AES-256-GCM encryption. All JSON data is encrypted; a password gate decrypts on the client via WebCrypto.
+
+**Files in `docs/`:**
+- `index.html` — dashboard markup (template-wrapped in `<div id="app-root" style="display:none">`), preceded by an inline password gate + gate script
+- `app.js` — dashboard JS with static-mode overrides (built from `static/app.js`). Loaded dynamically by the gate after unlock, not referenced directly by `<script>` in the HTML
 - `style.css` — copied from `static/style.css`
-- `app.js` — built from `static/app.js` with a static-mode override that points API calls at the sibling JSON files
-- `data.json` — programs, courses, workflows, colleges, approvers, course pipeline (curriculum_html stripped out)
-- `curriculum.json` — current curriculum HTML per program (split out so `data.json` stays small)
-- `reference.json` — reference curriculum data per program
-- `campus_groups.json` — Boston↔deployment mappings for the Compare tab
-- Static JS reads from these JSON files via `fetch()` (no `window.__EMBEDDED_*__` — that was only used by the prior encrypted/inlined build)
-- "Update Now" button on static site reaches `localhost:5001` to trigger a local scan (shows "Cannot reach local server" if Flask isn't running)
-- Auto-refresh interval is disabled on static site (data doesn't change)
+- `crypto.json` — `{salt, iterations, algorithm, kdf}`; public by design (salt is not a secret)
+- `data.json.enc` — programs, courses, workflows, colleges, approvers, course pipeline (curriculum_html stripped out); decrypted on unlock
+- `campus_groups.json.enc` — Boston↔deployment mappings; decrypted lazily on Compare tab expand
+- `curriculum.json.enc` — current curriculum HTML per program; lazy
+- `reference.json.enc` — last-approved reference curricula; lazy
+
+**Crypto scheme:**
+- Password → PBKDF2-SHA256 (200,000 iterations, 16-byte salt) → 32-byte AES key
+- The salt persists across builds (reused from the previous `docs/crypto.json`) so that the client's remember-me — a derived key cached in `localStorage` for 30 days — survives each scan's rebuild. Salts are public by design; stable salt only gives up rainbow-table resistance, which 200k PBKDF2 iterations already defeats.
+- Per-file layout: `IV(12 bytes) || AES-256-GCM(plaintext, key, IV)` (the 16-byte GCM auth tag is appended by the cipher)
+- Wrong-password detection relies on AES-GCM's auth tag: `decrypt()` throws → gate shows "Wrong password."
+- Password lives in `SITE_PASSWORD` constant at the top of `export_static.py` (default `'husky26'`)
+
+**Client flow (in the inline gate script):**
+1. On page load, try to re-import a stored key from `localStorage['cim-tracker-key-v1']` (30-day remember-me). If present and decryption of `data.json.enc` succeeds, skip the form.
+2. Otherwise show the gate form. On submit: fetch `crypto.json`, derive a key via WebCrypto PBKDF2, attempt to decrypt `data.json.enc` to verify the password, stash the decrypted JSON in a cache, (optionally) save the JWK-exported key to localStorage.
+3. Monkey-patch `window.fetch` so that requests to `data.json` / `curriculum.json` / `reference.json` / `campus_groups.json` transparently go to the `.enc` sibling, decrypt via WebCrypto, and return a synthesized `Response` with the plaintext JSON. This means the downstream `static/app.js` code (which calls `fetch('curriculum.json')` etc.) works unchanged.
+4. Inject `<script src="app.js">` to boot the dashboard.
+
+**`build_static_js()` bootstrap:** the static-mode overrides used to be wrapped in `document.addEventListener('DOMContentLoaded', ...)`. Since `app.js` is injected by the gate *after* DOMContentLoaded has already fired, the wrapper is now readyState-aware (runs immediately if the document is already loaded, otherwise waits for the event). If you ever load `app.js` via a normal `<script>` tag, both paths still work.
+
+**Other static-site notes:**
+- "Update Now" button reaches `localhost:5001` to trigger a local scan (shows "Cannot reach local server" if Flask isn't running)
+- Auto-refresh interval is disabled on static site (data doesn't change between scans)
 - Timestamps displayed in Eastern Time (America/New_York) with "ET" suffix
 
-**Historical note:** The site used to be StatiCrypt-encrypted with everything inlined into a single ~97MB `index.html` (password in `STATICRYPT_PASSWORD`, 30-day remember-me cookie). That path was removed; the `STATICRYPT_PASSWORD` constant still sits at the top of `export_static.py` but is unused.
+**Dependency:** `pip install cryptography` for the Python-side AES-GCM + PBKDF2. No JS libraries needed — WebCrypto is built into every modern browser.
+
+**What this protection is and isn't:** it's client-side encryption with a shared password. Anyone with the password can decrypt any of the `.enc` files they download; anyone *without* the password sees only ciphertext at the `.enc` URLs. It keeps casual visitors, crawlers, and archive bots out. It is NOT real access control — a motivated attacker who knows or obtains the password (or guesses it offline against the PBKDF2 verifier) gets everything. If that matters, move to real auth (e.g. Cloudflare Pages behind Cloudflare Access).
+
+**Historical note:** The site was originally StatiCrypt-encrypted with everything inlined into a single ~97MB `index.html`. That approach became unloadable at current data sizes and was removed, replaced briefly by a plain (unencrypted) build, then by the current per-file scheme.
 
 ## Known Issues / Gotchas
 
@@ -149,7 +172,7 @@ After each scan completes, `app.py` automatically runs `export_static.py`, then 
 
 ## Dependencies
 - Python 3.9+ (macOS system Python works)
-- Flask, flask-cors (`pip install flask flask-cors`)
+- Flask, flask-cors, cryptography (`pip install flask flask-cors cryptography`)
 - Google Chrome with CourseLeaf session
 - macOS (AppleScript)
 - Git configured with push access to the repo

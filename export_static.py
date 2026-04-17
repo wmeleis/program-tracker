@@ -1,11 +1,15 @@
 """Export current data to a static site that can be hosted on GitHub Pages."""
 
+import base64
 import json
 import os
 import re
+import secrets
 import shutil
-import subprocess
 from datetime import datetime
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
 from database import (
     get_all_programs, get_program_workflow, get_pipeline_counts,
     get_recent_changes, get_last_scan, get_colleges,
@@ -18,8 +22,50 @@ from scraper import (
     COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES,
 )
 
-STATICRYPT_PASSWORD = 'husky26'
+SITE_PASSWORD = 'husky26'
+PBKDF2_ITERATIONS = 200_000
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _derive_key(password: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=PBKDF2_ITERATIONS,
+    )
+    return kdf.derive(password.encode('utf-8'))
+
+
+def _encrypt_to_file(plaintext: bytes, key: bytes, out_path: str) -> None:
+    """Write `iv(12) || AES-256-GCM ciphertext+tag` to out_path."""
+    iv = secrets.token_bytes(12)
+    ct = AESGCM(key).encrypt(iv, plaintext, None)
+    with open(out_path, 'wb') as f:
+        f.write(iv + ct)
+
+
+def _write_json_encrypted(obj, path_without_ext: str, key: bytes) -> None:
+    """Serialize `obj` to JSON and write an encrypted `.enc` file only."""
+    plaintext = json.dumps(obj).encode('utf-8')
+    _encrypt_to_file(plaintext, key, path_without_ext + '.enc')
+
+
+def _load_or_create_salt() -> bytes:
+    """Reuse the salt from docs/crypto.json if it exists; otherwise generate.
+
+    Keeping the salt stable across builds lets the client cache a derived
+    key in localStorage (remember-me) without being invalidated every scan.
+    """
+    path = os.path.join(EXPORT_DIR, 'crypto.json')
+    if os.path.exists(path):
+        try:
+            with open(path, 'r') as f:
+                params = json.load(f)
+            return base64.b64decode(params['salt'])
+        except Exception:
+            pass  # fall through to generating a new one
+    return secrets.token_bytes(16)
 
 
 def _parse_campus(name):
@@ -124,48 +170,71 @@ def export_data():
 
 
 def build_static_site():
-    """Build a complete static site in the docs/ directory.
+    """Build the static site in docs/, with JSON data encrypted via AES-GCM.
 
-    Encryption is currently OFF. All assets and JSON are served as plain files.
-    The frontend loads them via fetch(); the static override in build_static_js
-    already falls back to fetch when window.__EMBEDDED_*__ is undefined.
+    Output layout:
+      index.html             - dashboard markup + inline password gate + gate JS
+      app.js                 - dashboard JS (loaded dynamically after unlock)
+      style.css
+      crypto.json            - {salt (b64), iterations} — public by design
+      data.json.enc          - loaded on unlock
+      campus_groups.json.enc - loaded on unlock
+      curriculum.json.enc    - lazy-fetched + decrypted on program expand
+      reference.json.enc     - lazy-fetched + decrypted on program expand
+
+    Client flow: the gate derives a key from the password + salt using
+    PBKDF2-SHA256, monkey-patches fetch() to redirect *.json -> *.json.enc
+    and decrypt the bytes, then dynamically loads app.js. If decryption of
+    data.json.enc fails (auth-tag mismatch), the user sees "wrong password"
+    and is re-prompted.
     """
     os.makedirs(EXPORT_DIR, exist_ok=True)
 
-    # Remove any stale artifacts from the previous (encrypted) build. StatiCrypt
-    # used to emit an encrypted index.html that inlined everything; make sure
-    # old single-file copies don't stick around.
-    stale = os.path.join(EXPORT_DIR, 'index.html')
-    if os.path.exists(stale):
-        os.remove(stale)
+    # Reuse the existing salt across builds so that client-side remember-me
+    # (stored derived key in localStorage) keeps working after each scan.
+    # The salt is public by design; rotating it only helps against rainbow
+    # tables, which PBKDF2-SHA256 at 200k iterations already prevents.
+    salt = _load_or_create_salt()
+    key = _derive_key(SITE_PASSWORD, salt)
+
+    # Remove stale artifacts from previous builds (plain or encrypted).
+    # NB: we preserve crypto.json if it already holds the reused salt.
+    for fname in os.listdir(EXPORT_DIR):
+        if fname == 'crypto.json':
+            continue
+        if fname.endswith(('.json', '.enc', '.html', '.js', '.css')):
+            os.remove(os.path.join(EXPORT_DIR, fname))
 
     # Export data
     data = export_data()
-    # Strip curriculum_html from program rows — it's served separately via
-    # curriculum.json and would otherwise double the size of data.json.
+    # Strip curriculum_html from program rows — it lives in curriculum.json
     for p in data.get('programs', []):
         p.pop('curriculum_html', None)
-    with open(os.path.join(EXPORT_DIR, 'data.json'), 'w') as f:
-        json.dump(data, f)
+    _write_json_encrypted(data, os.path.join(EXPORT_DIR, 'data.json'), key)
 
-    # Export curriculum data separately (can be large; lazy-fetched on expand)
+    # Curriculum + reference (large; lazy-fetched + decrypted on expand)
     curriculum = get_all_curriculum()
-    with open(os.path.join(EXPORT_DIR, 'curriculum.json'), 'w') as f:
-        json.dump(curriculum, f)
+    _write_json_encrypted(curriculum, os.path.join(EXPORT_DIR, 'curriculum.json'), key)
 
-    # Export reference curriculum data
     reference = get_all_reference_curriculum()
-    with open(os.path.join(EXPORT_DIR, 'reference.json'), 'w') as f:
-        json.dump(reference, f)
+    _write_json_encrypted(reference, os.path.join(EXPORT_DIR, 'reference.json'), key)
 
-    # Export campus relationship data
+    # Campus relationship data
     boston_to_deployments, deployment_to_boston = build_campus_groups(data['programs'])
     campus_groups = {
         'boston_to_deployments': {str(k): v for k, v in boston_to_deployments.items()},
         'deployment_to_boston': {str(k): v for k, v in deployment_to_boston.items()},
     }
-    with open(os.path.join(EXPORT_DIR, 'campus_groups.json'), 'w') as f:
-        json.dump(campus_groups, f)
+    _write_json_encrypted(campus_groups, os.path.join(EXPORT_DIR, 'campus_groups.json'), key)
+
+    # Public crypto parameters (salt is not a secret)
+    with open(os.path.join(EXPORT_DIR, 'crypto.json'), 'w') as f:
+        json.dump({
+            'salt': base64.b64encode(salt).decode('ascii'),
+            'iterations': PBKDF2_ITERATIONS,
+            'algorithm': 'AES-GCM-256',
+            'kdf': 'PBKDF2-SHA256',
+        }, f)
 
     print(f"Exported: {len(data['programs'])} programs, {len(data['courses'])} courses, {len(data['workflows'])} workflows, {len(curriculum)} curricula, {len(reference)} references")
 
@@ -175,7 +244,7 @@ def build_static_site():
         os.path.join(EXPORT_DIR, 'style.css')
     )
 
-    # Build static app.js (overrides API calls to use data.json)
+    # Build static app.js (overrides API calls + readyState-aware bootstrap)
     src_js_path = os.path.join(os.path.dirname(__file__), 'static', 'app.js')
     with open(src_js_path, 'r') as f:
         original_js = f.read()
@@ -183,7 +252,8 @@ def build_static_site():
     with open(os.path.join(EXPORT_DIR, 'app.js'), 'w') as f:
         f.write(static_js)
 
-    # Generate index.html from template, pointing at the local asset files
+    # Generate index.html: take the dashboard template, wrap the dashboard
+    # content in a hidden container, and prepend the password gate.
     tmpl_path = os.path.join(os.path.dirname(__file__), 'templates', 'dashboard.html')
     with open(tmpl_path, 'r') as f:
         html = f.read()
@@ -191,16 +261,240 @@ def build_static_site():
     import time
     cache_bust = int(time.time())
     html = html.replace('href="/static/style.css"', f'href="style.css?v={cache_bust}"')
-    html = html.replace('src="/static/app.js"', f'src="app.js?v={cache_bust}"')
+    # Remove the static app.js <script> tag; the gate injects it after unlock
+    html = re.sub(r'\s*<script[^>]*src="/static/app\.js"[^>]*></script>', '', html)
     html = html.replace(
         '<button id="scan-btn" onclick="triggerScan()">Scan Now</button>',
         ''
     )
 
+    # Wrap the dashboard body content in a hidden container and prepend gate
+    gate_html = _gate_html(cache_bust)
+    html = html.replace('<body>', f'<body>\n{gate_html}\n<div id="app-root" style="display:none">', 1)
+    html = html.replace('</body>', '</div>\n</body>', 1)
+
     with open(os.path.join(EXPORT_DIR, 'index.html'), 'w') as f:
         f.write(html)
 
-    print(f"\nStatic site ready in: {EXPORT_DIR}/  (no encryption)")
+    print(f"\nStatic site ready in: {EXPORT_DIR}/  (AES-GCM, password-gated)")
+
+
+def _gate_html(cache_bust: int) -> str:
+    """HTML + inline JS for the password gate and client-side decryption."""
+    return r"""
+<style>
+  #password-gate {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #f5f5f5;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #password-gate .gate-card {
+    background: white; padding: 2.5rem; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    width: 360px; max-width: 90vw;
+  }
+  #password-gate h1 { margin: 0 0 0.25rem 0; font-size: 1.4rem; color: #333; }
+  #password-gate .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; display: block; }
+  #password-gate form { display: flex; gap: 0.5rem; }
+  #password-gate input {
+    flex: 1; padding: 0.6rem 0.8rem; font-size: 1rem;
+    border: 1px solid #ccc; border-radius: 4px; outline: none;
+  }
+  #password-gate input:focus { border-color: #C8102E; }
+  #password-gate button {
+    padding: 0.6rem 1.2rem; font-size: 1rem; font-weight: 600;
+    background: #C8102E; color: white; border: 0; border-radius: 4px; cursor: pointer;
+  }
+  #password-gate button:disabled { opacity: 0.6; cursor: default; }
+  #password-gate .gate-error { color: #C8102E; font-size: 0.9rem; margin-top: 0.75rem; min-height: 1.2em; }
+  #password-gate .gate-remember { font-size: 0.85rem; color: #666; margin-top: 0.75rem; }
+  #password-gate .gate-remember input { flex: 0; width: auto; margin-right: 0.4rem; vertical-align: middle; }
+</style>
+<div id="password-gate">
+  <div class="gate-card">
+    <h1>Program Approval Tracker</h1>
+    <span class="subtitle">Enter password to access the dashboard.</span>
+    <form id="gate-form" autocomplete="off">
+      <input type="password" id="gate-password" placeholder="Password" autofocus required>
+      <button type="submit" id="gate-submit">Unlock</button>
+    </form>
+    <label class="gate-remember">
+      <input type="checkbox" id="gate-remember" checked>
+      Remember me for 30 days on this device
+    </label>
+    <div id="gate-error" class="gate-error"></div>
+  </div>
+</div>
+<script>
+(function() {
+  const CACHE_BUST = """ + str(cache_bust) + r""";
+  const REMEMBER_KEY = 'cim-tracker-key-v1';
+  const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+  const gate = document.getElementById('password-gate');
+  const form = document.getElementById('gate-form');
+  const input = document.getElementById('gate-password');
+  const submit = document.getElementById('gate-submit');
+  const errEl = document.getElementById('gate-error');
+  const remember = document.getElementById('gate-remember');
+
+  const textDecoder = new TextDecoder();
+
+  const ENC_FILES = new Set([
+    'data.json', 'curriculum.json', 'reference.json', 'campus_groups.json',
+  ]);
+
+  let cryptoKey = null;
+  const cache = new Map(); // path -> parsed JSON
+
+  async function loadCryptoParams() {
+    const r = await fetch('crypto.json?v=' + CACHE_BUST);
+    if (!r.ok) throw new Error('crypto.json missing');
+    return r.json();
+  }
+
+  function b64ToBytes(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function bytesToB64(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  async function deriveKey(password, salt, iterations) {
+    const baseKey = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(password), {name: 'PBKDF2'}, false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      {name: 'PBKDF2', salt, iterations, hash: 'SHA-256'},
+      baseKey,
+      {name: 'AES-GCM', length: 256},
+      true,  // extractable (so we can stash it for remember-me)
+      ['decrypt']
+    );
+  }
+
+  async function decryptBlob(key, blob) {
+    // Layout: iv(12) || ciphertext+tag
+    const iv = blob.slice(0, 12);
+    const ct = blob.slice(12);
+    const pt = await crypto.subtle.decrypt({name: 'AES-GCM', iv}, key, ct);
+    return textDecoder.decode(pt);
+  }
+
+  async function fetchAndDecrypt(path) {
+    if (cache.has(path)) return cache.get(path);
+    const r = await fetch(path + '.enc?v=' + CACHE_BUST);
+    if (!r.ok) throw new Error('fetch ' + path + '.enc failed');
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(cryptoKey, blob);
+    const obj = JSON.parse(plaintext);
+    cache.set(path, obj);
+    return obj;
+  }
+
+  // Monkey-patch fetch so existing app.js paths (fetch('data.json') etc.)
+  // transparently go through the decryptor.
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async function(url, opts) {
+    const name = typeof url === 'string'
+      ? url.replace(/^\.\//, '').split('?')[0]
+      : null;
+    if (name && ENC_FILES.has(name)) {
+      const obj = await fetchAndDecrypt(name);
+      return new Response(JSON.stringify(obj), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+    return origFetch(url, opts);
+  };
+
+  async function tryRememberedKey() {
+    try {
+      const raw = localStorage.getItem(REMEMBER_KEY);
+      if (!raw) return null;
+      const {jwk, expires} = JSON.parse(raw);
+      if (Date.now() > expires) { localStorage.removeItem(REMEMBER_KEY); return null; }
+      return await crypto.subtle.importKey(
+        'jwk', jwk, {name: 'AES-GCM'}, true, ['decrypt']
+      );
+    } catch (e) { return null; }
+  }
+
+  async function stashKeyForRemember(key) {
+    const jwk = await crypto.subtle.exportKey('jwk', key);
+    localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+      jwk, expires: Date.now() + REMEMBER_TTL_MS,
+    }));
+  }
+
+  async function verifyKey(key) {
+    // Try decrypting data.json.enc as a password check. AES-GCM throws if tag mismatches.
+    const r = await fetch('data.json.enc?v=' + CACHE_BUST);
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(key, blob);
+    const obj = JSON.parse(plaintext);
+    cache.set('data.json', obj);
+    return obj;
+  }
+
+  function bootDashboard() {
+    gate.style.display = 'none';
+    document.getElementById('app-root').style.display = '';
+    const s = document.createElement('script');
+    s.src = 'app.js?v=' + CACHE_BUST;
+    document.head.appendChild(s);
+  }
+
+  async function attemptUnlock(password) {
+    const params = await loadCryptoParams();
+    const salt = b64ToBytes(params.salt);
+    const key = await deriveKey(password, salt, params.iterations);
+    await verifyKey(key);  // throws on bad password
+    cryptoKey = key;
+    if (remember.checked) {
+      try { await stashKeyForRemember(key); } catch (e) { /* ignore */ }
+    }
+    bootDashboard();
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.textContent = '';
+    submit.disabled = true;
+    submit.textContent = 'Unlocking...';
+    try {
+      await attemptUnlock(input.value);
+    } catch (err) {
+      errEl.textContent = 'Wrong password.';
+      submit.disabled = false;
+      submit.textContent = 'Unlock';
+      input.select();
+    }
+  });
+
+  // Try remembered key silently
+  (async () => {
+    const key = await tryRememberedKey();
+    if (!key) return;
+    try {
+      await verifyKey(key);
+      cryptoKey = key;
+      bootDashboard();
+    } catch (e) {
+      localStorage.removeItem(REMEMBER_KEY);
+    }
+  })();
+})();
+</script>
+"""
 
 
 def build_static_js(original_js):
@@ -219,8 +513,10 @@ async function _getData() {
     return _cache;
 }
 
-// Override all load* functions AFTER the original script defines them
-document.addEventListener('DOMContentLoaded', () => {
+// Override all load* functions AFTER the original script defines them.
+// Run immediately if DOM is already ready (app.js may be injected after
+// DOMContentLoaded has fired, e.g. by the password gate).
+function __staticInit() {
     // Patch the load functions to use static data
     window._origLoadDashboard = loadDashboard;
 
@@ -573,7 +869,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial load
     loadDashboard();
-});
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __staticInit);
+} else {
+    __staticInit();
+}
 '''
 
     # Remove the DOMContentLoaded listener from the original since we add our own
