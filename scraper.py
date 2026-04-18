@@ -658,6 +658,28 @@ def run_full_scan():
             record_change(scan_time, prog_id, '', current_step, 'new_program')
             changes += 1
 
+    # Clear current_step for programs no longer on any Approve Pages role.
+    # When a program advances past the last tracked step (or is archived),
+    # Approve Pages drops it, but the per-program workflow HTML's `<li
+    # class="current">` marker can stay stale. If we leave the old
+    # current_step in place, the pipeline bucket for that role keeps
+    # counting it forever.
+    from database import get_db
+    discovered_ids = set(all_discovered.keys())
+    existing_in_pipeline = [
+        pid for pid, p in existing_programs.items()
+        if p.get('current_step') and pid not in discovered_ids
+    ]
+    if existing_in_pipeline:
+        with get_db() as conn:
+            placeholders = ','.join('?' * len(existing_in_pipeline))
+            conn.execute(
+                f"UPDATE programs SET current_step = '', current_approver_emails = '' "
+                f"WHERE id IN ({placeholders})",
+                existing_in_pipeline
+            )
+        print(f"  Cleared current_step for {len(existing_in_pipeline)} program(s) no longer on Approve Pages")
+
     # NB: we intentionally do NOT record the scan here. The caller
     # (app.py do_scan) records it with a fresh timestamp after the
     # entire scan cycle finishes — programs + courses + reference +
