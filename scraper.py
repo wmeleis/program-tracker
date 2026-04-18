@@ -687,21 +687,56 @@ def run_full_scan():
     # changes when the whole pipeline is actually done, not when this
     # first phase completes.
 
-    # Validation: spot-check a few tracked roles against live Approve Pages
+    # Validation + auto-heal: for each tracked role, re-query live Approve
+    # Pages and reconcile. If the DB has programs at a role that aren't in
+    # the live list, clear their current_step. Live is the source of truth.
+    #
+    # Safety: require two back-to-back live queries to agree before healing.
+    # Approve Pages occasionally returns a transient stale view; the double
+    # check filters that out so we never remove legitimate entries.
     print(f"\nValidating scan results against live data...")
-    from database import get_pipeline_counts
+    from database import get_pipeline_counts, get_programs_by_step, get_db
     db_counts = get_pipeline_counts(TRACKED_ROLES)
     warnings = 0
+    healed = 0
     for role in TRACKED_ROLES:
-        live = scrape_approve_pages_role(role)
+        live1 = scrape_approve_pages_role(role)
         db_c = db_counts.get(role, 0)
-        if len(live) != db_c:
-            print(f"  WARNING: {role}: DB={db_c}, Live={len(live)} (delta={len(live)-db_c})")
-            warnings += 1
+        if len(live1) == db_c:
+            continue  # counts match, nothing to do
+
+        print(f"  WARNING: {role}: DB={db_c}, Live={len(live1)} (delta={len(live1)-db_c})")
+        warnings += 1
+
+        # Only heal when DB has MORE than live (i.e. stale rows). If live
+        # has more than DB, the scanner missed something — don't blind-add.
+        if len(live1) >= db_c:
+            continue
+
+        # Confirm with a second query to guard against transient stale views.
+        live2 = scrape_approve_pages_role(role)
+        live_ids = {p['id'] for p in live1} & {p['id'] for p in live2}
+        if live_ids != {p['id'] for p in live1} or len(live2) != len(live1):
+            print(f"    Skipping heal for {role}: live view unstable across two queries")
+            continue
+
+        db_progs = get_programs_by_step(role)
+        stale_ids = [p['id'] for p in db_progs if p['id'] not in live_ids]
+        if stale_ids:
+            with get_db() as conn:
+                placeholders = ','.join('?' * len(stale_ids))
+                conn.execute(
+                    f"UPDATE programs SET current_step = '', current_approver_emails = '' "
+                    f"WHERE id IN ({placeholders})",
+                    stale_ids
+                )
+            print(f"    Healed: cleared current_step for {len(stale_ids)} stale program(s) at {role}: {stale_ids}")
+            healed += len(stale_ids)
+
     if warnings == 0:
         print("  All role counts match live data.")
     else:
-        print(f"  {warnings} role(s) have count differences (may be due to approvals during scan)")
+        print(f"  {warnings} role(s) had count differences; auto-healed {healed} stale program row(s)")
 
     total_time = time.time() - (time.mktime(datetime.fromisoformat(scan_time).timetuple()))
     print(f"\n{'='*60}")
