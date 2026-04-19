@@ -15,6 +15,13 @@ MIN_GAP_SECONDS=$((4 * 3600))
 
 echo "$(date): Starting update" >> "$LOG"
 
+# Skip weekends (ET). Saturday=6, Sunday=7 (ISO).
+DOW_ET=$(TZ=America/New_York date +%u)
+if [ "$DOW_ET" -ge 6 ]; then
+    echo "$(date): Weekend (dow=$DOW_ET ET), skipping" >> "$LOG"
+    exit 0
+fi
+
 # Only scan within working hours (ET).
 HOUR_ET=$(TZ=America/New_York date +%H)
 # Strip a leading zero so bash arithmetic treats e.g. "09" as decimal 9.
