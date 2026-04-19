@@ -42,9 +42,10 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 - **launchd agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
 - **Schedule:** `StartCalendarInterval` at 9am, 1pm, 5pm ET (every 4 hours, starting at 9am). macOS fires any missed firing on wake.
 - **Runs:** `update.sh`, which decides whether to actually scan based on these rules:
-  1. Current time must be inside the 9am–8pm ET window (exclusive on 8pm).
-  2. At least 4 hours must have passed since the last successful scan, recorded in `data/last_scan_unix`.
-  3. Chrome must be running with a live CourseLeaf session.
+  1. Current day must be Mon–Fri ET (weekends skipped).
+  2. Current time must be inside the 9am–8pm ET window (exclusive on 8pm).
+  3. At least 4 hours must have passed since the last successful scan, recorded in `data/last_scan_unix`.
+  4. Chrome must be running with a live CourseLeaf session.
 
   This layered design is deliberate: launchd's scheduled times are just *opportunities*; the gap check in `update.sh` is what enforces the rule, so waking from sleep (which causes launchd to fire missed intervals in a cluster) won't cause duplicate scans. If a scan is skipped, the next firing reconsiders.
 - **Requirement:** Chrome must be open with valid CourseLeaf session when a scan fires.
