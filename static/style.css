@@ -216,9 +216,9 @@ header h1 {
 }
 
 .type-btn.active {
-    background: var(--text);
-    color: white;
-    border-color: var(--text);
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
 }
 
 .smart-view-btn {
@@ -239,17 +239,22 @@ header h1 {
 }
 
 .smart-view-btn.active {
-    background: var(--text);
-    color: white;
-    border-color: var(--text);
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
 }
 
 .smart-view-btn .view-count {
-    background: rgba(255,255,255,0.25);
+    background: rgba(59, 130, 246, 0.15);
     padding: 1px 6px;
     border-radius: 8px;
     margin-left: 4px;
     font-size: 11px;
+}
+
+.smart-view-btn.active .view-count {
+    background: rgba(59, 130, 246, 0.25);
+    color: var(--accent);
 }
 
 /* Days at step indicator */
@@ -470,7 +475,7 @@ header h1 {
 .proposal-btn.active-new { background: #dcfce7; color: #166534; border-color: #22c55e; }
 .proposal-btn.active-edit { background: #dbeafe; color: #1e40af; border-color: #3b82f6; }
 .proposal-btn.active-inact { background: #fee2e2; color: #991b1b; border-color: #ef4444; }
-.proposal-btn.active-all { background: var(--text); color: white; border-color: var(--text); }
+.proposal-btn.active-all { background: #eff6ff; color: var(--accent); border-color: var(--accent); }
 
 /* Progress bar */
 .progress-container {
@@ -1031,33 +1036,30 @@ tr.program-row.expanded td {
 
 .view-toggle {
     display: flex;
-    background: #f1f5f9;
-    border-radius: 6px;
-    padding: 2px;
-    gap: 2px;
+    gap: 8px;
 }
 
 .toggle-btn {
-    padding: 8px 16px;
-    border: none;
-    background: transparent;
-    color: #64748b;
-    font-weight: 500;
-    font-size: 14px;
+    padding: 8px 20px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
     cursor: pointer;
-    border-radius: 4px;
-    transition: all 200ms ease;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s;
 }
 
 .toggle-btn:hover {
-    background: #e2e8f0;
-    color: #475569;
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .toggle-btn.active {
-    background: white;
-    color: #1e293b;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
 }
 
 /* Responsive */
