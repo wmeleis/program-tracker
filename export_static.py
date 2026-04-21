@@ -69,10 +69,15 @@ def _load_or_create_salt() -> bytes:
 
 
 def _parse_campus(name):
-    """Extract campus from 'Program, Degree (Campus)'. Returns (base, campus) or (name, None)."""
+    """Extract campus from a program name. Handles parenthetical (Boston)/(Oakland)
+    and em-dash deployment suffixes like —Online, —Accelerated, —Part-Time.
+    Returns (base, campus) or (name, None)."""
     m = re.search(r'\(([^)]+)\)\s*$', name)
     if m:
         return name[:m.start()].strip(), m.group(1).strip()
+    m2 = re.search(r'—(Online|Accelerated|Part-Time)\s*$', name)
+    if m2:
+        return name[:m2.start()].strip(), m2.group(1).strip()
     return name, None
 
 

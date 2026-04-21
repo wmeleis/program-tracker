@@ -753,12 +753,29 @@ def run_full_scan():
 
 
 def _parse_campus_from_name(name):
-    """Extract the campus from a program name like 'Management, MS (Oakland)'.
-    Returns (base_name_without_campus, campus) or (name, None) if no campus found."""
+    """Extract the campus/deployment from a program name.
+
+    Handles two patterns:
+    - Parenthetical campus: 'Management, MS (Oakland)' -> ('Management, MS', 'Oakland')
+    - Em-dash deployment suffix: 'Business Analytics, MS—Online' ->
+      ('Business Analytics, MS', 'Online')
+
+    Only treats a limited set of em-dash suffixes as deployment variants
+    (Online, Accelerated, Part-Time). Other em-dash suffixes like '—Align'
+    are part of distinct program names and are left intact in the base.
+
+    Returns (base_name_without_campus, campus) or (name, None) if no campus found.
+    """
     match = re.search(r'\(([^)]+)\)\s*$', name)
     if match:
         campus = match.group(1).strip()
         base = name[:match.start()].strip()
+        return base, campus
+    # Em-dash deployment variants (not distinct programs like —Align, —Connect)
+    m2 = re.search(r'—(Online|Accelerated|Part-Time)\s*$', name)
+    if m2:
+        campus = m2.group(1).strip()
+        base = name[:m2.start()].strip()
         return base, campus
     return name, None
 
