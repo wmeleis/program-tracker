@@ -1451,7 +1451,6 @@ async function loadCompareDetail(programId) {
             updateCompareButton(programId, identical);
 
             const inWorkflow = refData.version_date && refData.version_date.toLowerCase().includes('in workflow');
-            const refLabel = inWorkflow ? 'Boston (in workflow)' : 'Boston Reference';
             const identicalMsg = inWorkflow
                 ? 'Curriculum is identical to the current Boston proposal (in workflow).'
                 : 'Curriculum is identical to the Boston reference.';
@@ -1463,10 +1462,10 @@ async function loadCompareDetail(programId) {
             if (identical) {
                 contentEl.innerHTML = `${header}<div class="compare-identical">${identicalMsg}</div>`;
             } else {
-                const table = renderSideBySide(diff, getProgramName(programId), refLabel);
+                const table = renderSideBySide(diff, 'Current Proposed Curriculum', 'Reference Curriculum');
                 contentEl.innerHTML = `${header}
                     <div class="compare-legend">
-                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in this version</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in current proposal</span>
                         <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
                         <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>${table}`;
@@ -1510,11 +1509,11 @@ async function loadCompareDetail(programId) {
                     html += '<div class="compare-identical-small">Identical</div>';
                 } else {
                     html += `<div class="compare-legend">
-                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in ${escapeHtml(dep.name)}</span>
-                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in Boston</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in current proposal</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
                         <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>`;
-                    html += renderSideBySide(dep.diff, dep.name, 'Boston');
+                    html += renderSideBySide(dep.diff, 'Current Proposed Curriculum', 'Reference Curriculum');
                 }
                 html += '</div>';
             }
@@ -1540,10 +1539,10 @@ async function loadCompareDetail(programId) {
             if (identical) {
                 contentEl.innerHTML = '<div class="compare-identical">Current curriculum is identical to the last approved version.</div>';
             } else {
-                const table = renderSideBySide(diff, 'Current Proposal', 'Last Approved');
+                const table = renderSideBySide(diff, 'Current Proposed Curriculum', 'Reference Curriculum');
                 contentEl.innerHTML = `<div class="compare-legend">
-                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>
-                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in approved</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in current proposal</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
                     <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                 </div>${table}`;
             }
