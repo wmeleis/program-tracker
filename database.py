@@ -369,7 +369,11 @@ def get_colleges():
 
 
 def get_current_approvers():
-    """Get all people who are current approvers, with program counts."""
+    """Get all people who are current approvers, with program counts.
+
+    Only counts programs with a non-empty current_step, so the dropdown counts
+    match what you actually see when the filter is applied.
+    """
     with get_db() as conn:
         rows = conn.execute("""
             SELECT ws.approver_emails, p.id, p.name
@@ -378,6 +382,7 @@ def get_current_approvers():
             WHERE ws.step_status = 'current'
               AND ws.approver_emails IS NOT NULL
               AND ws.approver_emails != ''
+              AND p.current_step IS NOT NULL AND p.current_step != ''
         """).fetchall()
 
         # Parse into per-person counts
