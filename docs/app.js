@@ -1794,6 +1794,7 @@ function __staticInit() {
         cachedCoursePipeline = collapseCoursePipeline(D.course_pipeline || []);
         renderPipeline(cachedCoursePipeline, allCourses);
         populateCourseStepFilter();
+        if (typeof populateCourseSubjectFilter === 'function') populateCourseSubjectFilter();
         const cSel = document.getElementById('filter-college');
         cSel.innerHTML = '<option value="">All Colleges</option>' +
             (D.course_colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
@@ -1822,6 +1823,7 @@ function __staticInit() {
         const D = await _getData();
         allCourses = D.courses || [];
         populateCourseStepFilter();
+        if (typeof populateCourseSubjectFilter === 'function') populateCourseSubjectFilter();
         applyFilters();
     };
     window.loadCourseColleges = async function() {
