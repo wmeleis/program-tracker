@@ -785,7 +785,7 @@ function renderTable(items) {
         return;
     }
 
-    const headerColLabel = isCourseView ? 'Code' : 'College';
+    const headerColLabel = 'College';
     const titleLabel = isCourseView ? 'Course Title' : 'Program Name';
     const titleCol = isCourseView ? 'code' : 'name';
     const statusLabel = isCourseView ? '' : `

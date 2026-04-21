@@ -998,192 +998,173 @@ def fetch_reference_curricula(program_ids, batch_size=10):
     fetch_ids = [pid for pid in program_ids if pid not in boston_in_workflow]
 
     print(f"\nFetching reference curricula for {len(fetch_ids)} programs (via CIM history)...")
+    # Larger batches are OK now since we parallelize fetches within each batch
+    batch_size = max(batch_size, 25)
     batches = [fetch_ids[i:i+batch_size] for i in range(0, len(fetch_ids), batch_size)]
     fetched = 0
     skipped = 0
+    import time as _time
 
     for batch_num, batch in enumerate(batches):
         ids_json = json.dumps(batch)
-        # Build counterpart mapping for this batch: {non_boston_id: boston_id}
         batch_counterparts = {pid: counterpart_map[pid] for pid in batch if pid in counterpart_map}
         counterparts_json = json.dumps(batch_counterparts)
-        js_code = f'''
+
+        # Fire off async parallel fetches; write results into a hidden div keyed by batch number.
+        # The main thread returns immediately; Python polls the div for completion.
+        batch_tag = f"__refbatch_{batch_num}"
+        js_kickoff = f'''
 (function() {{
+    var existing = document.getElementById("{batch_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{batch_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+
     var ids = {ids_json};
     var counterparts = {counterparts_json};
-    var results = {{}};
     var parser = new DOMParser();
 
-    for (var i = 0; i < ids.length; i++) {{
-        var id = ids[i];
-        // For non-Boston programs, fetch the Boston counterpart's history
-        var fetchId = counterparts[id] || id;
-        try {{
-            // Step 1: Fetch program page to get history versions
-            var xhr1 = new XMLHttpRequest();
-            xhr1.open("GET", "/programadmin/" + fetchId + "/", false);
-            xhr1.send();
-            if (xhr1.status !== 200) {{
-                results[id] = {{error: "fetch_failed", status: xhr1.status}};
-                continue;
-            }}
-
-            var doc = parser.parseFromString(xhr1.responseText, "text/html");
-            var histDiv = doc.getElementById("history");
-            if (!histDiv) {{
-                results[id] = {{error: "no_history"}};
-                continue;
-            }}
-
-            // Parse version IDs and dates from onclick="return cim.showHistory(N);"
-            var links = histDiv.querySelectorAll("a[onclick]");
-            if (links.length === 0) {{
-                results[id] = {{error: "no_versions"}};
-                continue;
-            }}
-
-            // Last link = most recent history entry
-            var lastLink = links[links.length - 1];
-            var onclickAttr = lastLink.getAttribute("onclick");
-            var vMatch = onclickAttr.match(/showHistory\\((\\d+)\\)/);
-            if (!vMatch) {{
-                results[id] = {{error: "no_version_id"}};
-                continue;
-            }}
-
-            var versionId = parseInt(vMatch[1]);
-            var versionDate = lastLink.textContent.trim();
-
-            // Step 2: Fetch historical version content (using fetchId, which may be Boston counterpart)
-            var apiUrl = "/courseleaf/courseleaf.cgi?page=/programadmin/" + fetchId +
-                "/index.html&output=xml&step=showtcf&view=history&diffversion=" + versionId;
-            var xhr2 = new XMLHttpRequest();
-            xhr2.open("GET", apiUrl, false);
-            xhr2.send();
-
-            if (xhr2.status !== 200) {{
-                results[id] = {{error: "history_fetch_failed", status: xhr2.status}};
-                continue;
-            }}
-
-            // Step 3: Extract curriculum content from <showdata> CDATA
-            var xml = xhr2.responseText;
-            var cdataStart = xml.indexOf("<![CDATA[");
-            var cdataEnd = xml.indexOf("]]>", cdataStart + 9);
-            var fullHtml = "";
-            if (cdataStart !== -1 && cdataEnd !== -1) {{
-                fullHtml = xml.substring(cdataStart + 9, cdataEnd);
-            }}
-
-            // Parse the full HTML and extract just the curriculum sections
-            var refDoc = parser.parseFromString(fullHtml, "text/html");
-            var parts = [];
-
-            // Body = curriculum with course tables (bodycontentframediv3)
-            var bodyDiv = refDoc.getElementById("bodycontentframediv3");
-            if (bodyDiv) {{
-                parts.push(bodyDiv.innerHTML);
-            }}
-
-            // Concentrations section
-            var concDiv = refDoc.getElementById("concentrations");
-            if (concDiv) {{
-                // Get the concentration content - walk up to the row
-                var concRow = concDiv.closest(".row") || concDiv.parentElement;
-                if (concRow) parts.push(concRow.innerHTML);
-            }}
-
-            // Overview text (overviewcontentframediv4)
-            var overviewDiv = refDoc.getElementById("overviewcontentframediv4");
-            if (overviewDiv) {{
-                parts.push('<h2>Program Overview</h2>' + overviewDiv.innerHTML);
-            }}
-
-            var html = parts.join("\\n");
-
-            results[id] = {{
-                version_id: versionId,
-                version_date: versionDate,
-                html_size: html.length
-            }};
-
-            // Store extracted curriculum in a hidden div
-            var store = document.createElement("div");
-            store.id = "__ref_" + id;
-            store.style.display = "none";
-            store.textContent = html;
-            document.body.appendChild(store);
-
-        }} catch(e) {{
-            results[id] = {{error: e.toString()}};
+    function extractCurriculum(fullHtml) {{
+        var doc = parser.parseFromString(fullHtml, "text/html");
+        var parts = [];
+        var bodyDiv = doc.getElementById("bodycontentframediv3");
+        if (bodyDiv) parts.push(bodyDiv.innerHTML);
+        var concDiv = doc.getElementById("concentrations");
+        if (concDiv) {{
+            var concRow = concDiv.closest(".row") || concDiv.parentElement;
+            if (concRow) parts.push(concRow.innerHTML);
         }}
+        var overviewDiv = doc.getElementById("overviewcontentframediv4");
+        if (overviewDiv) parts.push('<h2>Program Overview</h2>' + overviewDiv.innerHTML);
+        return parts.join("\\n");
     }}
 
-    return JSON.stringify(results);
+    function processOne(id) {{
+        var fetchId = counterparts[id] || id;
+        // Step 1: page fetch (parallelizable — network limited)
+        return fetch("/programadmin/" + fetchId + "/")
+            .then(function(res) {{
+                if (!res.ok) throw new Error("fetch_failed:" + res.status);
+                return res.text();
+            }})
+            .then(function(pageText) {{
+                var doc = parser.parseFromString(pageText, "text/html");
+                var histDiv = doc.getElementById("history");
+                if (!histDiv) return {{id: id, error: "no_history"}};
+                var links = histDiv.querySelectorAll("a[onclick]");
+                if (links.length === 0) return {{id: id, error: "no_versions"}};
+                var lastLink = links[links.length - 1];
+                var vMatch = lastLink.getAttribute("onclick").match(/showHistory\\((\\d+)\\)/);
+                if (!vMatch) return {{id: id, error: "no_version_id"}};
+                var versionId = parseInt(vMatch[1]);
+                var versionDate = lastLink.textContent.trim();
+                // Step 2: CGI fetch (server serializes, but still faster with concurrent requests)
+                var apiUrl = "/courseleaf/courseleaf.cgi?page=/programadmin/" + fetchId +
+                    "/index.html&output=xml&step=showtcf&view=history&diffversion=" + versionId;
+                return fetch(apiUrl).then(function(res) {{
+                    if (!res.ok) throw new Error("history_fetch_failed:" + res.status);
+                    return res.text();
+                }}).then(function(xml) {{
+                    var cdataStart = xml.indexOf("<![CDATA[");
+                    var cdataEnd = xml.indexOf("]]>", cdataStart + 9);
+                    var fullHtml = (cdataStart !== -1 && cdataEnd !== -1)
+                        ? xml.substring(cdataStart + 9, cdataEnd) : "";
+                    var html = extractCurriculum(fullHtml);
+                    return {{id: id, version_id: versionId, version_date: versionDate, html: html}};
+                }});
+            }})
+            .catch(function(e) {{ return {{id: id, error: e.message || String(e)}}; }});
+    }}
+
+    Promise.all(ids.map(processOne)).then(function(results) {{
+        // Store results as JSON in the holder div
+        holder.textContent = JSON.stringify(results);
+        holder.setAttribute("data-status", "done");
+    }}).catch(function(e) {{
+        holder.textContent = "ERROR:" + e.message;
+        holder.setAttribute("data-status", "error");
+    }});
+
+    return "fired";
 }})();
 '''
-        result = run_js_in_tab("programadmin", js_code, match_by='url', timeout=120)
-        if not result:
-            print(f"  Batch {batch_num+1}/{len(batches)}: No result from Chrome")
+        run_js_in_tab("programadmin", js_kickoff, match_by='url', timeout=20)
+
+        # Poll for completion (up to ~120 seconds per batch)
+        check_js = f'''(function() {{
+    var el = document.getElementById("{batch_tag}");
+    if (!el) return "MISSING";
+    var status = el.getAttribute("data-status");
+    if (status === "done") return "DONE";
+    if (status === "error") return "ERR:" + el.textContent.substring(0, 200);
+    return "RUNNING";
+}})();'''
+        batch_results = None
+        for _ in range(60):  # up to 120s total
+            _time.sleep(2)
+            status = run_js_in_tab("programadmin", check_js, match_by='url', timeout=15)
+            if status == "DONE":
+                # Retrieve results in chunks to avoid AppleScript return-value limits
+                # Pull length first, then chunk through it
+                len_js = f'''(function() {{ var el = document.getElementById("{batch_tag}"); return el ? el.textContent.length : 0; }})();'''
+                total_len = int(run_js_in_tab("programadmin", len_js, match_by='url', timeout=15) or 0)
+                if total_len == 0:
+                    batch_results = []
+                    break
+                chunk_size = 200000
+                chunks = []
+                for offset in range(0, total_len, chunk_size):
+                    chunk_js = f'''(function() {{ var el = document.getElementById("{batch_tag}"); return el ? el.textContent.substring({offset}, {offset + chunk_size}) : ""; }})();'''
+                    part = run_js_in_tab("programadmin", chunk_js, match_by='url', timeout=30)
+                    if part and part != 'missing value':
+                        chunks.append(part)
+                try:
+                    batch_results = json.loads(''.join(chunks))
+                except json.JSONDecodeError as e:
+                    print(f"  Batch {batch_num+1}/{len(batches)}: JSON parse error ({e})")
+                    batch_results = []
+                # Clean up
+                run_js_in_tab("programadmin", f'var e=document.getElementById("{batch_tag}"); if(e) e.remove();', match_by='url', timeout=10)
+                break
+            if status and status.startswith("ERR"):
+                print(f"  Batch {batch_num+1}/{len(batches)}: JS error: {status}")
+                batch_results = []
+                break
+
+        if batch_results is None:
+            print(f"  Batch {batch_num+1}/{len(batches)}: timed out after 120s")
             continue
 
-        try:
-            batch_results = json.loads(result)
-        except json.JSONDecodeError:
-            print(f"  Batch {batch_num+1}/{len(batches)}: JSON parse error")
-            continue
-
-        # Now fetch the stored HTML for each successful program
-        for prog_id in batch:
-            prog_str = str(prog_id)
-            info = batch_results.get(prog_str, {})
-
+        # Process results
+        batch_fetched = 0
+        for info in batch_results:
+            prog_id = info.get('id')
             if 'error' in info:
-                if info['error'] != 'no_history' and info['error'] != 'no_versions':
+                if info['error'] not in ('no_history', 'no_versions'):
                     print(f"  Program {prog_id}: {info['error']}")
                 skipped += 1
                 continue
-
             version_id = info.get('version_id')
             version_date = info.get('version_date', '')
-
-            # Skip if we already have this version
+            html = info.get('html', '')
             if existing_refs.get(prog_id) == version_id:
                 skipped += 1
                 continue
-
-            # Retrieve the stored HTML from the hidden div
-            js_get = f'''
-(function() {{
-    var el = document.getElementById("__ref_{prog_id}");
-    if (!el) return "";
-    var html = el.textContent;
-    el.remove();
-    return html;
-}})();
-'''
-            html = run_js_in_tab("programadmin", js_get, match_by='url', timeout=30)
-            if html and html != 'missing value':
-                # If this is a non-Boston program, note the Boston source in version_date
-                display_date = version_date
-                if prog_id in counterpart_map:
-                    display_date = f"{version_date} (Boston version)"
+            if html:
+                display_date = f"{version_date} (Boston version)" if prog_id in counterpart_map else version_date
                 upsert_reference_curriculum(prog_id, version_id, display_date, html)
                 fetched += 1
+                batch_fetched += 1
             else:
                 skipped += 1
 
-        print(f"  Batch {batch_num+1}/{len(batches)}: fetched {fetched} references")
+        print(f"  Batch {batch_num+1}/{len(batches)}: fetched {batch_fetched} (total {fetched})")
 
-    # Clean up any remaining hidden divs
-    cleanup_js = '''
-(function() {
-    var els = document.querySelectorAll("[id^=__ref_]");
-    els.forEach(function(el) { el.remove(); });
-    return els.length;
-})();
-'''
-    run_js_in_tab("programadmin", cleanup_js, match_by='url', timeout=10)
+    # Clean up any leftover batch holders
+    run_js_in_tab("programadmin", 'document.querySelectorAll("[id^=__refbatch_]").forEach(function(e){e.remove();});', match_by='url', timeout=10)
 
     print(f"Reference curricula: {fetched} fetched, {skipped} skipped")
     return fetched
