@@ -790,9 +790,9 @@ function __staticInit() {
             if (identical) {
                 contentEl.innerHTML = header + '<div class="compare-identical">' + identicalMsg + '</div>';
             } else {
-                const table = renderSideBySide(diff, 'Current Proposed Curriculum', 'Reference Curriculum');
+                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
                 contentEl.innerHTML = header +
-                    '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in current proposal</span>' +
+                    '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>' +
                     '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>' +
                     '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
             }
@@ -816,10 +816,10 @@ function __staticInit() {
                 if (dep.noData) html += '<div class="workflow-meta">Curriculum data not available.</div>';
                 else if (dep.identical) html += '<div class="compare-identical-small">Identical</div>';
                 else {
-                    html += '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in current proposal</span>' +
+                    html += '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>' +
                         '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>' +
                         '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>';
-                    html += renderSideBySide(dep.diff, 'Current Proposed Curriculum', 'Reference Curriculum');
+                    html += renderSideBySide(dep.diff, 'Proposed Curriculum', 'Reference Curriculum');
                 }
                 html += '</div>';
             }
@@ -838,8 +838,8 @@ function __staticInit() {
             if (identical) {
                 contentEl.innerHTML = '<div class="compare-identical">Current curriculum is identical to the last approved version.</div>';
             } else {
-                const table = renderSideBySide(diff, 'Current Proposed Curriculum', 'Reference Curriculum');
-                contentEl.innerHTML = '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in current proposal</span>' +
+                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
+                contentEl.innerHTML = '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>' +
                     '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>' +
                     '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
             }
