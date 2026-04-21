@@ -1602,9 +1602,13 @@ function renderChanges(changes) {
 
 function toggleRow(programId) {
     if (expandedRows.has(programId)) {
+        // Collapse this row
         expandedRows.delete(programId);
         delete detailTabState[programId];
     } else {
+        // Close any other expanded rows (single-open accordion)
+        expandedRows.clear();
+        for (const k of Object.keys(detailTabState)) delete detailTabState[k];
         expandedRows.add(programId);
         detailTabState[programId] = 'workflow';
     }
