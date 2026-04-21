@@ -34,20 +34,25 @@ function switchView(view) {
     document.getElementById('filter-approver').value = '';
     document.getElementById('filter-step').value = '';
     document.getElementById('filter-search').value = '';
+    const subjectSel = document.getElementById('filter-subject');
+    if (subjectSel) subjectSel.value = '';
 
     // Hide/show sections based on view
     const typeSection = document.querySelector('.view-group');
     const proposalSection = document.querySelectorAll('.view-group')[1];
     const campusFilter = document.getElementById('filter-campus');
 
+    const subjectGroup = document.getElementById('filter-group-subject');
     if (view === 'courses') {
         typeSection.style.display = 'flex';
         proposalSection.style.display = 'flex';
         campusFilter.parentElement.parentElement.style.display = 'none';
+        if (subjectGroup) subjectGroup.style.display = 'flex';
     } else {
         typeSection.style.display = 'flex';
         proposalSection.style.display = 'flex';
         campusFilter.parentElement.parentElement.style.display = 'flex';
+        if (subjectGroup) subjectGroup.style.display = 'none';
     }
 
     // Update proposal button labels for Programs vs Courses
@@ -305,6 +310,7 @@ async function loadCourses() {
         const data = await res.json();
         allCourses = data.courses || [];
         populateCourseStepFilter();
+        populateCourseSubjectFilter();
         applyFilters();
     } catch (e) {
         console.error('Failed to load courses:', e);
@@ -321,6 +327,28 @@ async function loadCourseColleges() {
     } catch (e) {
         console.error('Failed to load course colleges:', e);
     }
+}
+
+function courseSubjectCode(course) {
+    // Subject code = leading letters of the course code (e.g. "CAEP 6326" -> "CAEP")
+    const code = (course.code || '').trim();
+    const m = code.match(/^([A-Za-z]+)/);
+    return m ? m[1].toUpperCase() : '';
+}
+
+function populateCourseSubjectFilter() {
+    const select = document.getElementById('filter-subject');
+    if (!select) return;
+    const subjects = new Set();
+    allCourses.forEach(c => {
+        const s = courseSubjectCode(c);
+        if (s) subjects.add(s);
+    });
+    const sorted = Array.from(subjects).sort();
+    const current = select.value;
+    const options = sorted.map(s => `<option value="${s}">${s}</option>`).join('');
+    select.innerHTML = '<option value="">All Subjects</option>' + options;
+    if (sorted.includes(current)) select.value = current;
 }
 
 function populateCourseStepFilter() {
@@ -652,6 +680,11 @@ function getBaseFiltered(approverProgramIds, exclude) {
         }
         if (!ex.proposal && proposalFilter && item.status !== proposalFilter) return false;
         if (!ex.college && collegeFilter && item.college !== collegeFilter) return false;
+        if (currentView === 'courses') {
+            const subjSel = document.getElementById('filter-subject');
+            const subjectFilter = subjSel ? subjSel.value : '';
+            if (subjectFilter && courseSubjectCode(item) !== subjectFilter) return false;
+        }
         if (stepFilter && item.current_step !== stepFilter) return false;
         if (currentView === 'programs' && campusFilter && extractCampus(item.name) !== campusFilter) return false;
         if (approverProgramIds && !approverProgramIds.has(item.id)) return false;

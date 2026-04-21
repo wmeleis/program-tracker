@@ -71,6 +71,15 @@
                 <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
             </div>
         </div>
+        <div class="filter-group" id="filter-group-subject" style="display: none">
+            <label>Subject Code:</label>
+            <div class="filter-select-wrap">
+                <select id="filter-subject" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Subjects</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-subject')" title="Clear">&times;</span>
+            </div>
+        </div>
         <div class="filter-group">
             <label>Campus:</label>
             <div class="filter-select-wrap">

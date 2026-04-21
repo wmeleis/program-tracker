@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1776790626">
+    <link rel="stylesheet" href="style.css?v=1776792638">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1776790626;
+  const CACHE_BUST = 1776792638;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -284,6 +284,15 @@
                     <option value="">All Colleges</option>
                 </select>
                 <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group" id="filter-group-subject" style="display: none">
+            <label>Subject Code:</label>
+            <div class="filter-select-wrap">
+                <select id="filter-subject" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Subjects</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-subject')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">

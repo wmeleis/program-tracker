@@ -166,10 +166,15 @@ def init_db():
 
 
 def upsert_program(program_data):
-    """Insert or update a program. Returns True if the program changed."""
+    """Insert or update a program. Returns True if the program changed.
+
+    For metadata fields (college, department, degree, banner_code, curriculum_html),
+    we preserve existing values when the new value is empty — this prevents transient
+    XML fetch failures from wiping out good data.
+    """
     with get_db() as conn:
         existing = conn.execute(
-            "SELECT current_step, status, step_entered_date FROM programs WHERE id = ?",
+            "SELECT * FROM programs WHERE id = ?",
             (program_data['id'],)
         ).fetchone()
 
@@ -213,6 +218,15 @@ def upsert_program(program_data):
             if old_step == new_step:
                 step_entered = existing['step_entered_date'] or now
 
+            # Preserve existing metadata when new values are empty (protects against
+            # transient XML fetch failures wiping out good data).
+            def keep(field, default=''):
+                new_val = program_data.get(field, default)
+                if new_val in ('', None):
+                    existing_val = existing[field] if field in existing.keys() else default
+                    return existing_val if existing_val not in ('', None) else default
+                return new_val
+
             conn.execute("""
                 UPDATE programs SET
                     banner_code = ?, name = ?, status = ?, current_step = ?,
@@ -224,20 +238,20 @@ def upsert_program(program_data):
                     last_updated = ?
                 WHERE id = ?
             """, (
-                program_data.get('banner_code', ''),
+                keep('banner_code'),
                 program_data['name'],
                 program_data.get('status', ''),
                 program_data.get('current_step', ''),
                 program_data.get('total_steps', 0),
                 program_data.get('completed_steps', 0),
                 program_data.get('current_approver_emails', ''),
-                program_data.get('program_type', 'Unknown'),
-                program_data.get('college', ''),
-                program_data.get('department', ''),
-                program_data.get('degree', ''),
-                program_data.get('date_submitted', ''),
+                keep('program_type', 'Unknown'),
+                keep('college'),
+                keep('department'),
+                keep('degree'),
+                keep('date_submitted'),
                 step_entered,
-                program_data.get('curriculum_html', ''),
+                keep('curriculum_html'),
                 now,
                 program_data['id']
             ))
@@ -458,10 +472,15 @@ def get_all_reference_curriculum():
 
 
 def upsert_course(course_data):
-    """Insert or update a course. Returns True if the course changed."""
+    """Insert or update a course. Returns True if the course changed.
+
+    Preserves existing metadata (code, title, college, credits, description,
+    academic_level) when new values are empty — protects against transient
+    XML fetch failures wiping out good data.
+    """
     with get_db() as conn:
         existing = conn.execute(
-            "SELECT current_step, status, step_entered_date, first_seen FROM courses WHERE id = ?",
+            "SELECT * FROM courses WHERE id = ?",
             (course_data['id'],)
         ).fetchone()
 
@@ -520,6 +539,15 @@ def upsert_course(course_data):
                 else:
                     step_entered = existing['first_seen'] or now
 
+            # Preserve existing metadata when new values are empty (guards against
+            # transient XML fetch failures wiping out good data).
+            def keep(field, default=''):
+                new_val = course_data.get(field, default)
+                if new_val in ('', None):
+                    existing_val = existing[field] if field in existing.keys() else default
+                    return existing_val if existing_val not in ('', None) else default
+                return new_val
+
             conn.execute("""
                 UPDATE courses SET
                     code = ?, title = ?, status = ?, current_step = ?,
@@ -530,19 +558,19 @@ def upsert_course(course_data):
                     last_updated = ?
                 WHERE id = ?
             """, (
-                course_data.get('code', ''),
-                course_data['title'],
+                keep('code'),
+                keep('title') or course_data['title'],
                 course_data.get('status', ''),
                 course_data.get('current_step', ''),
                 course_data.get('total_steps', 0),
                 course_data.get('completed_steps', 0),
                 course_data.get('current_approver_emails', ''),
-                course_data.get('college', ''),
-                course_data.get('date_submitted', ''),
+                keep('college'),
+                keep('date_submitted'),
                 step_entered,
-                course_data.get('credits', ''),
-                course_data.get('description', ''),
-                course_data.get('academic_level', ''),
+                keep('credits'),
+                keep('description'),
+                keep('academic_level'),
                 now,
                 course_data['id']
             ))
