@@ -1020,48 +1020,30 @@ function cleanCurriculumHtml(html) {
         }
     });
 
-    // Remove "Program Overview" section (h2 + following content until next h2)
-    div.querySelectorAll('h2').forEach(h2 => {
-        if (h2.textContent.trim() === 'Program Overview') {
-            // Remove everything from this h2 until the next h2 or end
-            let node = h2.nextSibling;
-            while (node) {
-                const next = node.nextSibling;
-                if (node.nodeName === 'H2') break;
-                node.parentNode.removeChild(node);
-                node = next;
-            }
-            h2.remove();
-        }
-    });
-
-    // Remove Milestone sections (h4 or h3 with "Milestone" + following p)
-    div.querySelectorAll('h3, h4').forEach(h => {
-        if (h.textContent.trim() === 'Milestone') {
+    // Remove a labeled section: the heading itself plus following content until
+    // the next heading of the same or higher level (or the next h2/h3/h4).
+    // Stopping at any heading prevents greedy deletion of later sections that
+    // use a different heading level (e.g., concentrations as <h3> after a
+    // Program Credit/GPA Requirements <h2>).
+    function removeLabeledSection(headingSelector, isMatch) {
+        div.querySelectorAll(headingSelector).forEach(h => {
+            if (!isMatch(h)) return;
             let node = h.nextSibling;
             while (node) {
                 const next = node.nextSibling;
-                if (node.nodeName && node.nodeName.match(/^H[2-4]$/)) break;
+                if (node.nodeName && /^H[1-6]$/.test(node.nodeName)) break;
                 node.parentNode.removeChild(node);
                 node = next;
             }
             h.remove();
-        }
-    });
+        });
+    }
 
-    // Remove "Research Areas" and "Program Credit/GPA Requirements" sections
-    div.querySelectorAll('h2, h3').forEach(h => {
-        const text = h.textContent.trim();
-        if (text === 'Research Areas' || text === 'Program Credit/GPA Requirements') {
-            let node = h.nextSibling;
-            while (node) {
-                const next = node.nextSibling;
-                if (node.nodeName === 'H2') break;
-                node.parentNode.removeChild(node);
-                node = next;
-            }
-            h.remove();
-        }
+    removeLabeledSection('h2', h => h.textContent.trim() === 'Program Overview');
+    removeLabeledSection('h3, h4', h => h.textContent.trim() === 'Milestone');
+    removeLabeledSection('h2, h3', h => {
+        const t = h.textContent.trim();
+        return t === 'Research Areas' || t === 'Program Credit/GPA Requirements';
     });
 
     // --- Heading/areaheader classification for visual hierarchy ---
