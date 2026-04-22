@@ -61,6 +61,13 @@ function switchView(view) {
     // Continuing only applies to courses
     const contBtn = document.getElementById('btn-type-continuing');
     if (contBtn) contBtn.style.display = view === 'courses' ? 'inline-block' : 'none';
+    // Update search placeholder
+    const searchEl = document.getElementById('filter-search');
+    if (searchEl) {
+        searchEl.placeholder = view === 'courses'
+            ? 'Search courses by code or title...'
+            : 'Search programs by name or banner code...';
+    }
 
     // Reload appropriate data
     if (view === 'programs') {
@@ -87,6 +94,12 @@ function updateClearButtons() {
             wrap.classList.remove('has-value');
         }
     });
+    // Header search clear button
+    const hs = document.getElementById('filter-search');
+    const clear = document.querySelector('.header-search-clear');
+    if (hs && clear) {
+        clear.classList.toggle('visible', !!hs.value);
+    }
 }
 
 // The 14 main tracked pipeline steps
@@ -1583,10 +1596,39 @@ async function loadCompareDetail(programId) {
         const campus = campusMatch ? campusMatch[1] : null;
         const isNonBoston = campus && campus.toLowerCase() !== 'boston';
 
+        // If a custom reference override is active, always compare proposed vs that custom ref,
+        // regardless of the program's campus relationships.
+        const refRes0 = await fetch(`/api/program/${programId}/reference`);
+        const refData0 = refRes0.ok ? await refRes0.json() : {};
+        const hasCustomOverride = refData0.source === 'custom';
+
+        if (hasCustomOverride) {
+            const refHtml = refData0.curriculum_html || '';
+            if (!currHtml || !refHtml) {
+                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or custom reference data not available for comparison.</div>';
+                updateCompareButton(programId, null);
+                return;
+            }
+            const {identical, diff} = compareCurricula(currHtml, refHtml);
+            updateCompareButton(programId, identical);
+            const header = `<div class="reference-header">Comparing against custom reference: ${escapeHtml(refData0.name || refData0.version_date || '')}</div>`;
+            if (identical) {
+                contentEl.innerHTML = `${header}<div class="compare-identical">Proposed curriculum is identical to the custom reference.</div>`;
+            } else {
+                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
+                contentEl.innerHTML = `${header}
+                    <div class="compare-legend">
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
+                    </div>${table}`;
+            }
+            return;
+        }
+
         if (bostonId || isNonBoston) {
             // This is a non-Boston deployment — compare against Boston reference
-            const refRes = await fetch(`/api/program/${programId}/reference`);
-            const refData = refRes.ok ? await refRes.json() : {};
+            const refData = refData0;
             const refHtml = refData.curriculum_html || '';
 
             if (!currHtml || !refHtml) {
@@ -1671,8 +1713,7 @@ async function loadCompareDetail(programId) {
         } else {
             // No campus relationships — this is a standalone program
             // Compare against its own reference if available
-            const refRes = await fetch(`/api/program/${programId}/reference`);
-            const refData = refRes.ok ? await refRes.json() : {};
+            const refData = refData0;
             const refHtml = refData.curriculum_html || '';
 
             if (!currHtml || !refHtml) {
@@ -2197,6 +2238,31 @@ function __staticInit() {
         const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
         const campus = campusMatch ? campusMatch[1] : null;
         const isNonBoston = campus && campus.toLowerCase() !== 'boston';
+
+        // Custom-reference override takes precedence over campus-based comparison logic
+        const _ref = (_referenceCache || {})[String(programId)];
+        const isCustomRef = _ref && _ref.version_date && _ref.version_date.indexOf('Custom reference') === 0;
+        if (isCustomRef) {
+            const refHtml = _ref.html || '';
+            if (!currHtml || !refHtml) {
+                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or custom reference data not available for comparison.</div>';
+                updateCompareButton(programId, null);
+                return;
+            }
+            const {identical, diff} = compareCurricula(currHtml, refHtml);
+            updateCompareButton(programId, identical);
+            const header = '<div class="reference-header">Comparing against ' + escapeHtml(_ref.version_date) + '</div>';
+            if (identical) {
+                contentEl.innerHTML = header + '<div class="compare-identical">Proposed curriculum is identical to the custom reference.</div>';
+            } else {
+                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
+                contentEl.innerHTML = header +
+                    '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
+            }
+            return;
+        }
 
         if (bostonId || isNonBoston) {
             // Non-Boston deployment

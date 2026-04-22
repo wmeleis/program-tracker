@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1776886109">
+    <link rel="stylesheet" href="style.css?v=1776887332">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1776886109;
+  const CACHE_BUST = 1776887332;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -236,6 +236,10 @@
                 <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">Courses</button>
                 <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
             </div>
+            <div class="header-search">
+                <input type="text" id="filter-search" placeholder="Search programs by name or banner code..." oninput="applyFilters(); updateClearButtons()">
+                <span class="filter-clear header-search-clear" onclick="clearFilter('filter-search')" title="Clear">&times;</span>
+            </div>
         </div>
         <div class="header-right">
             <span id="last-updated" class="last-updated"></span>
@@ -243,10 +247,11 @@
             <div id="progress-container" class="progress-container" style="display: none;">
                 <span id="progress-phase" class="progress-phase"></span>
             </div>
-            
             <button id="scan-btn" onclick="triggerScan()">Update Now</button>
         </div>
     </header>
+
+    
 
     <!-- Manage References modal (local-only) -->
     
@@ -330,13 +335,6 @@
                     <option value="">All Steps</option>
                 </select>
                 <span class="filter-clear" onclick="clearFilter('filter-step')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group search-group">
-            <label>Search:</label>
-            <div class="filter-select-wrap">
-                <input type="text" id="filter-search" placeholder="Program name..." oninput="applyFilters(); updateClearButtons()">
-                <span class="filter-clear" onclick="clearFilter('filter-search')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">

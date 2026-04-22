@@ -714,22 +714,55 @@ tr.program-row.expanded td {
     border-bottom-color: #3b82f6;
 }
 
-/* Secondary-action button (References, etc.) */
-.secondary-btn {
-    padding: 8px 14px;
-    border: 2px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--text);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    margin-right: 8px;
+/* Header search bar */
+.header-search {
+    position: relative;
+    margin-left: 16px;
+    flex: 1;
+    max-width: 360px;
 }
-.secondary-btn:hover {
+.header-search input[type=text] {
+    width: 100%;
+    padding: 8px 30px 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--surface);
+}
+.header-search input[type=text]:focus {
+    outline: none;
     border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+.header-search-clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    font-size: 16px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px 6px;
+}
+.header-search-clear.visible { display: block; }
+
+/* Subtle links row below the header — lower-priority actions */
+.subtle-links {
+    display: flex;
+    justify-content: flex-end;
+    gap: 16px;
+    padding: 4px 24px 0;
+    font-size: 12px;
+}
+.subtle-links a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--text-secondary);
+}
+.subtle-links a:hover {
     color: var(--accent);
+    border-bottom-color: var(--accent);
 }
 
 /* Modal overlay */
@@ -1214,11 +1247,13 @@ tr.program-row.expanded td {
     background: #fef2f2;
 }
 
-/* View Toggle (Programs/Courses) */
+/* View Toggle (Programs/Courses) + search */
 .header-middle {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     display: flex;
     align-items: center;
+    gap: 16px;
+    min-width: 0;
 }
 
 .view-toggle {
