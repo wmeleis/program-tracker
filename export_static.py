@@ -286,8 +286,8 @@ def build_static_site():
     # Remove the References management UI — static site has no backend for uploads.
     # Overrides are baked into reference.json, so the current reference display still works.
     html = re.sub(
-        r'<button id="refs-btn"[^>]*>.*?</button>',
-        '', html, flags=re.DOTALL
+        r'<div class="subtle-links">.*?</div>',
+        '', html, count=1, flags=re.DOTALL
     )
     html = re.sub(
         r'<div id="refs-modal"[^>]*>.*?</div>\s*</div>\s*</div>',
@@ -791,6 +791,31 @@ function __staticInit() {
         const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
         const campus = campusMatch ? campusMatch[1] : null;
         const isNonBoston = campus && campus.toLowerCase() !== 'boston';
+
+        // Custom-reference override takes precedence over campus-based comparison logic
+        const _ref = (_referenceCache || {})[String(programId)];
+        const isCustomRef = _ref && _ref.version_date && _ref.version_date.indexOf('Custom reference') === 0;
+        if (isCustomRef) {
+            const refHtml = _ref.html || '';
+            if (!currHtml || !refHtml) {
+                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or custom reference data not available for comparison.</div>';
+                updateCompareButton(programId, null);
+                return;
+            }
+            const {identical, diff} = compareCurricula(currHtml, refHtml);
+            updateCompareButton(programId, identical);
+            const header = '<div class="reference-header">Comparing against ' + escapeHtml(_ref.version_date) + '</div>';
+            if (identical) {
+                contentEl.innerHTML = header + '<div class="compare-identical">Proposed curriculum is identical to the custom reference.</div>';
+            } else {
+                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
+                contentEl.innerHTML = header +
+                    '<div class="compare-legend"><span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>' +
+                    '<span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span></div>' + table;
+            }
+            return;
+        }
 
         if (bostonId || isNonBoston) {
             // Non-Boston deployment
