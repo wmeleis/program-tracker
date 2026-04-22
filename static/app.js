@@ -1041,10 +1041,10 @@ function cleanCurriculumHtml(html) {
 
     removeLabeledSection('h2', h => h.textContent.trim() === 'Program Overview');
     removeLabeledSection('h3, h4', h => h.textContent.trim() === 'Milestone');
-    removeLabeledSection('h2, h3', h => {
-        const t = h.textContent.trim();
-        return t === 'Research Areas' || t === 'Program Credit/GPA Requirements';
-    });
+    removeLabeledSection('h2, h3', h => h.textContent.trim() === 'Research Areas');
+    // NOTE: Program Credit/GPA Requirements is no longer stripped because in
+    // umbrella programs that section also contains the Pathway Options form
+    // (Program Pathway vs Project Pathway), which is part of the curriculum.
 
     // --- Heading/areaheader classification for visual hierarchy ---
     // Concentration headings: make them pop (bold + accent color)

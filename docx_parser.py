@@ -206,16 +206,23 @@ def parse_docx(data):
 
     # Walk the body in order. Track the most recent Heading2/Heading3 text; when we
     # hit a table, bind it to that heading. Tables produce sections in the output.
+    # Also: certain structurally-significant plain paragraphs (like "Project Pathway",
+    # "Program Pathway") act as section boundaries even without a heading style —
+    # some umbrella docs leave them unstyled but they separate meaningful curriculum
+    # chunks.
+    PROMOTED_HEADINGS_RE = re.compile(
+        r'^(project pathway|program pathway|plan of study|sample plan of study)\b', re.I
+    )
     sections = []
     current_heading = None
     for child in body:
         tag = child.tag.split('}')[-1]
         if tag == 'p':
             style, text = _paragraph_text_and_style(child)
-            # Only Heading2/Heading3 act as section boundaries. Ignore Heading1 (title)
-            # and the top-of-doc form labels (Heading3 with short metadata text).
             if style in ('Heading2', 'Heading3') and text:
                 current_heading = text
+            elif text and PROMOTED_HEADINGS_RE.match(text.strip()):
+                current_heading = text.strip()
         elif tag == 'tbl':
             rows = _parse_table(child)
             # Skip tables that have no course-code rows AND no meaningful header rows
