@@ -1058,8 +1058,11 @@ function cleanCurriculumHtml(html) {
     // A row is "decorative" if it just groups a list of courses visually ("Process
     // Sciences Focus", "Artificial Intelligence Focus") — no "Required", "Option",
     // "Complete N semester hours", "Electives", "Core".
-    const CHOICE_RE = /\b(required|core|elective|option|choose|complete\s*\d|\d+\s*semester|must|in consultation|any\s+\d)\b/i;
-    const DECORATIVE_SUFFIX_RE = /\b(focus|track|area|group|pathway)s?\s*$/i;
+    const CHOICE_RE = /\b(required|core|elective|option|choose|complete\s*\d|\d+\s*semester|must|in consultation|any\s+\d|pathway)\b/i;
+    // "Focus / Track / Area / Group" are pure grouping labels in the curriculum
+    // (e.g., "Process Sciences Focus"). "Pathway" is NOT in this list — pathways
+    // (Program Pathway, Project Pathway) are meaningful structural choices.
+    const DECORATIVE_SUFFIX_RE = /\b(focus|track|area|group)s?\s*$/i;
     div.querySelectorAll('tr.areaheader').forEach(tr => {
         const text = (tr.textContent || '').trim();
         if (!text) return;
