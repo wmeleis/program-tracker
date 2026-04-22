@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <div id="error-banner" class="error-banner" style="display: none;">
+        <span id="error-banner-text"></span>
+        <button class="error-banner-close" onclick="dismissErrorBanner()" title="Dismiss">&times;</button>
+    </div>
     <header>
         <div class="header-left">
             <h1>Approval Tracker</h1>

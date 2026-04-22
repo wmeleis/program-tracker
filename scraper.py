@@ -504,6 +504,94 @@ def classify_program_type(name, workflow_steps=None):
     return 'Graduate'
 
 
+def check_courseleaf_session():
+    """Quickly probe CourseLeaf to verify the Chrome session is authenticated.
+
+    Returns a dict: {'ok': bool, 'error': str (when not ok), 'detail': str}
+
+    Checks:
+    1. The programadmin tab exists and JS can execute (Chrome accessible)
+    2. The XML API returns real program data (not a redirect to login)
+    3. The Approve Pages tab's role <select> is populated (session valid)
+
+    Fast: ~1-3 seconds total.
+    """
+    # Step 1: Can we talk to the programadmin tab at all?
+    url = run_js_in_tab('programadmin', 'location.href', match_by='url', timeout=10)
+    if not url or url == 'missing value':
+        return {
+            'ok': False,
+            'error': 'chrome_unreachable',
+            'detail': 'Chrome programadmin tab not found or not responding. '
+                      'Open https://nextcatalog.northeastern.edu/programadmin/ in Chrome window 1.'
+        }
+
+    # Step 2: Probe the XML API for a known program to verify session
+    probe_js = '''
+(function() {
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/programadmin/2/index.xml", false);
+        xhr.send();
+        var txt = xhr.responseText || "";
+        if (xhr.status !== 200) return "HTTP:" + xhr.status;
+        // A valid session returns XML that starts with <?xml> and contains <courseleaf>
+        if (txt.indexOf("<courseleaf>") === -1) return "NOT_XML";
+        // A logged-out response often redirects to login HTML (starts with <!DOCTYPE or <html)
+        if (txt.trimStart().toLowerCase().indexOf("<!doctype") === 0) return "LOGIN_REDIRECT";
+        if (txt.length < 500) return "SHORT:" + txt.length;
+        return "OK:" + txt.length;
+    } catch(e) {
+        return "ERR:" + e.message;
+    }
+})();
+'''
+    result = run_js_in_tab('programadmin', probe_js, match_by='url', timeout=15)
+    if not result or result == 'missing value':
+        return {
+            'ok': False,
+            'error': 'probe_failed',
+            'detail': 'Could not probe CourseLeaf. Check that Chrome is running and '
+                      'the programadmin tab is open.'
+        }
+
+    if not result.startswith('OK:'):
+        return {
+            'ok': False,
+            'error': 'session_invalid',
+            'detail': f'CourseLeaf session appears invalid or expired (probe: {result}). '
+                      'Please log in to CourseLeaf in Chrome, then retry.'
+        }
+
+    # Step 3: Verify Approve Pages tab has the role selector
+    approve_js = '''
+(function() {
+    var sel = document.querySelector("select");
+    if (!sel) return "NO_SELECT";
+    var count = sel.options.length;
+    if (count < 10) return "TOO_FEW:" + count;
+    return "OK:" + count;
+})();
+'''
+    ap_result = run_js_in_tab('courseleaf/approve', approve_js, match_by='url', timeout=10)
+    if not ap_result or ap_result == 'missing value':
+        return {
+            'ok': False,
+            'error': 'approve_pages_missing',
+            'detail': 'The CourseLeaf Approve Pages tab is not open. '
+                      'Open https://nextcatalog.northeastern.edu/courseleaf/approve/ in Chrome.'
+        }
+    if not ap_result.startswith('OK:'):
+        return {
+            'ok': False,
+            'error': 'approve_pages_invalid',
+            'detail': f'Approve Pages tab is not showing roles ({ap_result}). '
+                      'You may need to log in again.'
+        }
+
+    return {'ok': True, 'detail': 'CourseLeaf session is valid.'}
+
+
 def run_full_scan():
     """Run a complete scan: discover programs via Approve Pages, then batch-fetch details.
 
