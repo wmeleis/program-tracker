@@ -46,7 +46,8 @@ scan_status = {
 @app.route('/')
 def dashboard():
     """Serve the main dashboard."""
-    return render_template('dashboard.html')
+    import time
+    return render_template('dashboard.html', cache_bust=int(time.time()))
 
 
 @app.route('/api/programs')
