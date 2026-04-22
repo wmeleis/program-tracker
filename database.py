@@ -108,6 +108,18 @@ def init_db():
                 FOREIGN KEY (program_id) REFERENCES programs(id)
             );
 
+            CREATE TABLE IF NOT EXISTS custom_references (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                source_type TEXT,           -- 'docx', 'doc', 'pdf', 'txt'
+                source_filename TEXT,
+                title TEXT,                 -- detected from the document
+                curriculum_html TEXT,
+                sections_json TEXT,         -- structured preview data
+                notes TEXT,
+                created_at TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS courses (
                 id TEXT PRIMARY KEY,
                 code TEXT NOT NULL,
@@ -476,6 +488,84 @@ def get_all_reference_curriculum():
         return {str(row['program_id']): {'version_date': row['version_date'], 'html': row['curriculum_html']} for row in rows}
 
 
+# ---- Custom references (uploaded curriculum docs) ----
+
+def create_custom_reference(name, source_type, source_filename, title, curriculum_html, sections_json, notes=''):
+    """Create a new custom reference. Returns the new id."""
+    with get_db() as conn:
+        now = datetime.now().isoformat()
+        cur = conn.execute("""
+            INSERT INTO custom_references
+                (name, source_type, source_filename, title, curriculum_html, sections_json, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, source_type, source_filename, title, curriculum_html, sections_json, notes, now))
+        return cur.lastrowid
+
+
+def list_custom_references():
+    """List all custom references (metadata only, no full HTML)."""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT id, name, source_type, source_filename, title, notes, created_at,
+                   length(curriculum_html) as html_size
+            FROM custom_references
+            ORDER BY created_at DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_custom_reference(ref_id):
+    """Fetch a single custom reference, including its curriculum HTML."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM custom_references WHERE id = ?", (ref_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_custom_reference(ref_id):
+    """Delete a custom reference. Clears any program overrides pointing to it.
+
+    Returns the number of programs whose overrides were cleared.
+    """
+    with get_db() as conn:
+        cleared = conn.execute(
+            "UPDATE programs SET custom_reference_id = NULL WHERE custom_reference_id = ?",
+            (ref_id,),
+        ).rowcount
+        conn.execute("DELETE FROM custom_references WHERE id = ?", (ref_id,))
+        return cleared
+
+
+def set_program_reference_override(program_id, custom_reference_id):
+    """Set or clear a program's custom reference override."""
+    with get_db() as conn:
+        if custom_reference_id is None:
+            conn.execute("UPDATE programs SET custom_reference_id = NULL WHERE id = ?", (program_id,))
+        else:
+            conn.execute(
+                "UPDATE programs SET custom_reference_id = ? WHERE id = ?",
+                (custom_reference_id, program_id),
+            )
+
+
+def get_program_reference_override_id(program_id):
+    """Return the custom_reference_id for a program, or None."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT custom_reference_id FROM programs WHERE id = ?",
+            (program_id,),
+        ).fetchone()
+        return row['custom_reference_id'] if row else None
+
+
+def get_all_program_reference_overrides():
+    """Return {program_id: custom_reference_id} for all programs with an override."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, custom_reference_id FROM programs WHERE custom_reference_id IS NOT NULL"
+        ).fetchall()
+        return {r['id']: r['custom_reference_id'] for r in rows}
+
+
 def upsert_course(course_data):
     """Insert or update a course. Returns True if the course changed.
 
@@ -779,3 +869,25 @@ def migrate_db():
                 FOREIGN KEY (program_id) REFERENCES programs(id)
             )
         """)
+
+        # Custom references (uploaded .docx etc.) — programs may point to one of these
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS custom_references (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                source_type TEXT,
+                source_filename TEXT,
+                title TEXT,
+                curriculum_html TEXT,
+                sections_json TEXT,
+                notes TEXT,
+                created_at TIMESTAMP
+            )
+        """)
+        # Add custom_reference_id column to programs if missing
+        if 'custom_reference_id' not in existing_cols:
+            try:
+                conn.execute("ALTER TABLE programs ADD COLUMN custom_reference_id INTEGER")
+                print("  Added column: custom_reference_id")
+            except sqlite3.OperationalError:
+                pass  # already added

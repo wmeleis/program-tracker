@@ -714,6 +714,161 @@ tr.program-row.expanded td {
     border-bottom-color: #3b82f6;
 }
 
+/* Secondary-action button (References, etc.) */
+.secondary-btn {
+    padding: 8px 14px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-right: 8px;
+}
+.secondary-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* Modal overlay */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 2000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 20px;
+    overflow-y: auto;
+}
+.modal-panel {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+    width: 100%;
+    max-width: 720px;
+    max-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+.modal-header h2 {
+    margin: 0;
+    font-size: 18px;
+}
+.modal-close {
+    background: transparent;
+    border: none;
+    font-size: 24px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 8px;
+    line-height: 1;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* References modal */
+.refs-upload h3, .refs-list-wrap h3 {
+    margin-top: 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+.refs-help {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: -4px;
+}
+#ref-upload-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+#ref-upload-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+#ref-upload-form input[type=text] {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+}
+#ref-upload-submit {
+    align-self: flex-start;
+    padding: 8px 16px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#ref-upload-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+#ref-upload-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+    align-self: flex-start;
+}
+#ref-upload-status.ok { color: #166534; }
+#ref-upload-status.err { color: #991b1b; }
+.refs-list-item {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.refs-list-item-info { flex: 1; }
+.refs-list-item-name { font-weight: 600; font-size: 14px; }
+.refs-list-item-meta { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.refs-list-item-delete {
+    padding: 6px 12px;
+    background: transparent;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.refs-list-item-delete:hover { background: #fee2e2; }
+
+/* Reference-source selector inside the Reference tab */
+.ref-source-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+.ref-source-picker label { color: var(--text-secondary); font-weight: 500; }
+.ref-source-picker select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
 /* Error banner (session check failures etc.) */
 .error-banner {
     background: #fee2e2;

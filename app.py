@@ -1,9 +1,10 @@
 """Flask server for Program Approval Status Tracker."""
 
 import os
+import json as _json
 import threading
 from datetime import datetime
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 
 from database import (
@@ -16,7 +17,11 @@ from database import (
     get_courses_by_step, get_course_colleges,
     get_course_current_approvers, get_courses_by_approver,
     record_scan,
+    create_custom_reference, list_custom_references, get_custom_reference,
+    delete_custom_reference, set_program_reference_override,
+    get_program_reference_override_id,
 )
+from docx_parser import parse_docx
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan, check_courseleaf_session
 from export_static import build_campus_groups
 
@@ -75,11 +80,131 @@ def api_program_curriculum(program_id):
 
 @app.route('/api/program/<int:program_id>/reference')
 def api_program_reference(program_id):
-    """Get reference (previously approved) curriculum for a program."""
+    """Get reference curriculum for a program.
+
+    If the program has a custom_reference_id override, returns that custom
+    reference's curriculum (annotated with source='custom'). Otherwise returns
+    the auto-derived reference from CIM history (source='auto').
+    """
+    override_id = get_program_reference_override_id(program_id)
+    if override_id:
+        custom = get_custom_reference(override_id)
+        if custom:
+            return jsonify({
+                'source': 'custom',
+                'custom_reference_id': override_id,
+                'name': custom.get('name'),
+                'source_filename': custom.get('source_filename'),
+                'version_date': f"Custom reference: {custom.get('name', '')}",
+                'curriculum_html': custom.get('curriculum_html', ''),
+            })
+        # Override points to a deleted ref — fall through to auto
     ref = get_reference_curriculum(program_id)
     if ref:
+        ref['source'] = 'auto'
         return jsonify(ref)
     return jsonify({'error': 'No reference curriculum found'}), 404
+
+
+@app.route('/api/custom_references', methods=['GET'])
+def api_list_custom_references():
+    """List all custom references (metadata only)."""
+    return jsonify({'references': list_custom_references()})
+
+
+@app.route('/api/custom_references', methods=['POST'])
+def api_upload_custom_reference():
+    """Upload a custom reference file (.docx) and save it.
+
+    Accepts multipart/form-data with:
+      - file: the .docx file
+      - name: display name for this reference (optional; defaults to filename)
+      - notes: free-text notes (optional)
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    f = request.files['file']
+    if not f or not f.filename:
+        return jsonify({'error': 'Empty filename'}), 400
+
+    filename = f.filename
+    ext = (filename.rsplit('.', 1)[-1] if '.' in filename else '').lower()
+    if ext != 'docx':
+        return jsonify({
+            'error': 'unsupported_format',
+            'detail': f'.{ext} files are not yet supported. Please upload a .docx file. '
+                      f'(Legacy .doc files should be re-saved as .docx.)'
+        }), 415
+
+    data = f.read()
+    try:
+        parsed = parse_docx(data)
+    except Exception as e:
+        return jsonify({'error': 'parse_failed', 'detail': str(e)}), 400
+
+    if not parsed.get('curriculum_html'):
+        return jsonify({
+            'error': 'empty_content',
+            'detail': 'No course content could be extracted from this file. '
+                      'Warnings: ' + '; '.join(parsed.get('warnings', []))
+        }), 400
+
+    name = request.form.get('name', '').strip() or parsed.get('title') or filename.rsplit('.', 1)[0]
+    notes = request.form.get('notes', '').strip()
+
+    ref_id = create_custom_reference(
+        name=name,
+        source_type=ext,
+        source_filename=filename,
+        title=parsed.get('title', ''),
+        curriculum_html=parsed.get('curriculum_html', ''),
+        sections_json=_json.dumps(parsed.get('sections', [])),
+        notes=notes,
+    )
+    # Return the preview so the UI can confirm the parse looked reasonable
+    return jsonify({
+        'id': ref_id,
+        'name': name,
+        'title': parsed.get('title', ''),
+        'sections': parsed.get('sections', []),
+        'warnings': parsed.get('warnings', []),
+    })
+
+
+@app.route('/api/custom_references/<int:ref_id>', methods=['GET'])
+def api_get_custom_reference(ref_id):
+    ref = get_custom_reference(ref_id)
+    if not ref:
+        return jsonify({'error': 'not_found'}), 404
+    # Parse sections_json back into structured data for UI
+    try:
+        ref['sections'] = _json.loads(ref.get('sections_json') or '[]')
+    except Exception:
+        ref['sections'] = []
+    return jsonify(ref)
+
+
+@app.route('/api/custom_references/<int:ref_id>', methods=['DELETE'])
+def api_delete_custom_reference(ref_id):
+    cleared = delete_custom_reference(ref_id)
+    return jsonify({'deleted': True, 'overrides_cleared': cleared})
+
+
+@app.route('/api/program/<int:program_id>/reference_override', methods=['POST'])
+def api_set_reference_override(program_id):
+    """Set (or clear with null) a program's custom reference override.
+
+    Body: {"custom_reference_id": N} or {"custom_reference_id": null}
+    """
+    body = request.get_json(silent=True) or {}
+    ref_id = body.get('custom_reference_id')
+    if ref_id is not None:
+        # Validate it exists
+        if not get_custom_reference(int(ref_id)):
+            return jsonify({'error': 'custom_reference_not_found'}), 404
+        ref_id = int(ref_id)
+    set_program_reference_override(program_id, ref_id)
+    return jsonify({'program_id': program_id, 'custom_reference_id': ref_id})
 
 
 @app.route('/api/campus_groups')

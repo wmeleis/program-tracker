@@ -1054,6 +1054,154 @@ function cleanCurriculumHtml(html) {
     return div.innerHTML;
 }
 
+// ==================== Custom References ====================
+
+let _customRefsCache = null;  // [{id, name, ...}]
+
+async function loadCustomRefs(force) {
+    if (_customRefsCache && !force) return _customRefsCache;
+    try {
+        const res = await fetch('/api/custom_references');
+        const data = await res.json();
+        _customRefsCache = data.references || [];
+    } catch (e) {
+        _customRefsCache = [];
+    }
+    return _customRefsCache;
+}
+
+function openReferencesModal() {
+    document.getElementById('refs-modal').style.display = 'flex';
+    renderRefsList();
+}
+
+function closeReferencesModal() {
+    document.getElementById('refs-modal').style.display = 'none';
+    // Reset upload form
+    document.getElementById('ref-upload-form').reset();
+    document.getElementById('ref-upload-status').textContent = '';
+    document.getElementById('ref-upload-status').className = '';
+}
+
+function closeReferencesModalIfBackdrop(event) {
+    if (event.target.id === 'refs-modal') closeReferencesModal();
+}
+
+async function renderRefsList() {
+    const container = document.getElementById('refs-list');
+    container.innerHTML = '<p class="empty-state">Loading...</p>';
+    const refs = await loadCustomRefs(true);
+    if (!refs.length) {
+        container.innerHTML = '<p class="empty-state">No custom references yet. Upload a .docx above.</p>';
+        return;
+    }
+    container.innerHTML = refs.map(r => {
+        const meta = [
+            r.source_filename || '',
+            r.title ? `Title: ${escapeHtml(r.title)}` : '',
+            r.notes ? `Notes: ${escapeHtml(r.notes)}` : '',
+            r.created_at ? new Date(r.created_at).toLocaleString() : ''
+        ].filter(Boolean).join(' · ');
+        return `<div class="refs-list-item">
+            <div class="refs-list-item-info">
+                <div class="refs-list-item-name">${escapeHtml(r.name)}</div>
+                <div class="refs-list-item-meta">${meta}</div>
+            </div>
+            <button class="refs-list-item-delete" onclick="deleteCustomRef(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Delete</button>
+        </div>`;
+    }).join('');
+}
+
+async function uploadCustomReference(event) {
+    event.preventDefault();
+    const fileEl = document.getElementById('ref-upload-file');
+    const nameEl = document.getElementById('ref-upload-name');
+    const notesEl = document.getElementById('ref-upload-notes');
+    const submit = document.getElementById('ref-upload-submit');
+    const status = document.getElementById('ref-upload-status');
+
+    if (!fileEl.files || !fileEl.files[0]) return false;
+    const fd = new FormData();
+    fd.append('file', fileEl.files[0]);
+    if (nameEl.value.trim()) fd.append('name', nameEl.value.trim());
+    if (notesEl.value.trim()) fd.append('notes', notesEl.value.trim());
+
+    submit.disabled = true;
+    status.textContent = 'Parsing...';
+    status.className = '';
+    try {
+        const res = await fetch('/api/custom_references', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) {
+            status.textContent = data.detail || data.error || 'Upload failed';
+            status.className = 'err';
+            return false;
+        }
+        const nCourses = (data.sections || []).reduce((n, s) =>
+            n + (s.courses || []).filter(c => !c.is_header).length, 0);
+        const nSections = (data.sections || []).length;
+        const warn = (data.warnings && data.warnings.length)
+            ? ` (warnings: ${data.warnings.join('; ')})` : '';
+        status.textContent = `Saved "${data.name}" — ${nSections} sections, ${nCourses} courses${warn}.`;
+        status.className = 'ok';
+        document.getElementById('ref-upload-form').reset();
+        _customRefsCache = null;  // invalidate
+        renderRefsList();
+    } catch (e) {
+        status.textContent = 'Upload failed: ' + (e.message || e);
+        status.className = 'err';
+    } finally {
+        submit.disabled = false;
+    }
+    return false;
+}
+
+async function deleteCustomRef(refId, name) {
+    if (!confirm(`Delete custom reference "${name}"? Any programs using it will revert to the auto reference.`)) return;
+    try {
+        const res = await fetch('/api/custom_references/' + refId, { method: 'DELETE' });
+        if (!res.ok) {
+            alert('Delete failed');
+            return;
+        }
+        _customRefsCache = null;
+        renderRefsList();
+        // If any currently-expanded row was using this ref, it'll reload on next tab click
+    } catch (e) {
+        alert('Delete failed: ' + e.message);
+    }
+}
+
+async function setProgramReferenceOverride(programId, customRefId) {
+    try {
+        await fetch(`/api/program/${programId}/reference_override`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ custom_reference_id: customRefId === 'auto' ? null : parseInt(customRefId, 10) })
+        });
+        // Reload the reference tab
+        loadReferenceDetail(programId);
+    } catch (e) {
+        alert('Failed to set override: ' + e.message);
+    }
+}
+
+async function buildRefSourcePickerHtml(programId, activeCustomRefId) {
+    // Hide picker on the static site — no backend to accept the change
+    if (window._staticMode) return '';
+    const refs = await loadCustomRefs();
+    if (!refs.length && !activeCustomRefId) return '';
+    const options = ['<option value="auto"' + (!activeCustomRefId ? ' selected' : '') + '>Auto (Boston / CIM history)</option>'];
+    for (const r of refs) {
+        const sel = activeCustomRefId === r.id ? ' selected' : '';
+        options.push(`<option value="${r.id}"${sel}>Custom: ${escapeHtml(r.name)}</option>`);
+    }
+    return `<div class="ref-source-picker">
+        <label>Reference source:</label>
+        <select onchange="setProgramReferenceOverride(${programId}, this.value)">${options.join('')}</select>
+    </div>`;
+}
+
 async function loadReferenceDetail(programId) {
     const contentEl = document.getElementById(`detail-content-${programId}`);
     if (!contentEl) return;
@@ -1061,20 +1209,20 @@ async function loadReferenceDetail(programId) {
 
     try {
         const res = await fetch(`/api/program/${programId}/reference`);
-        if (!res.ok) {
-            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals.</div>';
+        const data = res.ok ? await res.json() : {};
+        const activeCustomRefId = data.source === 'custom' ? data.custom_reference_id : null;
+        const picker = await buildRefSourcePickerHtml(programId, activeCustomRefId);
+
+        if (!res.ok || !data.curriculum_html) {
+            contentEl.innerHTML = picker + '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals. You can upload a custom reference from the "References" button at the top of the page.</div>';
             return;
         }
-        const data = await res.json();
-        if (data.curriculum_html) {
-            const cleaned = cleanCurriculumHtml(data.curriculum_html);
-            const header = data.version_date
-                ? `<div class="reference-header">Last approved version: ${escapeHtml(data.version_date)}</div>`
-                : '';
-            contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
-        } else {
-            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available.</div>';
-        }
+        const cleaned = cleanCurriculumHtml(data.curriculum_html);
+        const label = data.source === 'custom' ? 'Custom reference' : 'Last approved version';
+        const header = data.version_date
+            ? `<div class="reference-header">${label}: ${escapeHtml(data.version_date)}</div>`
+            : '';
+        contentEl.innerHTML = `${picker}${header}<div class="curriculum-content">${cleaned}</div>`;
     } catch (e) {
         contentEl.innerHTML = '<div class="workflow-meta">Failed to load reference curriculum.</div>';
     }

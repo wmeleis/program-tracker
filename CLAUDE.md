@@ -268,6 +268,22 @@ Side-by-side comparison of curriculum content. Uses LCS-based diff algorithm.
 ### Timezone Handling
 All timestamps displayed in Eastern Time (America/New_York) with "ET" suffix. Applied in both the Flask-served and static GitHub Pages versions.
 
+### Custom Reference Curricula (uploaded .docx)
+Programs may override the auto-derived reference with a user-uploaded document.
+
+- **DB:** `custom_references` table (`id`, `name`, `source_type`, `source_filename`, `title`, `curriculum_html`, `sections_json`, `notes`, `created_at`). `programs.custom_reference_id` (nullable FK) — when set, overrides the auto reference.
+- **Parser (`docx_parser.py`):** Pure stdlib (`zipfile` + `xml.etree`). Walks `<w:body>` in order; `Heading2` / `Heading3` paragraphs mark section boundaries; each `<w:tbl>` produces a section. Course rows are detected via regex `^[A-Z]{2,5}\s*\d{4}` on the first cell. Output HTML matches CourseLeaf's `<table class="sc_courselist">` structure so the Compare diff works unchanged.
+- **Supported formats:** `.docx` only. `.doc` uploads are rejected with a message asking the user to re-save as `.docx`. `.pdf` and `.txt` are deferred.
+- **API:**
+  - `GET /api/custom_references` — list
+  - `POST /api/custom_references` — multipart upload (`file`, optional `name`, `notes`) → parses → stores → returns preview (sections + course counts + warnings)
+  - `GET /api/custom_references/<id>` — full record incl. HTML
+  - `DELETE /api/custom_references/<id>` — removes; automatically clears any program overrides pointing to it
+  - `POST /api/program/<id>/reference_override` body `{custom_reference_id: N|null}` — set or clear a program's override
+  - `GET /api/program/<id>/reference` — now returns `{source: 'custom', custom_reference_id, name, ...}` when overridden, else the auto reference with `source: 'auto'`
+- **UI:** "References" button in the header opens a modal for upload/list/delete. On each program's Reference tab, a **Reference source** dropdown picks `Auto (Boston / CIM history)` or any custom ref. Changes POST the override and immediately reload the tab. The Compare tab works against whichever source is active.
+- **Static site:** `export_static.py` bakes overrides into `reference.json` (the override's HTML replaces the auto-derived ref for that program_id). The References button + modal are stripped from the exported HTML since the static site has no upload backend. `window._staticMode = true` is set in the static override bundle so the override-source dropdown also doesn't render.
+
 ### Metadata Preservation (prevents transient-failure data loss)
 `upsert_program` and `upsert_course` now preserve existing metadata (`college`, `department`, `degree`, `banner_code`, `curriculum_html`, `date_submitted`, `program_type` / `code`, `title`, `credits`, `description`, `academic_level`) when the scraper returns an empty value. Rationale: a scan that runs during a transient CourseLeaf session expiration previously wrote empty strings over hundreds of programs' good data. Empty values are now treated as "no new info" rather than "clear existing." Core fields (`status`, `current_step`, workflow steps) are still always overwritten since those drive correctness.
 

@@ -28,9 +28,40 @@
             <div id="progress-container" class="progress-container" style="display: none;">
                 <span id="progress-phase" class="progress-phase"></span>
             </div>
+            <button id="refs-btn" class="secondary-btn" onclick="openReferencesModal()" title="Manage custom reference curricula">References</button>
             <button id="scan-btn" onclick="triggerScan()">Update Now</button>
         </div>
     </header>
+
+    <!-- Manage References modal (local-only) -->
+    <div id="refs-modal" class="modal-overlay" style="display: none;" onclick="closeReferencesModalIfBackdrop(event)">
+        <div class="modal-panel" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>Custom Reference Curricula</h2>
+                <button class="modal-close" onclick="closeReferencesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="refs-upload">
+                    <h3>Upload a new reference</h3>
+                    <p class="refs-help">Supported: <code>.docx</code>. Legacy <code>.doc</code> must be re-saved as <code>.docx</code> first.</p>
+                    <form id="ref-upload-form" onsubmit="return uploadCustomReference(event)">
+                        <label>File: <input type="file" id="ref-upload-file" accept=".docx" required></label>
+                        <label>Display name (optional): <input type="text" id="ref-upload-name" placeholder="auto-detected from document"></label>
+                        <label>Notes (optional): <input type="text" id="ref-upload-notes"></label>
+                        <button type="submit" id="ref-upload-submit">Upload &amp; parse</button>
+                        <span id="ref-upload-status"></span>
+                    </form>
+                </div>
+                <hr>
+                <div class="refs-list-wrap">
+                    <h3>Saved references</h3>
+                    <div id="refs-list">
+                        <p class="empty-state">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Pipeline Summary -->
     <section id="pipeline" class="pipeline-section">

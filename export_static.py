@@ -14,6 +14,7 @@ from database import (
     get_all_programs, get_program_workflow, get_pipeline_counts,
     get_recent_changes, get_last_scan, get_colleges,
     get_current_approvers, get_all_curriculum, get_all_reference_curriculum,
+    get_all_program_reference_overrides, get_custom_reference,
     get_all_courses, get_course_workflow, get_course_pipeline_counts,
     get_course_colleges, get_course_current_approvers
 )
@@ -222,6 +223,16 @@ def build_static_site():
     _write_json_encrypted(curriculum, os.path.join(EXPORT_DIR, 'curriculum.json'), key)
 
     reference = get_all_reference_curriculum()
+    # Bake custom-reference overrides into reference.json: if a program has an
+    # override, that overrides the auto-derived reference for the static site.
+    overrides = get_all_program_reference_overrides()
+    for program_id, custom_ref_id in overrides.items():
+        custom = get_custom_reference(custom_ref_id)
+        if custom and custom.get('curriculum_html'):
+            reference[str(program_id)] = {
+                'version_date': f"Custom reference: {custom.get('name', '')}",
+                'html': custom.get('curriculum_html', ''),
+            }
     _write_json_encrypted(reference, os.path.join(EXPORT_DIR, 'reference.json'), key)
 
     # Campus relationship data
@@ -271,6 +282,16 @@ def build_static_site():
     html = html.replace(
         '<button id="scan-btn" onclick="triggerScan()">Scan Now</button>',
         ''
+    )
+    # Remove the References management UI — static site has no backend for uploads.
+    # Overrides are baked into reference.json, so the current reference display still works.
+    html = re.sub(
+        r'<button id="refs-btn"[^>]*>.*?</button>',
+        '', html, flags=re.DOTALL
+    )
+    html = re.sub(
+        r'<div id="refs-modal"[^>]*>.*?</div>\s*</div>\s*</div>',
+        '', html, count=1, flags=re.DOTALL
     )
 
     # Wrap the dashboard body content in a hidden container and prepend gate
