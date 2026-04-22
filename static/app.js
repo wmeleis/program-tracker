@@ -1413,7 +1413,11 @@ function extractCourseLines(html) {
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
-            lines.push({key: codecol + '\t' + titlecol, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
+            // Match on course code alone. Titles and hours can drift (renamed,
+            // minor edits, different campus wording) without representing a real
+            // curriculum change. If the code matches, the course matches.
+            const normCode = codecol.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+            lines.push({key: normCode, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
         } else {
             // Non-course context row — run through standardizeHeader to suppress
             // instructional preambles (returns '') and normalize meaningful headers
