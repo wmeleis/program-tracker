@@ -219,16 +219,19 @@ Captures the last-approved version of each program's curriculum from CourseLeaf'
 - **Boston programs** (campus = "Boston" or no campus parenthetical): Uses the program's own CIM history — fetches the most recently approved version.
 - **Non-Boston programs** (Oakland, Charlotte, etc.): Uses the **Boston counterpart's** most recently approved CIM history version as the reference. The version_date is annotated with "(Boston version)" to indicate the source. This is because non-Boston programs are typically based on the Boston curriculum.
 - **Counterpart matching (two-tier):**
-  1. **By name** — strips the campus parenthetical from the name (e.g., "Management, MS (Oakland)" → matches "Management, MS" or "Management, MS (Boston)" in the database).
+  1. **By name** — strips the campus parenthetical from the name (e.g., "Management, MS (Oakland)" → matches "Management, MS" or "Management, MS (Boston)" in the database). Also handles em-dash deployment suffixes: `"Business Analytics, MS—Online"` → base `"Business Analytics, MS"`, campus `"Online"` → matches Boston counterpart. Only `—Online`, `—Accelerated`, `—Part-Time` are treated as deployments; `—Align`, `—Connect`, `—Science` are distinct program names and left intact in the base.
   2. **By banner code via CIM search** — for programs not matched by name (Boston version already completed the workflow and isn't in the pipeline DB), searches CIM program IDs 1–2100 via XHR for matching banner code + Boston campus. This finds programs like "Analytics, MPS (Boston)" (ID 158) that are no longer in the active workflow.
+- **Special case — Boston counterpart in active workflow:** If the matched Boston counterpart is itself being revised in the current pipeline, the sentinel `version_id=0` reference (annotated `"current proposal (Boston, in workflow)"`) stores Boston's in-workflow curriculum instead of its last-approved history. Later scans always replace this sentinel so it tracks Boston's edits.
 - **Fallback**: Non-Boston programs with no Boston counterpart found anywhere use their own CIM history.
 - Helper functions: `_parse_campus_from_name(name)` extracts campus, `_build_boston_counterpart_map(program_ids)` builds the mapping (DB + CIM search), `_search_cim_for_boston_ids(banner_codes)` searches CIM by banner code in chunks of 200 IDs.
 
-- **`scraper.py`:** `fetch_reference_curricula()` — fetches historical version IDs from the history UI, retrieves that version's XML, parses CDATA-wrapped HTML for curriculum content. For non-Boston programs, fetches the Boston counterpart's history instead. Called automatically after each scan.
+- **`scraper.py`:** `fetch_reference_curricula()` — fetches historical version IDs from the history UI, retrieves that version's XML, parses CDATA-wrapped HTML for curriculum content, extracting only the `bodycontentframediv3` (curriculum body), `concentrations` section, and `overviewcontentframediv4` (overview). For non-Boston programs, fetches the Boston counterpart's history instead. Called automatically after each scan.
+  - **Parallelized (batch_size=25, ~0.5s/program):** Each batch kicks off an async `Promise.all` of `fetch()` calls; the JS writes results into a hidden `__refbatch_N` div; Python polls for completion, then retrieves the JSON in 200KB chunks to avoid AppleScript return-value limits. ~6 min for 615 programs vs ~10+ min before.
+  - **History API endpoint:** `/courseleaf/courseleaf.cgi?page=/programadmin/{id}/index.html&output=xml&step=showtcf&view=history&diffversion={versionId}` returns the full historical page HTML wrapped in `<showdata><![CDATA[ ... ]]></showdata>`. This endpoint is the only way to access historical content — the `?history=` URL parameter and the XML API both ignore version and return current.
 - **`database.py`:** `reference_curriculum` table (`program_id`, `version_id`, `version_date`, `curriculum_html`, `fetched_at`). Functions: `upsert_reference_curriculum()`, `get_reference_curriculum()`, `get_all_reference_curriculum()`.
 - **`app.py`:** `GET /api/program/<id>/reference` endpoint. Auto-fetches reference data after each scan completes.
 - **`export_static.py`:** Exports `reference.json` alongside `data.json` for the static site.
-- **`static/app.js`:** Adds a "Reference" tab in expandable program rows (alongside "Workflow" and "Curriculum"). `loadReferenceDetail()` displays the version date and cleaned curriculum HTML. `cleanCurriculumHtml()` strips errors and unnecessary sections.
+- **`static/app.js`:** Adds "Reference" and "Compare" tabs in expandable program rows (alongside "Workflow" and "Curriculum"). `loadReferenceDetail()` displays the version date and cleaned curriculum HTML. `cleanCurriculumHtml()` strips "Course Not Found" red error boxes, "Program Overview" / "Milestone" / "Research Areas" sections, and empty rows left after course removal.
 
 ### Curriculum Display
 Programs now store their full curriculum HTML (`programs.curriculum_html`). Expandable rows have a "Curriculum" tab showing the current proposal's curriculum content.
@@ -243,7 +246,7 @@ Side-by-side comparison of curriculum content. Uses LCS-based diff algorithm.
 - **Non-Boston programs**: Compare current curriculum against the Boston reference version
 - **Standalone programs** (no campus group): Compare against last approved version
 
-**Layout**: The current program/proposal is always on the **left**, the reference (Boston reference, Boston itself, or last approved version) is always on the **right**.
+**Layout**: The current program/proposal is always on the **left** (labeled "Proposed Curriculum"), the reference (Boston reference, Boston itself, or last approved version) is always on the **right** (labeled "Reference Curriculum"). Labels are identical across all three comparison paths (non-Boston deployment, Boston with deployments, standalone).
 
 **Key functions in `static/app.js`:**
 - `extractCourseLines(html)` — parses cleaned HTML into structured course objects `{key, code, title, hours, isHeader, section}`. Walks `h2`, `h3`, `h4`, and `tr` elements in document order to capture both HTML headings (used by many CIM programs) and `areaheader` table rows. The `key` uses only code+title (hours excluded) to prevent false diffs when hours differ.
@@ -265,6 +268,21 @@ Side-by-side comparison of curriculum content. Uses LCS-based diff algorithm.
 ### Timezone Handling
 All timestamps displayed in Eastern Time (America/New_York) with "ET" suffix. Applied in both the Flask-served and static GitHub Pages versions.
 
+### Metadata Preservation (prevents transient-failure data loss)
+`upsert_program` and `upsert_course` now preserve existing metadata (`college`, `department`, `degree`, `banner_code`, `curriculum_html`, `date_submitted`, `program_type` / `code`, `title`, `credits`, `description`, `academic_level`) when the scraper returns an empty value. Rationale: a scan that runs during a transient CourseLeaf session expiration previously wrote empty strings over hundreds of programs' good data. Empty values are now treated as "no new info" rather than "clear existing." Core fields (`status`, `current_step`, workflow steps) are still always overwritten since those drive correctness.
+
+### Single-Open Row Behavior
+Expanding one program/course row automatically collapses any other open row (`toggleRow` clears `expandedRows` before adding the new ID). Clicking the same row still collapses it normally. This prevents a cluttered view when browsing many programs.
+
+### Approver Count Consistency
+`get_current_approvers` and `get_course_current_approvers` require the program/course's `current_step` to be non-empty. Without this, the dropdown count could exceed the actual filter result count when stale `workflow_steps` rows lingered from programs whose `current_step` was wiped by a past session-expiration scan. A one-off SQL cleanup also cleared 65 stale `step_status='current'` flags.
+
+### Subject Code Filter (Courses view)
+Additional dropdown between College and Campus on the Courses view. Populates with the letter prefix of each course code (e.g., `CAEP 6326` → `CAEP`). Hidden on Programs view; cleared when switching views. `populateCourseSubjectFilter()` builds the dropdown from `allCourses`.
+
+### Unified Button Styling
+Type filter (`.type-btn`), Smart View (`.smart-view-btn`), Programs/Courses toggle (`.toggle-btn`), and the proposal "All" (`active-all`) buttons now share the pipeline-style active state: light-blue fill (`#eff6ff`), blue border (`var(--accent)`), blue text. The Proposal buttons retain their semantic colors for New (green), Edited (blue), and Inactivated (red) since those convey meaningful status. This was a consistency fix — previously type/smart-view used solid black and courses/programs used a segmented-control pill.
+
 ### Courses View
 Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggled via the Courses/Programs buttons in the header (Courses is now first).
 
@@ -276,7 +294,8 @@ Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggl
 - **step_entered_date priority:** `last_approval_date` → `date_submitted` → `now`. `upsert_course` overwrites an existing stale value when the scraper provides a historical date, so first-scan "now" defaults get corrected on subsequent scans.
 - **Database:** `courses`, `course_workflow_steps`, `course_changes` tables. `courses` includes `credits`, `description`, `academic_level` (UG/GR/CP/GR-UG codes from XML).
 - **Pipeline bucketing (display only):** `static/app.js` defines `COURSE_BUCKETS` that collapse many discrete role names into a handful of pipeline columns — `OTP` (any step starting with "Provost"), `Registrar` (any "REGISTRAR"), `Course Review` (Course Review 2 + 3), `Course Review Group` (anything starting with "Course Review Group", including "Complete - Hold"), `Data Entry`, `Banner`. Everything else (department chairs, college committees, program directors) aggregates into `College`. `isCourseCollegeStep()` excludes these prefixes from the College bucket.
-- **Course-level type filter:** `classifyCourseLevel()` maps `acad_level` codes to Undergraduate/Graduate, with a course-number fallback (1000–4999 UG, 5000+ GR).
+- **Course-level type filter:** `classifyCourseLevel()` maps `acad_level` codes to Undergraduate/Graduate/Continuing (CP), with a course-number fallback (1000–4999 UG, 5000+ GR). `GR-UG` / `UG-GR` → Graduate. A "Continuing" button appears on Courses view only.
+- **Course table columns:** both programs and courses share the same 5-column table (Title / College / Current Step / Progress / Days). Column 2 header is always "College"; for courses, `classifyCourseLevel` is used for filtering but the displayed value is the abbreviated college name.
 - **Approver filter isolation:** separate `/api/course_approvers` + `/api/course_approver/<email>` endpoints. The programs version was keyed by `program.id`, which collided numerically with course IDs, causing false-positive matches across views.
 - **Row coloring:** same CSS classes (`row-added`, `row-edited`, `row-deactivated`) drive the colored left border for courses as for programs.
 - **Static site:** `export_static.py` includes `courses`, `course_workflows`, `course_approvers` in `data.json`. `loadCoursesDashboard` and the approver filter are overridden to read from embedded data.
