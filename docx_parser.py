@@ -50,12 +50,17 @@ def _paragraph_text_and_style(p):
 
 def _cell_text(cell):
     """Concatenate text of all paragraphs in a <w:tc>."""
+    return ' '.join(_cell_paragraphs(cell)).strip()
+
+
+def _cell_paragraphs(cell):
+    """Return the list of non-empty paragraph texts in a <w:tc>."""
     lines = []
     for p in cell.findall('w:p', NS):
         _, t = _paragraph_text_and_style(p)
         if t:
             lines.append(t)
-    return ' '.join(lines).strip()
+    return lines
 
 
 def _normalize_code(text):
@@ -98,6 +103,31 @@ def _parse_table(tbl):
         # Skip caption/header rows
         if _looks_like_header_row(cells):
             continue
+
+        # Special case: a single-cell row whose cell contains multiple distinct
+        # paragraphs (e.g., a form row with "Pathway Options:", "Program Pathway",
+        # campus list, etc.). Emit each paragraph as its own areaheader row so
+        # labels like "Program Pathway" aren't buried in a run-on blob.
+        has_other_content_raw = any(c.strip() for c in cells[1:])
+        if not has_other_content_raw:
+            paragraphs = _cell_paragraphs(tcs[0])
+            if len(paragraphs) > 1:
+                for para in paragraphs:
+                    para_norm = _normalize_code(para)
+                    if not para_norm:
+                        continue
+                    if _is_course_code(para_norm):
+                        # Unlikely but defensible: a code split off onto its own
+                        # paragraph would otherwise vanish
+                        rows.append({
+                            'is_header': False,
+                            'code': para_norm,
+                            'title': '',
+                            'hours': '',
+                        })
+                    else:
+                        rows.append({'is_header': True, 'text': para_norm})
+                continue
 
         # Classify:
         # - Single non-empty cell (or first cell filled, rest empty): subheader
