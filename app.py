@@ -22,6 +22,11 @@ from database import (
     get_program_reference_override_id,
 )
 from docx_parser import parse_docx
+try:
+    from pdf_parser import parse_pdf
+    _PDF_AVAILABLE = True
+except ImportError:
+    _PDF_AVAILABLE = False
 from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan, check_courseleaf_session
 from export_static import build_campus_groups
 
@@ -129,16 +134,28 @@ def api_upload_custom_reference():
 
     filename = f.filename
     ext = (filename.rsplit('.', 1)[-1] if '.' in filename else '').lower()
-    if ext != 'docx':
+    if ext not in ('docx', 'pdf'):
+        # Helpful message for common rejections
+        if ext == 'doc':
+            detail = ('Legacy .doc files are not supported directly. Open the file in Word, '
+                      'then Save As → Word Document (.docx) and upload the .docx.')
+        else:
+            detail = (f'.{ext} files are not supported. Please upload a .docx or .pdf file.')
+        return jsonify({'error': 'unsupported_format', 'detail': detail}), 415
+
+    if ext == 'pdf' and not _PDF_AVAILABLE:
         return jsonify({
-            'error': 'unsupported_format',
-            'detail': f'.{ext} files are not yet supported. Please upload a .docx file. '
-                      f'(Legacy .doc files should be re-saved as .docx.)'
-        }), 415
+            'error': 'pdf_unavailable',
+            'detail': 'PDF parsing is not available — pdfplumber is not installed on the server. '
+                      'Run: pip3 install pdfplumber'
+        }), 503
 
     data = f.read()
     try:
-        parsed = parse_docx(data)
+        if ext == 'pdf':
+            parsed = parse_pdf(data)
+        else:
+            parsed = parse_docx(data)
     except Exception as e:
         return jsonify({'error': 'parse_failed', 'detail': str(e)}), 400
 

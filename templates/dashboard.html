@@ -50,9 +50,9 @@
             <div class="modal-body">
                 <div class="refs-upload">
                     <h3>Upload a new reference</h3>
-                    <p class="refs-help">Supported: <code>.docx</code>. Legacy <code>.doc</code> must be re-saved as <code>.docx</code> first.</p>
+                    <p class="refs-help">Supported: <code>.docx</code>, <code>.pdf</code>. Legacy <code>.doc</code> must be re-saved as <code>.docx</code> first.</p>
                     <form id="ref-upload-form" onsubmit="return uploadCustomReference(event)">
-                        <label>File: <input type="file" id="ref-upload-file" accept=".docx" required></label>
+                        <label>File: <input type="file" id="ref-upload-file" accept=".docx,.pdf" required></label>
                         <label>Display name (optional): <input type="text" id="ref-upload-name" placeholder="auto-detected from document"></label>
                         <label>Notes (optional): <input type="text" id="ref-upload-notes"></label>
                         <button type="submit" id="ref-upload-submit">Upload &amp; parse</button>
