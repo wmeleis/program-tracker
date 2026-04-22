@@ -1642,6 +1642,38 @@ function togglePipelineFilter(role) {
     applyFilters();
 }
 
+function showErrorBanner(message) {
+    const banner = document.getElementById('error-banner');
+    const text = document.getElementById('error-banner-text');
+    if (!banner || !text) return;
+    text.textContent = message;
+    banner.style.display = 'flex';
+}
+
+function dismissErrorBanner() {
+    const banner = document.getElementById('error-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+async function checkSessionHealth() {
+    // Fire-and-check: probe CourseLeaf connectivity. Called on page load and after
+    // a failed scan trigger. Non-fatal if endpoint unreachable (just means the Flask
+    // server is down and the page itself wouldn't load anyway).
+    try {
+        const res = await fetch('/api/session/check');
+        const data = await res.json();
+        if (!data.ok) {
+            showErrorBanner('CourseLeaf session issue: ' + (data.detail || data.error || 'Unknown error'));
+        } else {
+            dismissErrorBanner();
+        }
+        return data.ok;
+    } catch (e) {
+        // Server unreachable; don't clobber existing banner
+        return false;
+    }
+}
+
 async function triggerScan() {
     const btn = document.getElementById('scan-btn');
     btn.disabled = true;
@@ -1649,11 +1681,26 @@ async function triggerScan() {
     document.getElementById('scan-status').className = 'scan-status running';
 
     try {
-        await fetch('/api/scan/trigger', { method: 'POST' });
+        const res = await fetch('/api/scan/trigger', { method: 'POST' });
+        if (!res.ok) {
+            // 503 = session check failed; show banner with the returned detail
+            let detail = 'Scan could not start.';
+            try {
+                const data = await res.json();
+                detail = data.detail || data.error || detail;
+            } catch (_) {}
+            showErrorBanner('Cannot start scan: ' + detail);
+            btn.disabled = false;
+            document.getElementById('scan-status').textContent = '';
+            document.getElementById('scan-status').className = 'scan-status';
+            return;
+        }
+        dismissErrorBanner();
         // Poll for completion
         pollScanStatus();
     } catch (e) {
         console.error('Failed to trigger scan:', e);
+        showErrorBanner('Failed to reach the tracker server.');
         btn.disabled = false;
     }
 }
@@ -1725,7 +1772,15 @@ function formatTime(isoString) {
 
 // ==================== Init ====================
 
-// DOMContentLoaded handled by static override
+document.addEventListener('DOMContentLoaded', () => {
+    loadDashboard();
+    // Fast CourseLeaf session health probe so user sees "please log in" quickly,
+    // not after a 10-minute scan that silently does nothing.
+    // Only do this when the server is the Flask local server (not the static site).
+    if (typeof window._staticMode === 'undefined') {
+        checkSessionHealth();
+    }
+});
 
 // Auto-refresh every 2 minutes (data display only, not scanning)
 // Auto-refresh disabled in static mode
@@ -1733,6 +1788,7 @@ function formatTime(isoString) {
 
 /* ======= STATIC SITE DATA LAYER ======= */
 /* Overrides API calls to use embedded data (inlined by export_static.py) */
+window._staticMode = true;
 let _cache = null;
 let _curriculumCache = null;
 async function _getData() {
