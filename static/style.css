@@ -1016,17 +1016,31 @@ tr.program-row.expanded td {
 
 /* Area headers within tables (e.g., "Restricted Electives", "Capstone") */
 /* Area headers within tables (e.g., "Required Core", "Electives", "Programming") */
+/* Default area header: low-emphasis structural marker (Required / Core / etc.) */
 .curriculum-content .areaheader {
-    font-weight: 700;
-    color: #1e293b;
-    font-size: 14px;
+    font-weight: 600;
+    color: #475569;
+    font-size: 13px;
     letter-spacing: 0.01em;
 }
 
 .curriculum-content tr.areaheader td {
-    padding-top: 16px;
-    padding-bottom: 6px;
-    border-bottom: 2px solid #94a3b8;
+    padding-top: 14px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+/* "Option A:", "Complete 3 semester hours...", "In consultation with advisor..." —
+   these describe choices but don't need heavy visual weight. */
+.curriculum-content tr.areaheader.ref-option td {
+    border-bottom: none;
+    padding-top: 8px;
+}
+.curriculum-content tr.areaheader.ref-option .areaheader,
+.curriculum-content tr.areaheader.ref-option .courselistcomment {
+    font-weight: 500;
+    font-style: italic;
+    color: #64748b;
 }
 
 /* Comment rows (e.g., "Complete 4 semester hours from...") */
@@ -1044,25 +1058,41 @@ tr.program-row.expanded td {
     margin-left: 20px !important;
 }
 
+/* H2 — major section (Core Requirements, Electives Option, etc.) */
 .curriculum-content h2 {
     margin: 18px 0 6px;
-    font-size: 15px;
-    font-weight: 700;
-    color: #1e293b;
-    border-bottom: 2px solid #cbd5e1;
-    padding-bottom: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    border-bottom: 1px solid #cbd5e1;
+    padding-bottom: 3px;
 }
 
 .curriculum-content h2:first-child {
     margin-top: 4px;
 }
 
+/* H3/H4 — subsections (concentrations also use h3) — low emphasis by default */
 .curriculum-content h3,
 .curriculum-content h4 {
-    margin: 14px 0 4px;
-    font-size: 14px;
-    font-weight: 600;
-    color: #334155;
+    margin: 12px 0 4px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #475569;
+}
+
+/* Concentration headings — visually dominant so they stand out from the
+   structural plumbing (Core / Electives / Option A / ...) */
+.curriculum-content h2.ref-concentration,
+.curriculum-content h3.ref-concentration,
+.curriculum-content h4.ref-concentration {
+    margin-top: 22px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 3px;
+    letter-spacing: 0.01em;
 }
 
 .curriculum-content p {

@@ -1064,6 +1064,36 @@ function cleanCurriculumHtml(html) {
         }
     });
 
+    // --- Heading/areaheader classification for visual hierarchy ---
+    // Concentration headings: make them pop (bold + accent color)
+    div.querySelectorAll('h2, h3, h4').forEach(h => {
+        if (/\bconcentration\b/i.test(h.textContent)) {
+            h.classList.add('ref-concentration');
+        }
+    });
+
+    // Area headers inside course tables: classify then remove decorative-only ones.
+    // A row is "decorative" if it just groups a list of courses visually ("Process
+    // Sciences Focus", "Artificial Intelligence Focus") — no "Required", "Option",
+    // "Complete N semester hours", "Electives", "Core".
+    const CHOICE_RE = /\b(required|core|elective|option|choose|complete\s*\d|\d+\s*semester|must|in consultation|any\s+\d)\b/i;
+    const DECORATIVE_SUFFIX_RE = /\b(focus|track|area|group|pathway)s?\s*$/i;
+    div.querySelectorAll('tr.areaheader').forEach(tr => {
+        const text = (tr.textContent || '').trim();
+        if (!text) return;
+        const isChoice = CHOICE_RE.test(text);
+        const isDecorative = !isChoice && DECORATIVE_SUFFIX_RE.test(text);
+        if (isDecorative) {
+            tr.remove();
+            return;
+        }
+        // Option A/B/C and similar "you-pick-one" markers are choices but visually
+        // quieter than required-vs-elective boundaries
+        if (/^option\s+[A-Z]:?\s*/i.test(text) || /^complete\s+/i.test(text) || /^in consultation/i.test(text) || /^any\s+\d/i.test(text)) {
+            tr.classList.add('ref-option');
+        }
+    });
+
     return div.innerHTML;
 }
 
