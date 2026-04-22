@@ -144,9 +144,11 @@ def _detect_title(body):
     return ''
 
 
-def _render_course_table(rows):
-    """Render a list of course rows as a CourseLeaf-compatible table."""
+def _render_section_html(heading, rows):
+    """Render a single section (heading + rows) to CourseLeaf-compatible HTML."""
     parts = []
+    if heading:
+        parts.append(f'<h2>{escape(heading)}</h2>')
     parts.append('<table class="sc_courselist">')
     parts.append('<thead>')
     parts.append('<tr class="hidden noscript"><th scope="col">Code</th>'
@@ -172,19 +174,6 @@ def _render_course_table(rows):
                 f'<td class="hourscol">{escape(r["hours"])}</td></tr>'
             )
     parts.append('</tbody></table>')
-    return ''.join(parts)
-
-
-def _render_section_html(heading, items):
-    """Render a section composed of mixed paragraph text and course tables."""
-    parts = []
-    if heading:
-        parts.append(f'<h2>{escape(heading)}</h2>')
-    for item in items:
-        if item['type'] == 'text':
-            parts.append(f'<p>{escape(item["text"])}</p>')
-        elif item['type'] == 'table':
-            parts.append(_render_course_table(item['rows']))
     return ''.join(parts)
 
 
@@ -215,68 +204,49 @@ def parse_docx(data):
 
     title = _detect_title(body)
 
-    # Walk the body in order, building sections. Each section has a heading
-    # (Heading2/Heading3) and a list of items (text paragraphs or course tables).
-    # A new Heading2/Heading3 opens a fresh section.
+    # Walk the body in order. Track the most recent Heading2/Heading3 text; when we
+    # hit a table, bind it to that heading. Tables produce sections in the output.
     sections = []
     current_heading = None
-    current_items = []
-
-    def flush_section():
-        if current_heading or current_items:
-            sections.append({
-                'heading': current_heading or '',
-                'items': list(current_items),
-            })
-
     for child in body:
         tag = child.tag.split('}')[-1]
         if tag == 'p':
             style, text = _paragraph_text_and_style(child)
+            # Only Heading2/Heading3 act as section boundaries. Ignore Heading1 (title)
+            # and the top-of-doc form labels (Heading3 with short metadata text).
             if style in ('Heading2', 'Heading3') and text:
-                # New section boundary
-                flush_section()
                 current_heading = text
-                current_items = []
-            elif text:
-                # Regular paragraph — content of the current section. Skip the
-                # top-of-doc form-label paragraphs (they come before any section
-                # heading is detected).
-                if current_heading is not None:
-                    current_items.append({'type': 'text', 'text': text})
         elif tag == 'tbl':
             rows = _parse_table(child)
-            if rows:
-                current_items.append({'type': 'table', 'rows': rows})
+            # Skip tables that have no course-code rows AND no meaningful header rows
+            has_courses = any(not r.get('is_header') for r in rows)
+            if not rows:
+                continue
+            sections.append({
+                'heading': current_heading or '',
+                'courses': rows,
+                'has_courses': has_courses,
+            })
 
-    flush_section()
-
-    # Drop empty sections (heading with no items)
-    sections = [s for s in sections if s['items']]
-
-    # Build a flat course list per section for the preview UI (so the structured
-    # preview still counts courses). Also assemble the combined HTML.
+    # Generate combined HTML
     html_parts = []
-    preview_sections = []
     for sec in sections:
-        html_parts.append(_render_section_html(sec['heading'], sec['items']))
-        courses = []
-        for item in sec['items']:
-            if item['type'] == 'table':
-                courses.extend(item['rows'])
-        preview_sections.append({
-            'heading': sec['heading'],
-            'courses': courses,
-        })
+        html_parts.append(_render_section_html(sec['heading'], sec['courses']))
     curriculum_html = '\n'.join(html_parts)
 
     # Warnings
-    if not preview_sections:
-        warnings.append('No sections or course tables found in this document.')
+    if not sections:
+        warnings.append('No course tables found in this document.')
     else:
-        total_courses = sum(1 for s in preview_sections for r in s['courses'] if not r.get('is_header'))
+        total_courses = sum(1 for s in sections for r in s['courses'] if not r.get('is_header'))
         if total_courses == 0:
             warnings.append('Tables found but no course rows recognized. Check formatting.')
+
+    # Flatten sections for preview (without internal has_courses flag)
+    preview_sections = [
+        {'heading': s['heading'], 'courses': s['courses']}
+        for s in sections
+    ]
 
     return {
         'title': title,
