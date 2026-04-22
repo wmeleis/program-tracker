@@ -276,6 +276,8 @@ def build_static_site():
 
     import time
     cache_bust = int(time.time())
+    # Strip Jinja placeholders (left by the Flask template) — static site has none
+    html = re.sub(r'\?v=\{\{\s*cache_bust\s*\}\}', '', html)
     html = html.replace('href="/static/style.css"', f'href="style.css?v={cache_bust}"')
     # Remove the static app.js <script> tag; the gate injects it after unlock
     html = re.sub(r'\s*<script[^>]*src="/static/app\.js"[^>]*></script>', '', html)
