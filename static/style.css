@@ -714,6 +714,38 @@ tr.program-row.expanded td {
     border-bottom-color: #3b82f6;
 }
 
+/* Error banner (session check failures etc.) */
+.error-banner {
+    background: #fee2e2;
+    border-bottom: 2px solid #ef4444;
+    color: #991b1b;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.error-banner-close {
+    background: transparent;
+    border: none;
+    color: #991b1b;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+    border-radius: 4px;
+}
+
+.error-banner-close:hover {
+    background: rgba(153, 27, 27, 0.1);
+}
+
 /* Reference curriculum header */
 .reference-header {
     background: #fff3cd;

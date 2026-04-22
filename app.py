@@ -17,7 +17,7 @@ from database import (
     get_course_current_approvers, get_courses_by_approver,
     record_scan,
 )
-from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan
+from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan, check_courseleaf_session
 from export_static import build_campus_groups
 
 app = Flask(__name__)
@@ -127,11 +127,32 @@ def api_scan_status():
     })
 
 
+@app.route('/api/session/check')
+def api_session_check():
+    """Quickly verify that the CourseLeaf session is authenticated."""
+    result = check_courseleaf_session()
+    status_code = 200 if result.get('ok') else 503
+    return jsonify(result), status_code
+
+
 @app.route('/api/scan/trigger', methods=['POST'])
 def api_scan_trigger():
-    """Trigger a manual scan."""
+    """Trigger a manual scan.
+
+    Preflight: verify the CourseLeaf session is authenticated before spending
+    10+ minutes on a scan that would silently do nothing.
+    """
     if scan_status['running']:
         return jsonify({'error': 'Scan already in progress'}), 409
+
+    # Fast session probe (~1-3s); abort scan if not logged in / Chrome unreachable
+    session = check_courseleaf_session()
+    if not session.get('ok'):
+        scan_status['error'] = session.get('detail', 'CourseLeaf session invalid')
+        return jsonify({
+            'error': session.get('error', 'session_invalid'),
+            'detail': session.get('detail', 'CourseLeaf session invalid')
+        }), 503
 
     def do_scan():
         try:

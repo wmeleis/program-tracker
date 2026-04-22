@@ -509,6 +509,7 @@ def build_static_js(original_js):
 
     override = r'''/* ======= STATIC SITE DATA LAYER ======= */
 /* Overrides API calls to use embedded data (inlined by export_static.py) */
+window._staticMode = true;
 let _cache = null;
 let _curriculumCache = null;
 async function _getData() {
