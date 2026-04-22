@@ -273,7 +273,8 @@ Programs may override the auto-derived reference with a user-uploaded document.
 
 - **DB:** `custom_references` table (`id`, `name`, `source_type`, `source_filename`, `title`, `curriculum_html`, `sections_json`, `notes`, `created_at`). `programs.custom_reference_id` (nullable FK) — when set, overrides the auto reference.
 - **Parser (`docx_parser.py`):** Pure stdlib (`zipfile` + `xml.etree`). Walks `<w:body>` in order; `Heading2` / `Heading3` paragraphs mark section boundaries; each `<w:tbl>` produces a section. Course rows are detected via regex `^[A-Z]{2,5}\s*\d{4}` on the first cell. Output HTML matches CourseLeaf's `<table class="sc_courselist">` structure so the Compare diff works unchanged.
-- **Supported formats:** `.docx` only. `.doc` uploads are rejected with a message asking the user to re-save as `.docx`. `.pdf` and `.txt` are deferred.
+- **PDF parser (`pdf_parser.py`):** Uses `pdfplumber`. Extracts tables per page, pairs each with the nearest heading-like text line above it (between tables), applies the same course-code regex as the docx parser. Produces identical output shape so both formats flow through the same rendering/diff pipeline. Works well for text-based PDFs exported from Word/LibreOffice; falls back with a warning on scanned/image-only PDFs.
+- **Supported formats:** `.docx` and `.pdf`. Legacy `.doc` uploads are rejected with a message asking the user to re-save as `.docx`.
 - **API:**
   - `GET /api/custom_references` — list
   - `POST /api/custom_references` — multipart upload (`file`, optional `name`, `notes`) → parses → stores → returns preview (sections + course counts + warnings)
