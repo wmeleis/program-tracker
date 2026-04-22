@@ -4,7 +4,7 @@ import os
 import json as _json
 import threading
 from datetime import datetime
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, make_response, send_from_directory
 from flask_cors import CORS
 
 from database import (
@@ -47,7 +47,19 @@ scan_status = {
 def dashboard():
     """Serve the main dashboard."""
     import time
-    return render_template('dashboard.html', cache_bust=int(time.time()))
+    resp = make_response(render_template('dashboard.html', cache_bust=int(time.time())))
+    # Force reload on every visit so user never sees stale JS/CSS.
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
+
+
+# Serve static files with short cache so code updates are picked up quickly
+@app.route('/static/<path:filename>')
+def _static_no_cache(filename):
+    resp = make_response(send_from_directory(app.static_folder, filename))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return resp
 
 
 @app.route('/api/programs')
