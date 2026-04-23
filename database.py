@@ -59,6 +59,8 @@ def init_db():
                 date_submitted TEXT,
                 step_entered_date TEXT,
                 curriculum_html TEXT DEFAULT '',
+                completion_date TEXT DEFAULT '',
+                campus TEXT DEFAULT '',
                 first_seen TIMESTAMP,
                 last_updated TIMESTAMP
             );
@@ -215,8 +217,9 @@ def upsert_program(program_data):
                 INSERT INTO programs (id, banner_code, name, status, current_step,
                     total_steps, completed_steps, current_approver_emails,
                     program_type, college, department, degree, date_submitted,
-                    step_entered_date, curriculum_html, first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    step_entered_date, curriculum_html, completion_date, campus,
+                    first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 program_data['id'],
                 program_data.get('banner_code', ''),
@@ -233,6 +236,8 @@ def upsert_program(program_data):
                 program_data.get('date_submitted', ''),
                 program_data.get('step_entered_date', now),
                 program_data.get('curriculum_html', ''),
+                program_data.get('completion_date', ''),
+                program_data.get('campus', ''),
                 now, now
             ))
             changed = True
@@ -256,6 +261,22 @@ def upsert_program(program_data):
                     return existing_val if existing_val not in ('', None) else default
                 return new_val
 
+            # completion_date: only set/cleared explicitly — if the caller
+            # provides one, use it; otherwise preserve existing. If the caller
+            # provides the empty string and the program is now back in the
+            # workflow (current_step non-empty), clear completion_date so the
+            # program rejoins the active pipeline.
+            new_completion = program_data.get('completion_date', None)
+            if new_completion is None:
+                completion_val = existing['completion_date'] if 'completion_date' in existing.keys() else ''
+            elif new_completion == '' and (program_data.get('current_step') or ''):
+                completion_val = ''
+            elif new_completion == '':
+                # Empty override but still not in an active step — preserve existing.
+                completion_val = existing['completion_date'] if 'completion_date' in existing.keys() else ''
+            else:
+                completion_val = new_completion
+
             conn.execute("""
                 UPDATE programs SET
                     banner_code = ?, name = ?, status = ?, current_step = ?,
@@ -264,6 +285,7 @@ def upsert_program(program_data):
                     college = ?, department = ?, degree = ?,
                     date_submitted = ?, step_entered_date = ?,
                     curriculum_html = ?,
+                    completion_date = ?, campus = ?,
                     last_updated = ?
                 WHERE id = ?
             """, (
@@ -281,6 +303,8 @@ def upsert_program(program_data):
                 keep('date_submitted'),
                 step_entered,
                 keep('curriculum_html'),
+                completion_val,
+                keep('campus'),
                 now,
                 program_data['id']
             ))
@@ -324,11 +348,19 @@ def record_scan(scan_time, programs_scanned, programs_with_workflow, changes_det
 
 
 def get_all_programs():
-    """Get all programs with active workflows."""
+    """Get all programs that are either in an active workflow step OR have
+    completed the workflow (completion_date set).
+
+    Programs with empty current_step AND empty completion_date are ingest
+    artifacts (e.g., archived/placeholder IDs with no workflow data) and
+    filtered out. The frontend uses `completion_date` to render completed
+    programs differently (no progress bar, "Approved on <date>" column).
+    """
     with get_db() as conn:
         return [dict(row) for row in conn.execute("""
             SELECT * FROM programs
-            WHERE current_step IS NOT NULL AND current_step != ''
+            WHERE (current_step IS NOT NULL AND current_step != '')
+               OR (completion_date IS NOT NULL AND completion_date != '')
             ORDER BY program_type, name
         """).fetchall()]
 
@@ -929,6 +961,8 @@ def migrate_db():
             'date_submitted': 'TEXT DEFAULT ""',
             'step_entered_date': 'TEXT DEFAULT ""',
             'curriculum_html': 'TEXT DEFAULT ""',
+            'completion_date': 'TEXT DEFAULT ""',   # last approval date once fully approved; empty while in pipeline
+            'campus': 'TEXT DEFAULT ""',            # XML campus code (e.g. BOS, VAN); parsed from program name otherwise
         }
         for col, typedef in new_cols.items():
             if col not in existing_cols:

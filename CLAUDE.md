@@ -342,6 +342,22 @@ Fourth tab on each program's expandable row (shown only for programs at the seve
   - SharePoint session expired → 401 response → same as above.
   - Workbook file removed from SharePoint → the campus's download returns an error, any existing rows for that campus stay. (If the workbook *is present* but empty/new-shaped, unmatched CIM programs' rows get cleared, so the tab cleanly disappears.)
 
+### Historical programs + Complete tile
+The pipeline bar has a **Complete** label-only tile after Catalog. Clicking it filters the table to programs that have fully completed the CIM workflow.
+
+- **DB:** `programs.completion_date` (TEXT, nullable) holds the last approval timestamp. `programs.campus` captures the XML `<campus>` code (e.g. `BOS`, `VAN`) so we don't have to re-parse the name. `get_all_programs()` returns rows that have either a non-empty `current_step` OR a non-empty `completion_date` — the frontend hides completed programs by default and shows them only when Complete is active.
+- **Scraper completion detection:** in `run_full_scan` phase 3, a program is flagged complete when `total_steps > 0` AND `completed_steps == total_steps` AND the workflow HTML has no `current` step. When flagged, `current_step` is cleared and `completion_date` is set from the last approval-history entry (`last_approval_date`).
+- **Staleness guard (cross-check):** `batch_fetch_program_details` now returns the full approval history (`meta.approvals`), not just the last entry. Phase 3 compares the Approve Pages-discovered `current_step` against that history: if the discovered step is already in the approved-history set, Approve Pages is stale and we defer to the per-program workflow HTML's `current` marker. This is what caused `MS Management (Boston)` and `MS Management (Online)` to linger at `Graduate Provost Review` in April 2026 after they had moved to Graduate Curriculum Committee — CourseLeaf's pending list kept them there past the heal's two-query agreement window.
+- **On-demand heal:** `POST /api/heal` runs the same role-by-role stale-row cleanup that end-of-scan validation does, without kicking off a full scan. `scraper.heal_stale_program_steps(log=True)` is the shared implementation and is also what `run_full_scan` now calls. ~30s per call.
+- **Bootstrap CLI (`bootstrap_history.py`):** one-shot walk of all CIM program IDs (default 1..2100, configurable via positional args). Uses `batch_fetch_program_details` in batches of 25 (~7 min). Populates active + completed programs. Preserves `current_step` for in-flight programs (Approve Pages discovery is authoritative there); only sets/clears it for ones the sweep confirms as complete.
+- **Weekly auto-refresh:** `run_full_scan` (via `app.py` `do_scan`) checks the `scans` table for the most recent row with `programs_scanned = -1` (sentinel used by `sweep_all_program_ids` to record its own runs) and kicks off a sweep when the last one was ≥ 7 days ago. Recovers recently-completed programs without a manual CLI run.
+- **Frontend:**
+  - Pipeline-bar tile: label-only, no count — styled as `.pipeline-step-label` (distinguished from counted tiles). Active state uses the same light-blue fill as other active filters. Hidden on Courses view.
+  - `pipelineFilter === '__complete__'` filters the table to rows where `completion_date` is set. The default table view (no pipeline filter) explicitly hides completed rows so completed programs don't bleed into the active pipeline.
+  - Row rendering for completed programs: progress bar 100% in green (`.progress-fill.complete`), Current-step cell shows "Approved" muted, Days cell shows "Approved MM/DD/YYYY" pill (`.days-at-step.complete`). Row keeps its New/Edited/Inactivated left border.
+  - `formatCompletionDate(iso)` helper parses both ISO and the `"Tue, 03 Feb 2026 17:21:11 GMT"` CIM format.
+  - Regulatory tab flows through unchanged — completed programs at regulatory campuses still get their approved-courses flagging.
+
 ### Courses View
 Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggled via the Courses/Programs buttons in the header (Courses is now first).
 

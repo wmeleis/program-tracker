@@ -1073,6 +1073,32 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 .regulatory-table tr.regflag-moved .reg-flag { color: #d97706; }
 .regulatory-table tr.regflag-moved .reg-note { color: #92400e; }
 
+/* Complete tile (label-only pipeline-bar tile after Catalog) */
+.pipeline-step.pipeline-step-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pipeline-step.pipeline-step-label .step-name {
+    font-weight: 600;
+    color: #475569;
+}
+.pipeline-step.pipeline-step-label:hover { background: #f1f5f9; cursor: pointer; }
+.pipeline-step.pipeline-step-label.active { background: #eff6ff; border-color: var(--accent); }
+.pipeline-step.pipeline-step-label.active .step-name { color: var(--accent); }
+
+/* Completed program row styling */
+.progress-fill.complete { background: #22c55e; }
+.days-at-step.complete {
+    background: #ecfdf5; color: #065f46;
+    border: 1px solid #a7f3d0;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.program-row.row-complete td em.muted { color: #64748b; font-style: italic; }
+
 /* Any remaining structuredcontenterror elements — show without red styling */
 .curriculum-content .structuredcontenterror {
     border: none !important;

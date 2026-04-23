@@ -391,16 +391,18 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 var dsMatch = text.match(/Date Submitted:\\s*([^\\n]+)/);
                 if (dsMatch) result.meta.date_submitted = dsMatch[1].trim();
 
-                // Extract approval dates for step_entered_date
+                // Extract approval dates for step_entered_date AND all historical approvals
+                // (used to cross-check Approve Pages staleness in Phase 3).
                 var approvalDates = [];
                 var apMatch;
-                var apPattern = /([A-Z][a-z]{{2}}, \\d+ [A-Z][a-z]+ \\d{{4}} [\\d:]+ GMT)[\\s\\S]*?Approved for ([^\\n]+)/g;
+                var apPattern = /([A-Z][a-z]{{2}}, \\d+ [A-Z][a-z]+ \\d{{4}} [\\d:]+ GMT)[\\s\\S]*?Approved for ([^<\\n]+)/g;
                 while ((apMatch = apPattern.exec(text)) !== null) {{
                     approvalDates.push({{date: apMatch[1], step: apMatch[2].trim()}});
                 }}
                 if (approvalDates.length > 0) {{
                     result.meta.last_approval_date = approvalDates[approvalDates.length - 1].date;
                 }}
+                result.meta.approvals = approvalDates;
             }}
         }} catch(e) {{
             result.html_error = e.message;
@@ -691,23 +693,50 @@ def run_full_scan():
         # Calculate progress
         total = len(steps)
         completed = sum(1 for s in steps if s.get('status') == 'approved')
-        # Trust the Approve Pages queue (Phase 1) for current_step. The
-        # per-program workflow HTML's `<li class="current">` marker can
-        # stay stale after a program has been approved through — CourseLeaf
-        # appears to cache those pages server-side — which causes the
-        # pipeline bucket counts to overcount early steps.
+        # Default: trust Approve Pages queue (Phase 1) for current_step,
+        # because the per-program workflow HTML's `<li class="current">`
+        # marker used to lag in the opposite direction. But the approval
+        # history is the authoritative record — if Approve Pages put the
+        # program at step X but the history log shows X already approved,
+        # Approve Pages is stale (this exact failure caused MS Management
+        # Boston/Online to sit at "Graduate Provost Review" after they'd
+        # moved to GCC). In that case we defer to the workflow HTML's
+        # `current` marker instead.
         current_step = info.get('current_step', '')
         current_emails = ''
-        matched = next((s for s in steps if s.get('name') == current_step), None)
-        if matched:
-            current_emails = matched.get('emails', '')
-        elif not current_step:
-            # Approve Pages had no assignment; fall back to workflow div.
-            for s in steps:
-                if s.get('status') == 'current':
-                    current_emails = s.get('emails', '')
-                    current_step = s.get('name', '')
-                    break
+        approvals = meta.get('approvals', []) or []
+        approved_step_names = {
+            (a.get('step') or '').rstrip('</li>').strip()
+            for a in approvals
+        }
+        html_current = next((s for s in steps if s.get('status') == 'current'), None)
+
+        if current_step and current_step in approved_step_names:
+            # Approve Pages queue is stale — this step was already approved.
+            if html_current:
+                current_step = html_current.get('name', '')
+                current_emails = html_current.get('emails', '')
+            else:
+                # All steps approved per HTML → program has completed workflow.
+                current_step = ''
+                current_emails = ''
+        else:
+            matched = next((s for s in steps if s.get('name') == current_step), None)
+            if matched:
+                current_emails = matched.get('emails', '')
+            elif not current_step and html_current:
+                # Approve Pages had no assignment; fall back to workflow div.
+                current_step = html_current.get('name', '')
+                current_emails = html_current.get('emails', '')
+
+        # Derive completion_date when the workflow is fully approved.
+        is_complete = (
+            total > 0
+            and completed == total
+            and html_current is None
+            and not current_step
+        )
+        completion_date = meta.get('last_approval_date', '') if is_complete else ''
 
         prog_type = classify_program_type(prog_name, steps)
 
@@ -727,6 +756,8 @@ def run_full_scan():
             'date_submitted': date_submitted,
             'step_entered_date': step_entered_date,
             'curriculum_html': meta.get('curriculum_html', '').replace('<![CDATA[', '').replace(']]>', '').strip(),
+            'completion_date': completion_date,
+            'campus': meta.get('campus', ''),
         }
 
         # Detect changes
@@ -775,52 +806,8 @@ def run_full_scan():
     # changes when the whole pipeline is actually done, not when this
     # first phase completes.
 
-    # Validation + auto-heal: for each tracked role, re-query live Approve
-    # Pages and reconcile. If the DB has programs at a role that aren't in
-    # the live list, clear their current_step. Live is the source of truth.
-    #
-    # Safety: require two back-to-back live queries to agree before healing.
-    # Approve Pages occasionally returns a transient stale view; the double
-    # check filters that out so we never remove legitimate entries.
-    print(f"\nValidating scan results against live data...")
-    from database import get_pipeline_counts, get_programs_by_step, get_db
-    db_counts = get_pipeline_counts(TRACKED_ROLES)
-    warnings = 0
-    healed = 0
-    for role in TRACKED_ROLES:
-        live1 = scrape_approve_pages_role(role)
-        db_c = db_counts.get(role, 0)
-        if len(live1) == db_c:
-            continue  # counts match, nothing to do
-
-        print(f"  WARNING: {role}: DB={db_c}, Live={len(live1)} (delta={len(live1)-db_c})")
-        warnings += 1
-
-        # Only heal when DB has MORE than live (i.e. stale rows). If live
-        # has more than DB, the scanner missed something — don't blind-add.
-        if len(live1) >= db_c:
-            continue
-
-        # Confirm with a second query to guard against transient stale views.
-        live2 = scrape_approve_pages_role(role)
-        live_ids = {p['id'] for p in live1} & {p['id'] for p in live2}
-        if live_ids != {p['id'] for p in live1} or len(live2) != len(live1):
-            print(f"    Skipping heal for {role}: live view unstable across two queries")
-            continue
-
-        db_progs = get_programs_by_step(role)
-        stale_ids = [p['id'] for p in db_progs if p['id'] not in live_ids]
-        if stale_ids:
-            with get_db() as conn:
-                placeholders = ','.join('?' * len(stale_ids))
-                conn.execute(
-                    f"UPDATE programs SET current_step = '', current_approver_emails = '' "
-                    f"WHERE id IN ({placeholders})",
-                    stale_ids
-                )
-            print(f"    Healed: cleared current_step for {len(stale_ids)} stale program(s) at {role}: {stale_ids}")
-            healed += len(stale_ids)
-
+    # Validation + auto-heal: reconcile DB against live Approve Pages.
+    warnings, healed = heal_stale_program_steps(log=True)
     if warnings == 0:
         print("  All role counts match live data.")
     else:
@@ -838,6 +825,283 @@ def run_full_scan():
         'programs_with_workflow': len(details),
         'changes': changes
     }
+
+
+def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
+    """Sweep every CIM program ID in [start_id, end_id] and ingest anything
+    present. Used once (bootstrap) and then weekly to pick up programs that
+    completed the workflow since the last sweep.
+
+    - Uses the same `batch_fetch_program_details` as regular scans (HTML +
+      XML) so data shape matches.
+    - Computes `completion_date` when a program's workflow is fully approved
+      and no step is `current`.
+    - `current_step` is left as-is for programs still in an active approval
+      (the regular scan's Approve-Pages discovery is the authority on that);
+      fully-approved programs get `current_step = ''`.
+    - Programs with no workflow (404s, deleted IDs, empty shells) are
+      skipped.
+
+    Args:
+        start_id, end_id: inclusive range to sweep.
+        batch_size: XHR batches per AppleScript round-trip.
+        log: print progress lines.
+
+    Returns:
+        {'scanned': int, 'completed': int, 'in_progress': int, 'skipped': int,
+         'new_completions': int}
+    """
+    from database import upsert_program, upsert_workflow_steps, get_db
+
+    ids = list(range(start_id, end_id + 1))
+    if log:
+        print(f"\nHistorical sweep: fetching {len(ids)} program IDs "
+              f"({start_id}..{end_id}) in batches of {batch_size}...")
+
+    details = batch_fetch_program_details(ids, batch_size=batch_size)
+
+    # Preload existing rows so we can tell new vs existing completions apart
+    with get_db() as conn:
+        existing = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, current_step, completion_date FROM programs"
+        ).fetchall()}
+
+    scanned = 0
+    completed = 0
+    in_progress = 0
+    skipped = 0
+    new_completions = 0
+
+    for prog_id, detail in details.items():
+        steps = detail.get('steps') or []
+        meta = detail.get('meta') or {}
+        if not steps and not meta.get('program_title') and not meta.get('banner_code'):
+            skipped += 1
+            continue
+
+        total = len(steps)
+        approved_count = sum(1 for s in steps if s.get('status') == 'approved')
+        html_current = next((s for s in steps if s.get('status') == 'current'), None)
+
+        is_complete = (total > 0 and approved_count == total and html_current is None)
+        completion_date = meta.get('last_approval_date', '') if is_complete else ''
+
+        # Don't touch current_step for programs still in an active step —
+        # the regular scan's Approve Pages discovery is canonical there.
+        # For completed programs we must clear current_step.
+        if is_complete:
+            current_step = ''
+            current_emails = ''
+        else:
+            # Preserve whatever the regular scan set; the sweep's HTML
+            # current marker can itself lag, so we leave it alone.
+            prev = existing.get(prog_id, {})
+            current_step = prev.get('current_step') or ''
+            current_emails = ''  # only the scan-time call knows live approvers
+
+        prog_name = meta.get('program_title') or detail.get('name') or f'Program #{prog_id}'
+        banner_code = meta.get('banner_code', '')
+        college_code = meta.get('college', '')
+        college = COLLEGE_NAMES.get(college_code, college_code)
+
+        proposal_type = meta.get('proposal_type', '')
+        if 'New Program' in proposal_type:
+            status = 'Added'
+        elif 'Inactivation' in proposal_type:
+            status = 'Deactivated'
+        else:
+            status = 'Edited'
+
+        program_data = {
+            'id': prog_id,
+            'banner_code': banner_code,
+            'name': prog_name,
+            'status': status,
+            'current_step': current_step,
+            'total_steps': total,
+            'completed_steps': approved_count,
+            'current_approver_emails': current_emails,
+            'program_type': classify_program_type(prog_name, steps),
+            'college': college,
+            'department': meta.get('department', ''),
+            'degree': meta.get('degree', ''),
+            'date_submitted': meta.get('date_submitted', ''),
+            'step_entered_date': meta.get('last_approval_date', ''),
+            'curriculum_html': (meta.get('curriculum_html', '') or '')
+                               .replace('<![CDATA[', '').replace(']]>', '').strip(),
+            'completion_date': completion_date,
+            'campus': meta.get('campus', ''),
+        }
+
+        upsert_program(program_data)
+        if steps:
+            upsert_workflow_steps(prog_id, steps)
+
+        scanned += 1
+        if is_complete:
+            completed += 1
+            prev = existing.get(prog_id)
+            if not prev or not (prev.get('completion_date') or ''):
+                new_completions += 1
+        else:
+            in_progress += 1
+
+    if log:
+        print(f"  Sweep complete: scanned={scanned}, completed={completed} "
+              f"({new_completions} newly completed), in_progress={in_progress}, "
+              f"skipped={skipped}")
+
+    # Record the sweep time in the scans table so the weekly auto-trigger
+    # knows when we last ran (uses a sentinel programs_scanned=-1).
+    from datetime import datetime as _dt
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO scans (scan_time, programs_scanned, programs_with_workflow, changes_detected) "
+            "VALUES (?, -1, ?, ?)",
+            (_dt.now().isoformat(), scanned, new_completions),
+        )
+
+    return {
+        'scanned': scanned,
+        'completed': completed,
+        'in_progress': in_progress,
+        'skipped': skipped,
+        'new_completions': new_completions,
+    }
+
+
+def heal_stale_program_steps(log=False):
+    """Reconcile DB program rows against live Approve Pages for each tracked role.
+
+    For each role: re-query the live pending list; if the DB has programs at
+    that role that aren't on the live list, re-fetch each candidate's
+    workflow HTML directly and update the DB from that authoritative source
+    (not from a blind clear). Requires two back-to-back pending-list queries
+    to agree before acting (guards against CourseLeaf's transient stale
+    views).
+
+    This verify-before-act design prevents the "pending list is stale in both
+    directions" failure mode: some programs linger at their old step (stale
+    positive) while newly-arrived programs don't appear in their new step's
+    pending list yet (stale negative). Either way, the per-program workflow
+    HTML at `/programadmin/{id}/` is the ground truth.
+
+    Safe to call outside a full scan — shared by end-of-scan validation
+    and the on-demand `/api/heal` endpoint.
+
+    Args:
+        log: if True, print a running commentary (used by `run_full_scan`).
+
+    Returns:
+        (warnings, fixed) -- counts (`fixed` = rows whose current_step was
+        updated or cleared based on the workflow HTML truth).
+    """
+    from database import (
+        get_pipeline_counts, get_programs_by_step, get_db,
+        upsert_program, upsert_workflow_steps,
+    )
+    if log:
+        print(f"\nValidating DB against live Approve Pages...")
+    db_counts = get_pipeline_counts(TRACKED_ROLES)
+    warnings = 0
+    fixed = 0
+    for role in TRACKED_ROLES:
+        live1 = scrape_approve_pages_role(role)
+        db_c = db_counts.get(role, 0)
+        if len(live1) == db_c:
+            continue
+
+        if log:
+            print(f"  WARNING: {role}: DB={db_c}, Live={len(live1)} (delta={len(live1) - db_c})")
+        warnings += 1
+
+        if len(live1) >= db_c:
+            continue  # live has more → scanner missed something; don't speculate
+
+        live2 = scrape_approve_pages_role(role)
+        live_ids = {p['id'] for p in live1} & {p['id'] for p in live2}
+        if live_ids != {p['id'] for p in live1} or len(live2) != len(live1):
+            if log:
+                print(f"    Skipping heal for {role}: live view unstable across two queries")
+            continue
+
+        db_progs = get_programs_by_step(role)
+        candidate_ids = [p['id'] for p in db_progs if p['id'] not in live_ids]
+        if not candidate_ids:
+            continue
+
+        # Re-fetch each candidate's workflow HTML and treat that as truth.
+        details = batch_fetch_program_details(candidate_ids, batch_size=25)
+        for pid in candidate_ids:
+            d = details.get(pid, {})
+            steps = d.get('steps') or []
+            meta = d.get('meta') or {}
+
+            if not steps:
+                # No workflow HTML came back — play it safe and leave DB alone
+                # rather than clearing based on a failed fetch.
+                if log:
+                    print(f"    Skipping {pid}: workflow HTML unavailable")
+                continue
+
+            html_current = next((s for s in steps if s.get('status') == 'current'), None)
+            total = len(steps)
+            approved = sum(1 for s in steps if s.get('status') == 'approved')
+            if html_current and html_current.get('name') == role:
+                # HTML confirms the program IS still at this role — CourseLeaf's
+                # pending list is falsely missing it. Leave DB as-is.
+                if log:
+                    print(f"    Keeping {pid}: workflow HTML still shows 'current' at {role}")
+                continue
+
+            # HTML says the program moved (or completed). Load the existing
+            # DB row so we can preserve name / status / program_type while
+            # updating just the workflow-state fields.
+            with get_db() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM programs WHERE id = ?", (pid,)
+                ).fetchone()
+            if not existing:
+                continue  # nothing to update
+            existing = dict(existing)
+
+            if html_current:
+                new_step = html_current.get('name', '')
+                new_emails = html_current.get('emails', '')
+            else:
+                new_step = ''
+                new_emails = ''
+            is_complete = (total > 0 and approved == total and html_current is None)
+            program_data = {
+                'id': pid,
+                'name': existing.get('name') or '',
+                'banner_code': meta.get('banner_code') or existing.get('banner_code', ''),
+                'status': existing.get('status') or '',
+                'current_step': new_step,
+                'total_steps': total,
+                'completed_steps': approved,
+                'current_approver_emails': new_emails,
+                'program_type': existing.get('program_type') or 'Unknown',
+                'college': COLLEGE_NAMES.get(meta.get('college', ''), meta.get('college', ''))
+                           or existing.get('college', ''),
+                'department': meta.get('department') or existing.get('department', ''),
+                'degree': meta.get('degree') or existing.get('degree', ''),
+                'date_submitted': meta.get('date_submitted') or existing.get('date_submitted', ''),
+                'step_entered_date': meta.get('last_approval_date') or existing.get('step_entered_date', ''),
+                'curriculum_html': (meta.get('curriculum_html', '') or '')
+                                   .replace('<![CDATA[', '').replace(']]>', '').strip()
+                                   or existing.get('curriculum_html', ''),
+                'completion_date': meta.get('last_approval_date', '') if is_complete else '',
+                'campus': meta.get('campus') or existing.get('campus', ''),
+            }
+            upsert_program(program_data)
+            upsert_workflow_steps(pid, steps)
+            fixed += 1
+            if log:
+                target = 'completed' if is_complete else new_step
+                print(f"    Fixed {pid}: {role} → {target!r}")
+
+    return warnings, fixed
 
 
 def _parse_campus_from_name(name):
