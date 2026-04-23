@@ -341,7 +341,9 @@ def parse_docx(data):
 
     # --- Post-processing passes ---
     sections = _strip_campus_metadata_rows(sections)
-    sections = _promote_program_pathway_section(sections)
+    # (Removed the synthetic "Program Pathway" heading — concentrations and the
+    # electives option are shared between Program Pathway and Project Pathway,
+    # so grouping them under a Program Pathway header was incorrect.)
 
     # Generate combined HTML
     html_parts = []
