@@ -230,6 +230,34 @@ def _sort_rows_within_sections(html):
     )
 
 
+def _inline_hours_into_title(html):
+    """Move credit hours from the hours column into the title cell as "(NSH)".
+
+    Example: <td>Stem Cells</td><td class="hourscol">4</td>
+          → <td>Stem Cells (4SH)</td><td class="hourscol"></td>
+    """
+    pattern = re.compile(
+        r'(<td(?!\s[^>]*class="[^"]*(?:codecol|hourscol)[^"]*")[^>]*>)'
+        r'(.*?)'
+        r'(</td>\s*<td[^>]*\bhourscol\b[^>]*>)'
+        r'([^<]*)'
+        r'(</td>)',
+        re.DOTALL | re.I,
+    )
+
+    def sub_one(m):
+        open_title, title_html, mid, hours_text, close = m.groups()
+        hours = hours_text.replace('\xa0', ' ').strip()
+        if not hours:
+            return m.group(0)
+        # Skip when hours isn't numeric (e.g. already empty or "Hours" header)
+        if not re.match(r'^[\d.\-]+$', hours):
+            return m.group(0)
+        return f'{open_title}{title_html.rstrip()} ({hours}SH){mid}{close}'
+
+    return pattern.sub(sub_one, html)
+
+
 def clean_curriculum_html(html):
     """Apply all cleanup steps. Safe to call on already-clean or empty input."""
     if not html:
@@ -250,6 +278,8 @@ def clean_curriculum_html(html):
     out = re.sub(r'(<h([1-6])[^>]*>)(.*?)(</h\2>)', _strip_one, out, flags=re.DOTALL | re.I)
     # Sort course rows alphabetically within each areaheader-delimited group
     out = _sort_rows_within_sections(out)
+    # Inline credit hours into the title cell as "(NSH)"
+    out = _inline_hours_into_title(out)
     # Decorative areaheader row removal
     out = _remove_decorative_areaheader_rows(out)
     # Course-Not-Found cleanup
