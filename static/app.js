@@ -1428,7 +1428,7 @@ function extractCourseLines(html) {
             // Match on course code alone. Titles and hours can drift (renamed,
             // minor edits, different campus wording) without representing a real
             // curriculum change. If the code matches, the course matches.
-            const normCode = codecol.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+            const normCode = codecol.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().replace(/^or\s+/i, '').toUpperCase();
             lines.push({key: normCode, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
         } else {
             // Non-course context row — run through standardizeHeader to suppress
