@@ -147,6 +147,59 @@ def _tag_concentration_headings(html):
     return pattern.sub(annotate, html)
 
 
+_TR_RE = re.compile(r'<tr\b[^>]*>.*?</tr>', re.DOTALL | re.I)
+_CODECOL_RE = re.compile(
+    r'<td[^>]*\bcodecol\b[^>]*>(?:<[^>]+>|\s)*(?:or\s+)?(?:<[^>]+>)*([A-Z]{2,5}\s*\d{4}[A-Z]?)',
+    re.I,
+)
+
+
+def _sort_rows_within_sections(html):
+    """Within each <tbody> of a course list, sort consecutive non-areaheader
+    course rows alphabetically by their first codecol code. Areaheader rows act
+    as group boundaries; sort runs reset on each header."""
+    def sort_tbody(match):
+        body = match.group(2)
+        rows = _TR_RE.findall(body)
+        if len(rows) < 2:
+            return match.group(0)
+
+        def sort_key(tr):
+            # No key → treat as boundary (shouldn't happen because we filter first)
+            m = _CODECOL_RE.search(tr)
+            if not m:
+                return ''
+            code = re.sub(r'\s+', ' ', m.group(1).replace('\xa0', ' ')).strip().upper()
+            return code
+
+        out = []
+        buffer = []
+
+        def flush():
+            if buffer:
+                buffer.sort(key=sort_key)
+                out.extend(buffer)
+                buffer.clear()
+
+        for tr in rows:
+            is_areaheader = bool(re.search(r'\bareas?u?b?header\b', tr, re.I))
+            has_code = bool(_CODECOL_RE.search(tr))
+            if is_areaheader or not has_code:
+                flush()
+                out.append(tr)
+            else:
+                buffer.append(tr)
+        flush()
+        return f'{match.group(1)}{"".join(out)}{match.group(3)}'
+
+    return re.sub(
+        r'(<tbody\b[^>]*>)(.*?)(</tbody>)',
+        sort_tbody,
+        html,
+        flags=re.DOTALL | re.I,
+    )
+
+
 def clean_curriculum_html(html):
     """Apply all cleanup steps. Safe to call on already-clean or empty input."""
     if not html:
@@ -157,6 +210,8 @@ def clean_curriculum_html(html):
         out = _remove_labeled_section(out, label)
     # Plan-of-study section removal (Year N, Concentration in X, Plan of Study, footnotes)
     out = _remove_plan_of_study_sections(out)
+    # Sort course rows alphabetically within each areaheader-delimited group
+    out = _sort_rows_within_sections(out)
     # Decorative areaheader row removal
     out = _remove_decorative_areaheader_rows(out)
     # Course-Not-Found cleanup
