@@ -1415,6 +1415,12 @@ function extractCourseLines(html) {
         // Skip column-header rows (Code/Title/Hours)
         if (parts.some(p => /^Code$/i.test(p)) && parts.some(p => /^Title$/i.test(p))) return;
 
+        // Plan-of-study / sample-schedule rows: multiple cells contain course
+        // codes (e.g. ["NNMD 5370", "4", "NNMD 6984"]). These are visual
+        // calendars, not curriculum entries — skip so they don't double-count.
+        const codeCount = parts.filter(p => courseCodePattern.test(p)).length;
+        if (codeCount >= 2) return;
+
         if (isAreaHeader) {
             const text = standardizeHeader(parts.join(' '));
             if (text) {
