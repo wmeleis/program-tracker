@@ -318,23 +318,26 @@ def _promote_program_pathway_section(sections):
     if concentration_idx is None:
         return sections
 
-    # Insert a synthetic Program Pathway section heading, and move the existing
-    # Project Pathway section to sit right after it. This way the two pathways
-    # appear together as a readable comparison, and the concentrations/electives
-    # (shared between both) follow after.
-    #
-    # Program Pathway has no content of its own in the source docx — the
-    # Options A/B/C live in Core Requirements and students following this
-    # pathway just take them as shown there. We just add a descriptive line
-    # referencing Core Requirements rather than duplicating the course rows.
-    synthetic = {
-        'heading': 'Program Pathway',
-        'courses': [
-            {'is_header': True,
-             'text': 'Students following the Program Pathway complete the Core Requirements (including the Option A, B, or C choice above) plus a concentration or the electives option (shown below).'},
-        ],
-        'has_courses': False,
-    }
+    # If Program Pathway already exists as a section (e.g., parsed from a
+    # nested table inside the Pathway Options form), keep its content and
+    # just reposition. Otherwise synthesize an empty heading.
+    program_idx = next(
+        (i for i, sec in enumerate(sections)
+         if re.search(r'^program pathway\s*$', sec['heading'].strip(), re.I)),
+        None,
+    )
+    if program_idx is not None:
+        program_section = sections[program_idx]
+        sections = sections[:program_idx] + sections[program_idx + 1:]
+        if program_idx < concentration_idx:
+            concentration_idx -= 1
+    else:
+        program_section = {
+            'heading': 'Program Pathway',
+            'courses': [],
+            'has_courses': False,
+        }
+
     # Extract the existing Project Pathway section so we can reposition it
     project_idx = next(
         (i for i, sec in enumerate(sections)
@@ -345,12 +348,10 @@ def _promote_program_pathway_section(sections):
     if project_idx is not None:
         project_section = sections[project_idx]
         sections = sections[:project_idx] + sections[project_idx + 1:]
-        # After removal, the concentration index may have shifted if the Project
-        # Pathway section was before it (it shouldn't be, but be safe).
         if project_idx < concentration_idx:
             concentration_idx -= 1
 
-    insertion = [synthetic]
+    insertion = [program_section]
     if project_section is not None:
         insertion.append(project_section)
     return sections[:concentration_idx] + insertion + sections[concentration_idx:]
@@ -394,6 +395,52 @@ def parse_docx(data):
     )
     sections = []
     current_heading = None
+
+    def emit_table(tbl, override_heading=None):
+        """Emit this table as a section, then recurse into any nested
+        <w:tbl> elements inside its cells so they appear in reading order.
+        CourseLeaf umbrella docs sometimes nest a course-list table inside
+        a form table (Pathway Options → Program Pathway's own electives table).
+        """
+        nonlocal current_heading
+        rows = _parse_table(tbl)
+        has_courses = any(not r.get('is_header') for r in rows)
+        if rows:
+            sections.append({
+                'heading': override_heading or (current_heading or ''),
+                'courses': rows,
+                'has_courses': has_courses,
+            })
+
+        # Decide whether any nested tables should get their own heading:
+        # If this table contains "Program Pathway" text in its rows (and is the
+        # Pathway Options form), any nested tables are Program Pathway's own
+        # curriculum and should be labeled as such.
+        nested_tables = []
+        for cell in tbl.findall('.//{%s}tc' % NS['w']):
+            for nested in cell.findall('w:tbl', NS):
+                nested_tables.append(nested)
+
+        if not nested_tables:
+            return
+
+        parent_text = ' '.join(
+            (t.text or '') for t in tbl.iter(f'{W}t')
+        )
+        is_pathway_options = (
+            re.search(r'\bpathway options\b', parent_text, re.I) and
+            re.search(r'\bprogram pathway\b', parent_text, re.I)
+        )
+
+        # If this IS the Pathway Options form, give nested tables the
+        # "Program Pathway" heading; also update current_heading so later
+        # siblings (like concentration sections) start fresh.
+        for nested in nested_tables:
+            if is_pathway_options:
+                emit_table(nested, override_heading='Program Pathway')
+            else:
+                emit_table(nested)
+
     for child in body:
         tag = child.tag.split('}')[-1]
         if tag == 'p':
@@ -403,6 +450,10 @@ def parse_docx(data):
             elif text and PROMOTED_HEADINGS_RE.match(text.strip()):
                 current_heading = text.strip()
         elif tag == 'tbl':
+            # Use emit_table helper which also descends into nested tables
+            emit_table(child)
+            continue
+            # (legacy path no longer used)
             rows = _parse_table(child)
             # Skip tables that have no course-code rows AND no meaningful header rows
             has_courses = any(not r.get('is_header') for r in rows)
