@@ -1546,6 +1546,45 @@ function diffLines(oldLines, newLines) {
             i--;
         }
     }
+
+    // Post-LCS: pair up any remaining "removed" entry with an "added" entry
+    // that shares the same course code. LCS can't cross-match when courses
+    // appear in non-overlapping sections on each side (e.g., BIOT 5810 in
+    // Toronto's Biodefense concentration vs the reference's Biopharm
+    // concentration). Since the user's mental model is "if the course code
+    // matches, the courses match", we pair them as "same" after the fact.
+    // Pair by scanning left-to-right to keep the output order sensible.
+    const removedByKey = {};
+    courseDiff.forEach((e, idx) => {
+        if (e.type === 'removed') {
+            const k = e.left.key;
+            (removedByKey[k] = removedByKey[k] || []).push(idx);
+        }
+    });
+    for (let idx = 0; idx < courseDiff.length; idx++) {
+        const e = courseDiff[idx];
+        if (e.type === 'added') {
+            const k = e.right.key;
+            const candidates = removedByKey[k];
+            if (candidates && candidates.length) {
+                // Pair this 'added' with the nearest earlier 'removed'
+                const rIdx = candidates.shift();
+                courseDiff[rIdx] = {
+                    type: 'same',
+                    leftIdx: courseDiff[rIdx].leftIdx,
+                    rightIdx: e.rightIdx,
+                    left: courseDiff[rIdx].left,
+                    right: e.right,
+                };
+                // Remove the 'added' entry by marking for deletion
+                courseDiff[idx] = null;
+            }
+        }
+    }
+    // Filter out the nulls
+    for (let idx = courseDiff.length - 1; idx >= 0; idx--) {
+        if (courseDiff[idx] === null) courseDiff.splice(idx, 1);
+    }
     // Re-insert headers before the first course in their section.
     // Each side's headers are shown independently on that side only, so that
     // courses stay under their correct heading even when sections differ.
