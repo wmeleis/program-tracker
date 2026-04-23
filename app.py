@@ -22,6 +22,7 @@ from database import (
     get_program_reference_override_id,
 )
 from docx_parser import parse_docx
+from html_cleaner import clean_curriculum_html
 try:
     from pdf_parser import parse_pdf
     _PDF_AVAILABLE = True
@@ -93,7 +94,7 @@ def api_program_workflow(program_id):
 def api_program_curriculum(program_id):
     """Get curriculum HTML for a specific program."""
     html = get_program_curriculum(program_id)
-    return jsonify({'curriculum_html': html})
+    return jsonify({'curriculum_html': clean_curriculum_html(html)})
 
 
 @app.route('/api/program/<int:program_id>/reference')
@@ -114,12 +115,13 @@ def api_program_reference(program_id):
                 'name': custom.get('name'),
                 'source_filename': custom.get('source_filename'),
                 'version_date': f"Custom reference: {custom.get('name', '')}",
-                'curriculum_html': custom.get('curriculum_html', ''),
+                'curriculum_html': clean_curriculum_html(custom.get('curriculum_html', '')),
             })
         # Override points to a deleted ref — fall through to auto
     ref = get_reference_curriculum(program_id)
     if ref:
         ref['source'] = 'auto'
+        ref['curriculum_html'] = clean_curriculum_html(ref.get('curriculum_html', ''))
         return jsonify(ref)
     return jsonify({'error': 'No reference curriculum found'}), 404
 
