@@ -1297,7 +1297,10 @@ function normForCompare(s) {
 // Maps common CIM variations to uniform labels while preserving meaningful distinctions.
 // Returns '' for instructional preambles that don't define a new section.
 function standardizeHeader(text) {
-    const t = text.trim();
+    // Drop trailing " Concentration" so deployment variants that omit the word
+    // (e.g., "Biotechnology Operations") match reference versions that keep it
+    // (e.g., "Biotechnology Operations Concentration").
+    let t = text.trim().replace(/\s+Concentration\s*$/i, '').trim();
     const s = t.toLowerCase();
     // Suppress instructional preambles that don't define a new section
     // (these appear as courselistcomment rows under an existing h2/h3 heading)
