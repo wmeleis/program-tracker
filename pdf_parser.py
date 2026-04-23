@@ -150,6 +150,20 @@ def _render_section_html(heading, rows):
     return ''.join(parts)
 
 
+def _flush_text_rows(sections, rows):
+    """Append text-fallback course rows as a new section, grouping consecutive
+    rows that share the same _section label."""
+    if not rows:
+        return
+    current = None
+    for r in rows:
+        sec = r.pop('_section', '') or ''
+        if current is None or current['heading'] != sec:
+            current = {'heading': sec, 'courses': []}
+            sections.append(current)
+        current['courses'].append(r)
+
+
 def parse_pdf(data):
     """Parse a .pdf into structured curriculum data.
 
@@ -227,6 +241,7 @@ def parse_pdf(data):
 
             # Walk tables in order, binding each to its nearest heading above
             prev_bottom = 0
+            table_bboxes = []
             for i, tbl in enumerate(table_objs_sorted):
                 bbox_top = tbl.bbox[1] if tbl.bbox else 0
                 heading = find_heading_above(bbox_top, min_top=prev_bottom) or current_heading
@@ -246,7 +261,63 @@ def parse_pdf(data):
                     'courses': rows,
                 })
                 current_heading = heading or current_heading
-                prev_bottom = tbl.bbox[3] if tbl.bbox else prev_bottom
+                if tbl.bbox:
+                    table_bboxes.append(tbl.bbox)
+                    prev_bottom = tbl.bbox[3]
+
+            # Text-line fallback: courses that aren't inside any detected table.
+            # PDFs sometimes render elective lists as plain text ("BIOL 6131 CRISPR:
+            # Gene Editing Fundamentals" one per line) which find_tables() misses.
+            # Walk lines; track the most recent heading-like line as current section
+            # for any course lines we find outside table bboxes.
+            def line_in_any_table(l):
+                for bb in table_bboxes:
+                    if bb[1] <= l['top'] and l['bottom'] <= bb[3]:
+                        return True
+                return False
+
+            line_course_re = re.compile(r'^([A-Z]{2,5})\s+(\d{4}[A-Z]?)\s+(.+)$')
+            line_or_course_re = re.compile(r'^or\s+([A-Z]{2,5})\s+(\d{4}[A-Z]?)\s+(.+)$', re.I)
+
+            text_section_heading = current_heading
+            text_rows = []
+            for l in lines:
+                if line_in_any_table(l):
+                    continue
+                txt = l['text'].strip()
+                if not txt:
+                    continue
+                cm = line_course_re.match(txt) or line_or_course_re.match(txt)
+                if cm:
+                    code = f'{cm.group(1)} {cm.group(2)}'
+                    title = cm.group(3).strip()
+                    # Trailing credit hours column may be appended to title
+                    hrs_m = re.search(r'\s+(\d+(?:-\d+)?)\s*$', title)
+                    hours = ''
+                    if hrs_m:
+                        hours = hrs_m.group(1)
+                        title = title[:hrs_m.start()].strip()
+                    text_rows.append({
+                        'is_header': False, 'code': code, 'title': title, 'hours': hours,
+                        '_section': text_section_heading,
+                    })
+                elif _looks_like_heading(txt):
+                    # Flush previous group to its section
+                    if text_rows:
+                        _flush_text_rows(sections, text_rows)
+                        text_rows = []
+                    text_section_heading = txt
+                else:
+                    # Non-course, non-heading line may be a courselistcomment
+                    # (e.g. "Complete a minimum of 5 semester hours..."). Flush
+                    # so following courses group under a new comment label.
+                    if text_rows:
+                        _flush_text_rows(sections, text_rows)
+                        text_rows = []
+                    if len(txt) > 10 and len(txt) < 200:
+                        text_section_heading = txt
+            if text_rows:
+                _flush_text_rows(sections, text_rows)
 
     html_parts = []
     for sec in sections:
