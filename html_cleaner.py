@@ -27,6 +27,15 @@ LABELED_SECTIONS_TO_REMOVE = {
     'Research Areas',
 }
 
+# Pattern-based section removal — any h2/h3 whose text matches one of these
+# is a plan-of-study / schedule grid (visual calendar), not curriculum content.
+PLAN_OF_STUDY_HEADING_RES = [
+    re.compile(r'^\s*year\s+\d+\s*$', re.I),
+    re.compile(r'^\s*concentration\s+in\s+', re.I),
+    re.compile(r'^\s*(?:sample\s+)?plan\s+of\s+study\b', re.I),
+    re.compile(r'^\s*\*', re.I),  # footnotes that h2-rendered from source
+]
+
 
 def _strip_tags(s):
     return re.sub(r'<[^>]+>', '', s).strip()
@@ -42,6 +51,24 @@ def _remove_labeled_section(html, heading_text):
         re.I | re.DOTALL,
     )
     return pattern.sub('', html)
+
+
+def _remove_plan_of_study_sections(html):
+    """Remove h2/h3 sections whose heading matches a plan-of-study pattern,
+    along with everything up to the next heading."""
+    pattern = re.compile(
+        r'<h([23])[^>]*>(.*?)</h\1>(.*?)(?=<h[1-6][\s>]|\Z)',
+        re.I | re.DOTALL,
+    )
+
+    def sub_one(m):
+        text = _strip_tags(m.group(2)).replace('\xa0', ' ').strip()
+        for rx in PLAN_OF_STUDY_HEADING_RES:
+            if rx.search(text):
+                return ''
+        return m.group(0)
+
+    return pattern.sub(sub_one, html)
 
 
 REDUNDANT_COURSE_INTRO_RE = re.compile(
@@ -128,6 +155,8 @@ def clean_curriculum_html(html):
     # Labeled section removal
     for label in LABELED_SECTIONS_TO_REMOVE:
         out = _remove_labeled_section(out, label)
+    # Plan-of-study section removal (Year N, Concentration in X, Plan of Study, footnotes)
+    out = _remove_plan_of_study_sections(out)
     # Decorative areaheader row removal
     out = _remove_decorative_areaheader_rows(out)
     # Course-Not-Found cleanup
