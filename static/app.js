@@ -1297,10 +1297,17 @@ function normForCompare(s) {
 // Maps common CIM variations to uniform labels while preserving meaningful distinctions.
 // Returns '' for instructional preambles that don't define a new section.
 function standardizeHeader(text) {
-    // Drop trailing " Concentration" so deployment variants that omit the word
-    // (e.g., "Biotechnology Operations") match reference versions that keep it
-    // (e.g., "Biotechnology Operations Concentration").
-    let t = text.trim().replace(/\s+Concentration\s*$/i, '').trim();
+    // Normalize concentration headings so variants all collapse to the same form.
+    // Different deployments use different wordings:
+    //   - "Agricultural Biotechnology Concentration"  (Boston)
+    //   - "Biotechnology Operations"                  (Oakland, no suffix)
+    //   - "Concentration in Agricultural Biotechnology"  (Toronto)
+    // Strip leading "Concentration in" and trailing "Concentration" so all three
+    // collapse to "Agricultural Biotechnology" in the diff.
+    let t = text.trim()
+        .replace(/^Concentration\s+in\s+/i, '')
+        .replace(/\s+Concentration\s*$/i, '')
+        .trim();
     const s = t.toLowerCase();
     // Suppress instructional preambles that don't define a new section
     // (these appear as courselistcomment rows under an existing h2/h3 heading)
