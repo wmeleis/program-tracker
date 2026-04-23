@@ -16,6 +16,7 @@ import pdfplumber
 
 # Course code pattern: 2-5 uppercase letters, optional space/nbsp, 4 digits
 COURSE_CODE_RE = re.compile(r'^([A-Z]{2,5})\s*(\d{4}[A-Z]?)\b')
+OR_COURSE_CODE_RE = re.compile(r'^or\s+([A-Z]{2,5}\s*\d{4}[A-Z]?)\b(.*)$', re.I)
 
 
 def _normalize(s):
@@ -57,6 +58,17 @@ def _parse_table(table):
             rows.append({
                 'is_header': False,
                 'code': code_cell,
+                'title': title,
+                'hours': hours.strip(),
+            })
+        elif (m := OR_COURSE_CODE_RE.match(code_cell)):
+            code = _normalize(m.group(1))
+            rest = m.group(2).strip()
+            title = cells[1] if len(cells) > 1 and cells[1].strip() else rest
+            hours = cells[2] if len(cells) > 2 else ''
+            rows.append({
+                'is_header': False,
+                'code': code,
                 'title': title,
                 'hours': hours.strip(),
             })
