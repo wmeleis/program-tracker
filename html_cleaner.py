@@ -56,9 +56,10 @@ def _remove_decorative_areaheader_rows(html):
             return False
         return bool(DECORATIVE_SUFFIX_RE.search(text))
 
-    # Non-greedy match on <tr ... class=\"...areaheader...\" ...> ... </tr>
+    # Match both areaheader and areasubheader rows. CourseLeaf uses
+    # areasubheader for grouping labels like "Artificial Intelligence Focus".
     pattern = re.compile(
-        r'<tr[^>]*\bareaheader\b[^>]*>.*?</tr>',
+        r'<tr[^>]*\bareas?u?b?header\b[^>]*>.*?</tr>',
         re.DOTALL | re.I,
     )
     return pattern.sub(lambda m: '' if is_decorative(m) else m.group(0), html)
