@@ -233,10 +233,25 @@ def build_static_site():
                 'version_date': f"Custom reference: {custom.get('name', '')}",
                 'html': custom.get('curriculum_html', ''),
             }
-    _write_json_encrypted(reference, os.path.join(EXPORT_DIR, 'reference.json'), key)
 
     # Campus relationship data
     boston_to_deployments, deployment_to_boston = build_campus_groups(data['programs'])
+
+    # Propagate Boston's custom override to non-Boston deployments so their
+    # Compare tab sees the same umbrella reference (matches app.py's runtime
+    # /api/program/<id>/reference logic).
+    for deployment_id, boston_id in deployment_to_boston.items():
+        boston_custom_id = overrides.get(boston_id)
+        if not boston_custom_id:
+            continue
+        custom = get_custom_reference(boston_custom_id)
+        if custom and custom.get('curriculum_html'):
+            reference[str(deployment_id)] = {
+                'version_date': f"Custom reference (via Boston counterpart): {custom.get('name', '')}",
+                'html': custom.get('curriculum_html', ''),
+            }
+
+    _write_json_encrypted(reference, os.path.join(EXPORT_DIR, 'reference.json'), key)
     campus_groups = {
         'boston_to_deployments': {str(k): v for k, v in boston_to_deployments.items()},
         'deployment_to_boston': {str(k): v for k, v in deployment_to_boston.items()},
