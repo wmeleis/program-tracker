@@ -870,6 +870,9 @@ function renderTable(items) {
 
         if (expanded) {
             const activeTab = detailTabState[id] || 'workflow';
+            // Only show Regulatory tab when this program has an approved-courses
+            // match on file (from the SharePoint regulatory workbooks).
+            const hasReg = !isCourseView && item.has_regulatory === true;
             const tabs = isCourseView ?
                 `<button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}"
                     onclick="event.stopPropagation(); switchDetailTab('${id}', 'workflow')">Workflow</button>` :
@@ -880,7 +883,10 @@ function renderTable(items) {
                 <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Reference</button>
                 <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Compare</button>`;
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Compare</button>` +
+                (hasReg ? `
+                <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory</button>` : '');
 
             html += `
                 <tr class="workflow-detail" id="detail-${id}">
@@ -912,6 +918,7 @@ function renderTable(items) {
         else if (!isCourseView) {
             if (tab === 'reference') loadReferenceDetail(id);
             else if (tab === 'compare') loadCompareDetail(id);
+            else if (tab === 'regulatory') loadRegulatoryDetail(id);
             else loadCurriculumDetail(id);
         }
     });
@@ -1268,6 +1275,140 @@ async function loadReferenceDetail(programId) {
     }
 }
 
+// Regulatory tab: render the current proposal with each course flagged against
+// the SharePoint approved-course list for its regulatory campus. Flags:
+//  - red   (regflag-missing) : course code not in the approved list at all
+//  - amber (regflag-moved)   : course is approved but in a different section
+//  - plain                   : course is approved in the same section
+async function loadRegulatoryDetail(programId) {
+    const contentEl = document.getElementById(`detail-content-${programId}`);
+    if (!contentEl) return;
+    contentEl.innerHTML = '<div class="workflow-loading">Loading regulatory data...</div>';
+
+    try {
+        const [currRes, regRes] = await Promise.all([
+            fetch(`/api/program/${programId}/curriculum`),
+            fetch(`/api/program/${programId}/regulatory`),
+        ]);
+        const currData = currRes.ok ? await currRes.json() : {};
+        if (!regRes.ok) {
+            contentEl.innerHTML = '<div class="workflow-meta">No regulatory approved-course list on file for this program.</div>';
+            return;
+        }
+        const reg = await regRes.json();
+        if (!reg.available || !Array.isArray(reg.courses) || reg.courses.length === 0) {
+            contentEl.innerHTML = '<div class="workflow-meta">No regulatory approved-course list on file for this program.</div>';
+            return;
+        }
+
+        // Build approved lookup: code -> Set of normalized sections it appears in.
+        // Some SharePoint workbooks list the same course in multiple sections
+        // (e.g. under both "Theory and Security" and a summary "CS 5100-CS 7880"
+        // range). A proposal course is "in the same section" if it matches any
+        // of the approved sections for that code.
+        const approvedBySection = new Map();
+        const approvedCount = reg.courses.length;
+        const uniqueApprovedCodes = new Set();
+        for (const c of reg.courses) {
+            if (!c || !c.code) continue;
+            const key = c.code.toUpperCase().replace(/\s+/g, ' ').trim();
+            uniqueApprovedCodes.add(key);
+            if (!approvedBySection.has(key)) approvedBySection.set(key, new Set());
+            approvedBySection.get(key).add(normalizeSection(c.section || ''));
+        }
+
+        const proposalHtml = currData.curriculum_html || '';
+        if (!proposalHtml) {
+            contentEl.innerHTML = renderRegulatoryHeader(reg, 0, 0, 0, uniqueApprovedCodes.size)
+                + '<div class="workflow-meta">No proposed curriculum to compare.</div>';
+            return;
+        }
+        const items = extractCourseLines(cleanCurriculumHtml(proposalHtml));
+
+        let totalProposed = 0, flaggedMissing = 0, flaggedMoved = 0;
+        let rowsHtml = '';
+        for (const it of items) {
+            if (it.isHeader) {
+                rowsHtml += `<tr><td class="reg-section" colspan="4">${escapeHtml(it.title)}</td></tr>`;
+                continue;
+            }
+            if (!it.code) continue;
+            totalProposed += 1;
+            const codeKey = it.code.toUpperCase().replace(/\s+/g, ' ').trim();
+            let flag = 'ok';
+            let flagLabel = '';
+            if (!approvedBySection.has(codeKey)) {
+                flag = 'missing';
+                flagLabel = 'Not on approved list';
+                flaggedMissing += 1;
+            } else {
+                const approvedSections = approvedBySection.get(codeKey);
+                const proposalSection = normalizeSection(it.section || '');
+                // "Moved" only when proposal section is non-empty and none of
+                // the approved sections match. Empty-approved sections (some
+                // sheets have unlabeled course entries) are permissive.
+                const anyMatch = !proposalSection ||
+                    approvedSections.has(proposalSection) ||
+                    approvedSections.has('');
+                if (!anyMatch) {
+                    flag = 'moved';
+                    flagLabel = 'Approved, but in a different section';
+                    flaggedMoved += 1;
+                }
+            }
+            const titleDisplay = it.hours ? `${it.title} (${it.hours}SH)` : it.title;
+            rowsHtml += `<tr class="regflag-${flag}" title="${escapeHtml(flagLabel)}">` +
+                `<td class="reg-flag">${flag === 'missing' ? '&#9888;' : flag === 'moved' ? '&#9651;' : ''}</td>` +
+                `<td class="reg-code">${escapeHtml(it.code)}</td>` +
+                `<td class="reg-title">${escapeHtml(titleDisplay)}</td>` +
+                `<td class="reg-note">${escapeHtml(flagLabel)}</td>` +
+                `</tr>`;
+        }
+
+        const header = renderRegulatoryHeader(reg, totalProposed, flaggedMissing, flaggedMoved, uniqueApprovedCodes.size);
+        contentEl.innerHTML = header +
+            '<table class="regulatory-table">' +
+            '<thead><tr><th></th><th>Code</th><th>Title</th><th>Status</th></tr></thead>' +
+            '<tbody>' + rowsHtml + '</tbody></table>';
+    } catch (e) {
+        contentEl.innerHTML = '<div class="workflow-meta">Failed to load regulatory data.</div>';
+    }
+}
+
+// Normalize section strings for comparison. Uses standardizeHeader() if available,
+// else falls back to lowercased trim. Both sides go through the same function so
+// "Core Requirements" on one side matches "Required Courses" on the other.
+// Returns '' for range-style labels like "CS 5100-CS 7880" — those are course
+// groupings in the workbook, not semantic sections, and are treated permissively.
+function normalizeSection(s) {
+    if (!s) return '';
+    const raw = String(s).trim();
+    // Range-style labels: "CS 5100-CS 7880", "EECE 5000 - EECE 7000"
+    if (/^[A-Z]{2,5}\s*\d{4}\s*[-–—]\s*[A-Z]{2,5}\s*\d{4}\s*$/i.test(raw)) return '';
+    try {
+        const std = (typeof standardizeHeader === 'function') ? standardizeHeader(raw) : '';
+        return (std || raw).trim().toLowerCase();
+    } catch (e) {
+        return raw.toLowerCase();
+    }
+}
+
+function renderRegulatoryHeader(reg, totalProposed, missing, moved, approvedCount) {
+    const source = reg.source_file ? `<strong>${escapeHtml(reg.source_file)}</strong> &middot; ${escapeHtml(reg.sheet_name || '')}` : '';
+    const edited = reg.edited_by ? ` &middot; ${escapeHtml(reg.edited_by)}` : '';
+    const conf = reg.confidence && reg.confidence < 1 ? ` &middot; <span class="reg-low-confidence" title="${escapeHtml(reg.match_reason || '')}">match confidence ${Math.round(reg.confidence * 100)}%</span>` : '';
+    const okCount = Math.max(0, totalProposed - missing - moved);
+    return `<div class="regulatory-header">
+        <div class="reg-source">${source}${edited}${conf}</div>
+        <div class="reg-summary">
+            <span class="reg-badge reg-badge-ok" title="Approved in same section">${okCount} approved</span>
+            <span class="reg-badge reg-badge-moved" title="Approved but in a different section">${moved} in different section</span>
+            <span class="reg-badge reg-badge-missing" title="Not found in approved list">${missing} not on approved list</span>
+            <span class="reg-approved-count" title="Total courses in the approved list">&middot; approved list has ${approvedCount} course${approvedCount === 1 ? '' : 's'}</span>
+        </div>
+    </div>`;
+}
+
 function switchDetailTab(programId, tab) {
     detailTabState[programId] = tab;
     const detailRow = document.getElementById(`detail-${programId}`);
@@ -1278,6 +1419,7 @@ function switchDetailTab(programId, tab) {
     if (tab === 'workflow') loadWorkflowDetail(programId);
     else if (tab === 'reference') loadReferenceDetail(programId);
     else if (tab === 'compare') loadCompareDetail(programId);
+    else if (tab === 'regulatory') loadRegulatoryDetail(programId);
     else loadCurriculumDetail(programId);
 }
 
