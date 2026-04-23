@@ -118,6 +118,27 @@ def api_program_reference(program_id):
                 'curriculum_html': clean_curriculum_html(custom.get('curriculum_html', '')),
             })
         # Override points to a deleted ref — fall through to auto
+
+    # Non-Boston deployments: if Boston counterpart has a custom override,
+    # use that custom reference as the deployment's reference too. This way
+    # uploading one umbrella doc covers every deployment of the program.
+    programs = get_all_programs()
+    _boston_to_deployments, deployment_to_boston = build_campus_groups(programs)
+    boston_id = deployment_to_boston.get(program_id)
+    if boston_id:
+        boston_override_id = get_program_reference_override_id(boston_id)
+        if boston_override_id:
+            custom = get_custom_reference(boston_override_id)
+            if custom:
+                return jsonify({
+                    'source': 'custom',
+                    'custom_reference_id': boston_override_id,
+                    'name': custom.get('name'),
+                    'source_filename': custom.get('source_filename'),
+                    'version_date': f"Custom reference (via Boston counterpart): {custom.get('name', '')}",
+                    'curriculum_html': clean_curriculum_html(custom.get('curriculum_html', '')),
+                })
+
     ref = get_reference_curriculum(program_id)
     if ref:
         ref['source'] = 'auto'
