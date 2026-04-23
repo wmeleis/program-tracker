@@ -68,7 +68,7 @@ def _parse_table(table):
             hours = cells[2] if len(cells) > 2 else ''
             rows.append({
                 'is_header': False,
-                'code': code,
+                'code': f'or {code}',
                 'title': title,
                 'hours': hours.strip(),
             })
@@ -302,7 +302,10 @@ def parse_pdf(data):
                 cm = line_course_re.match(txt) or line_or_course_re.match(txt)
                 if cm:
                     commit_pending()
+                    is_or = bool(line_or_course_re.match(txt))
                     code = f'{cm.group(1)} {cm.group(2)}'
+                    if is_or:
+                        code = f'or {code}'
                     title = cm.group(3).strip()
                     hrs_m = re.search(r'\s+(\d+(?:-\d+)?)\s*$', title)
                     hours = ''

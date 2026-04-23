@@ -154,7 +154,9 @@ def _parse_table(tbl):
             hours = cells[2] if len(cells) > 2 else ''
             rows.append({
                 'is_header': False,
-                'code': code,
+                # Preserve "or" prefix in display — Compare strips it when
+                # normalizing for diff matching, so it's purely visual.
+                'code': f'or {code}',
                 'title': title,
                 'hours': hours.strip(),
             })
