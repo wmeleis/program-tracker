@@ -66,7 +66,18 @@ def _static_no_cache(filename):
 @app.route('/api/programs')
 def api_programs():
     """Get all programs with active workflows."""
+    from database import get_db
     programs = get_all_programs()
+
+    # Flag programs that have a regulatory approved-courses match so the
+    # frontend can show/hide the Regulatory tab without an extra round-trip.
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT program_id FROM regulatory_approved_courses"
+        ).fetchall()
+        has_reg = {row['program_id'] for row in rows}
+    for p in programs:
+        p['has_regulatory'] = p['id'] in has_reg
 
     # Group by type
     grouped = {}
@@ -95,6 +106,33 @@ def api_program_curriculum(program_id):
     """Get curriculum HTML for a specific program."""
     html = get_program_curriculum(program_id)
     return jsonify({'curriculum_html': clean_curriculum_html(html)})
+
+
+@app.route('/api/program/<int:program_id>/regulatory')
+def api_program_regulatory(program_id):
+    """Return regulatory approved-curriculum data for a program.
+
+    Returns the list of approved courses from the matching SharePoint
+    workbook sheet, or 404 if no match is on file.
+    """
+    from database import get_regulatory_approved
+    reg = get_regulatory_approved(program_id)
+    if not reg:
+        return jsonify({'available': False}), 404
+    return jsonify({
+        'available': True,
+        'campus': reg.get('campus'),
+        'source_file': reg.get('source_file'),
+        'sheet_name': reg.get('sheet_name'),
+        'sheet_title': reg.get('sheet_title'),
+        'edited_by': reg.get('edited_by'),
+        'unit_header': reg.get('unit_header'),
+        'confidence': reg.get('confidence'),
+        'match_reason': reg.get('match_reason'),
+        'fetched_at': reg.get('fetched_at'),
+        'courses': reg.get('courses', []),
+        'sections': reg.get('sections', []),
+    })
 
 
 @app.route('/api/program/<int:program_id>/reference')
@@ -372,9 +410,21 @@ def api_scan_trigger():
                 prog_ids = [p['id'] for p in programs]
                 if prog_ids:
                     fetch_reference_curricula(prog_ids)
-                    scan_status['progress'] = 85
+                    scan_status['progress'] = 82
             except Exception as e:
                 print(f"Reference fetch error: {e}")
+
+            # Fetch regulatory approved curricula (SharePoint workbooks)
+            scan_status['phase'] = 'Fetching regulatory data...'
+            scan_status['progress'] = 85
+            try:
+                from scraper import fetch_regulatory_approved
+                if prog_ids:
+                    fetch_regulatory_approved(prog_ids)
+            except Exception as e:
+                # Regulatory fetch is best-effort — a missing SharePoint tab
+                # or expired session must not block the rest of the scan.
+                print(f"Regulatory fetch error: {e}")
 
             # Auto-export and deploy to GitHub Pages
             scan_status['phase'] = 'Exporting & deploying...'
@@ -525,4 +575,5 @@ if __name__ == '__main__':
     init_db()
     migrate_db()
     # Scans are driven externally by launchd/update.sh, not on a Flask timer.
-    app.run(debug=True, port=5001, use_reloader=False)
+    port = int(os.environ.get('CIM_PORT', 5001))
+    app.run(debug=True, port=port, use_reloader=False)

@@ -120,6 +120,23 @@ def init_db():
                 created_at TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS regulatory_approved_courses (
+                program_id INTEGER PRIMARY KEY,
+                campus TEXT NOT NULL,         -- Vancouver / Miami / Portland / Charlotte / Toronto / Arlington / Seattle
+                source_file TEXT NOT NULL,    -- e.g. 'BC Approved Courses.xlsx'
+                sheet_name TEXT NOT NULL,     -- tab name within the workbook
+                sheet_title TEXT,             -- row-0 A1 text
+                edited_by TEXT,               -- row-0 col-D provenance string
+                unit_header TEXT,             -- 'SH' or 'QH' (from sheet header row)
+                confidence REAL DEFAULT 0,    -- 0-1 match score
+                match_reason TEXT,            -- debug/audit string
+                courses_json TEXT,            -- JSON list [{code,title,sh,section,note}, ...]
+                sections_json TEXT,           -- JSON list of ordered section headers
+                fetched_at TIMESTAMP,
+                FOREIGN KEY (program_id) REFERENCES programs(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_regulatory_campus ON regulatory_approved_courses(campus);
+
             CREATE TABLE IF NOT EXISTS courses (
                 id TEXT PRIMARY KEY,
                 code TEXT NOT NULL,
@@ -486,6 +503,74 @@ def get_all_reference_curriculum():
             "SELECT program_id, version_date, curriculum_html FROM reference_curriculum"
         ).fetchall()
         return {str(row['program_id']): {'version_date': row['version_date'], 'html': row['curriculum_html']} for row in rows}
+
+
+# ---- Regulatory approved courses (from GlobalRegulatoryAffairs SharePoint) ----
+
+def upsert_regulatory_approved(program_id, campus, source_file, sheet_name,
+                               sheet_title, edited_by, unit_header,
+                               confidence, match_reason, courses_json, sections_json):
+    """Insert or update regulatory approved-course data for a program."""
+    with get_db() as conn:
+        now = datetime.now().isoformat()
+        conn.execute("""
+            INSERT INTO regulatory_approved_courses
+                (program_id, campus, source_file, sheet_name, sheet_title,
+                 edited_by, unit_header, confidence, match_reason,
+                 courses_json, sections_json, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(program_id) DO UPDATE SET
+                campus = excluded.campus,
+                source_file = excluded.source_file,
+                sheet_name = excluded.sheet_name,
+                sheet_title = excluded.sheet_title,
+                edited_by = excluded.edited_by,
+                unit_header = excluded.unit_header,
+                confidence = excluded.confidence,
+                match_reason = excluded.match_reason,
+                courses_json = excluded.courses_json,
+                sections_json = excluded.sections_json,
+                fetched_at = excluded.fetched_at
+        """, (program_id, campus, source_file, sheet_name, sheet_title,
+              edited_by, unit_header, confidence, match_reason,
+              courses_json, sections_json, now))
+
+
+def delete_regulatory_approved(program_id):
+    """Clear regulatory match for a program (e.g. when re-scan finds no match)."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM regulatory_approved_courses WHERE program_id = ?", (program_id,))
+
+
+def get_regulatory_approved(program_id):
+    """Return {campus, source_file, sheet_name, sheet_title, edited_by, unit_header,
+    confidence, match_reason, courses, sections, fetched_at} or None."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM regulatory_approved_courses WHERE program_id = ?",
+            (program_id,)
+        ).fetchone()
+        if not row:
+            return None
+        import json as _json
+        d = dict(row)
+        d['courses'] = _json.loads(d.pop('courses_json') or '[]')
+        d['sections'] = _json.loads(d.pop('sections_json') or '[]')
+        return d
+
+
+def get_all_regulatory_approved():
+    """All regulatory approved-course rows, keyed by program_id (for static export)."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM regulatory_approved_courses").fetchall()
+        import json as _json
+        out = {}
+        for row in rows:
+            d = dict(row)
+            d['courses'] = _json.loads(d.pop('courses_json') or '[]')
+            d['sections'] = _json.loads(d.pop('sections_json') or '[]')
+            out[str(d['program_id'])] = d
+        return out
 
 
 # ---- Custom references (uploaded curriculum docs) ----
