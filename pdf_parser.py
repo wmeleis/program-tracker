@@ -281,6 +281,18 @@ def parse_pdf(data):
 
             text_section_heading = current_heading
             text_rows = []
+            # Accumulate non-course lines as the pending heading; concatenate so
+            # multi-line comments ("Complete a minimum of 5 semester hours from
+            # the following to meet the 32 total / hours for the program:") end
+            # up as one section label with the key elective-signaling phrases.
+            pending_heading_parts = []
+
+            def commit_pending():
+                nonlocal text_section_heading, pending_heading_parts
+                if pending_heading_parts:
+                    text_section_heading = ' '.join(pending_heading_parts).strip()
+                    pending_heading_parts = []
+
             for l in lines:
                 if line_in_any_table(l):
                     continue
@@ -289,9 +301,9 @@ def parse_pdf(data):
                     continue
                 cm = line_course_re.match(txt) or line_or_course_re.match(txt)
                 if cm:
+                    commit_pending()
                     code = f'{cm.group(1)} {cm.group(2)}'
                     title = cm.group(3).strip()
-                    # Trailing credit hours column may be appended to title
                     hrs_m = re.search(r'\s+(\d+(?:-\d+)?)\s*$', title)
                     hours = ''
                     if hrs_m:
@@ -301,21 +313,14 @@ def parse_pdf(data):
                         'is_header': False, 'code': code, 'title': title, 'hours': hours,
                         '_section': text_section_heading,
                     })
-                elif _looks_like_heading(txt):
-                    # Flush previous group to its section
-                    if text_rows:
-                        _flush_text_rows(sections, text_rows)
-                        text_rows = []
-                    text_section_heading = txt
                 else:
-                    # Non-course, non-heading line may be a courselistcomment
-                    # (e.g. "Complete a minimum of 5 semester hours..."). Flush
-                    # so following courses group under a new comment label.
+                    # Flush any already-collected course rows so they stay with
+                    # the previous heading, then start accumulating a new one.
                     if text_rows:
                         _flush_text_rows(sections, text_rows)
                         text_rows = []
-                    if len(txt) > 10 and len(txt) < 200:
-                        text_section_heading = txt
+                    if len(txt) > 3 and len(txt) < 250:
+                        pending_heading_parts.append(txt)
             if text_rows:
                 _flush_text_rows(sections, text_rows)
 
