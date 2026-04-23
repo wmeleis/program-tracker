@@ -273,9 +273,10 @@ def _promote_program_pathway_section(sections):
         return sections
 
     # Insert a synthetic Program Pathway section heading with a brief descriptive
-    # row clarifying what this pathway consists of (since the concentrations
-    # below it are shared with the Project Pathway — students just know they
-    # take a concentration or elective option plus the Options A/B/C from Core).
+    # row clarifying what this pathway consists of, and move the existing
+    # Project Pathway section to sit right after it. This way the two pathways
+    # appear together as a readable comparison, and the concentrations/electives
+    # (shared between both) follow after.
     synthetic = {
         'heading': 'Program Pathway',
         'courses': [
@@ -284,7 +285,25 @@ def _promote_program_pathway_section(sections):
         ],
         'has_courses': False,
     }
-    return sections[:concentration_idx] + [synthetic] + sections[concentration_idx:]
+    # Extract the existing Project Pathway section so we can reposition it
+    project_idx = next(
+        (i for i, sec in enumerate(sections)
+         if re.search(r'\bproject pathway\b', sec['heading'], re.I)),
+        None,
+    )
+    project_section = None
+    if project_idx is not None:
+        project_section = sections[project_idx]
+        sections = sections[:project_idx] + sections[project_idx + 1:]
+        # After removal, the concentration index may have shifted if the Project
+        # Pathway section was before it (it shouldn't be, but be safe).
+        if project_idx < concentration_idx:
+            concentration_idx -= 1
+
+    insertion = [synthetic]
+    if project_section is not None:
+        insertion.append(project_section)
+    return sections[:concentration_idx] + insertion + sections[concentration_idx:]
 
 
 def parse_docx(data):
