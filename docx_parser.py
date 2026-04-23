@@ -179,6 +179,9 @@ def _render_section_html(heading, rows):
     parts = []
     if heading:
         parts.append(f'<h2>{escape(heading)}</h2>')
+    if not rows:
+        # Heading-only section (synthetic, e.g. Program Pathway)
+        return ''.join(parts)
     parts.append('<table class="sc_courselist">')
     parts.append('<thead>')
     parts.append('<tr class="hidden noscript"><th scope="col">Code</th>'
@@ -205,6 +208,77 @@ def _render_section_html(heading, rows):
             )
     parts.append('</tbody></table>')
     return ''.join(parts)
+
+
+def _strip_campus_metadata_rows(sections):
+    """Remove 'Where will this program be offered?' + the campus-list rows
+    that follow it. These are form metadata, not curriculum content.
+
+    Campus markers: Boston, Oakland, Portland, Online, Toronto, Arlington,
+    Seattle, Vancouver, Miami, etc. Also the catch-all parenthetical forms
+    like 'Boston, MA (BOS)'.
+    """
+    CAMPUS_OFFER_RE = re.compile(r'where will this program be offered\??', re.I)
+    CAMPUS_VALUES_RE = re.compile(
+        r'^(boston|oakland|portland|online|toronto|arlington|seattle|vancouver|miami|silicon valley|san francisco|new york|charlotte)\b.*',
+        re.I,
+    )
+    for sec in sections:
+        new_rows = []
+        skip_campus_list = False
+        for r in sec['courses']:
+            if r.get('is_header'):
+                text = r.get('text', '').strip()
+                if CAMPUS_OFFER_RE.search(text):
+                    skip_campus_list = True
+                    continue  # don't keep the "Where will..." row either
+                if skip_campus_list and (CAMPUS_VALUES_RE.match(text) or len(text) < 35):
+                    # while we're in campus-value streak, skip plausible campus labels
+                    # and short one-liners (checkbox labels are usually short)
+                    continue
+                skip_campus_list = False
+            else:
+                skip_campus_list = False
+            new_rows.append(r)
+        sec['courses'] = new_rows
+    return sections
+
+
+def _promote_program_pathway_section(sections):
+    """If the doc mentions 'Program Pathway' (in a pathway options form) and
+    later has a 'Project Pathway' section, insert a synthetic 'Program Pathway'
+    section heading before the concentrations/electives (i.e., the Program
+    Pathway's curriculum), so the two pathways appear symmetrically."""
+    # Find: does the doc mention "Program Pathway" anywhere?
+    mentions_program_pathway = any(
+        any(
+            r.get('is_header') and re.search(r'\bprogram pathway\b', r.get('text', ''), re.I)
+            for r in sec['courses']
+        )
+        for sec in sections
+    )
+    has_project_pathway = any(
+        re.search(r'\bproject pathway\b', sec['heading'], re.I) for sec in sections
+    )
+    if not (mentions_program_pathway and has_project_pathway):
+        return sections
+
+    # Find index where concentrations start (first concentration section)
+    concentration_idx = next(
+        (i for i, sec in enumerate(sections)
+         if re.search(r'\bconcentration\b', sec['heading'], re.I)),
+        None,
+    )
+    if concentration_idx is None:
+        return sections
+
+    # Insert a synthetic Program Pathway section heading (empty content)
+    synthetic = {
+        'heading': 'Program Pathway',
+        'courses': [],
+        'has_courses': False,
+    }
+    return sections[:concentration_idx] + [synthetic] + sections[concentration_idx:]
 
 
 def parse_docx(data):
@@ -264,6 +338,10 @@ def parse_docx(data):
                 'courses': rows,
                 'has_courses': has_courses,
             })
+
+    # --- Post-processing passes ---
+    sections = _strip_campus_metadata_rows(sections)
+    sections = _promote_program_pathway_section(sections)
 
     # Generate combined HTML
     html_parts = []
