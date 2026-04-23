@@ -272,10 +272,16 @@ def _promote_program_pathway_section(sections):
     if concentration_idx is None:
         return sections
 
-    # Insert a synthetic Program Pathway section heading (empty content)
+    # Insert a synthetic Program Pathway section heading with a brief descriptive
+    # row clarifying what this pathway consists of (since the concentrations
+    # below it are shared with the Project Pathway — students just know they
+    # take a concentration or elective option plus the Options A/B/C from Core).
     synthetic = {
         'heading': 'Program Pathway',
-        'courses': [],
+        'courses': [
+            {'is_header': True,
+             'text': 'Students following the Program Pathway complete a concentration or the electives option (shown below), plus Option A, B, or C from Core Requirements.'},
+        ],
         'has_courses': False,
     }
     return sections[:concentration_idx] + [synthetic] + sections[concentration_idx:]
