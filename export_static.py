@@ -118,8 +118,19 @@ EXPORT_DIR = os.path.join(os.path.dirname(__file__), 'docs')
 
 def export_data():
     """Export all dashboard data to a single JSON file."""
+    from database import get_db
     programs = get_all_programs()
     courses = get_all_courses()
+
+    # Flag programs with regulatory approved-courses matches for the
+    # static-site Regulatory tab. Matches the flag added by api_programs.
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT program_id FROM regulatory_approved_courses"
+        ).fetchall()
+        has_reg = {row['program_id'] for row in rows}
+    for p in programs:
+        p['has_regulatory'] = p['id'] in has_reg
     pipeline_counts = get_pipeline_counts(TRACKED_ROLES)
     changes = get_recent_changes(limit=100)
     last_scan = get_last_scan()
@@ -273,6 +284,11 @@ def build_static_site():
     }
     _write_json_encrypted(campus_groups, os.path.join(EXPORT_DIR, 'campus_groups.json'), key)
 
+    # Regulatory approved-curriculum map (lazy-loaded per program)
+    from database import get_all_regulatory_approved
+    regulatory = get_all_regulatory_approved()
+    _write_json_encrypted(regulatory, os.path.join(EXPORT_DIR, 'regulatory.json'), key)
+
     # Public crypto parameters (salt is not a secret)
     with open(os.path.join(EXPORT_DIR, 'crypto.json'), 'w') as f:
         json.dump({
@@ -401,6 +417,7 @@ def _gate_html(cache_bust: int) -> str:
 
   const ENC_FILES = new Set([
     'data.json', 'curriculum.json', 'reference.json', 'campus_groups.json',
+    'regulatory.json',
   ]);
 
   let cryptoKey = null;
@@ -789,6 +806,82 @@ function __staticInit() {
         } else {
             contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals.</div>';
         }
+    };
+
+    // Patch regulatory loading to read from regulatory.json (lazy) instead of API
+    let _regulatoryCache = null;
+    window.loadRegulatoryDetail = async function(programId) {
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
+        contentEl.innerHTML = '<div class="workflow-loading">Loading regulatory data...</div>';
+        if (!_regulatoryCache) {
+            try { _regulatoryCache = await (await fetch('regulatory.json')).json(); }
+            catch(e) { _regulatoryCache = {}; }
+        }
+        if (!_curriculumCache) {
+            try { _curriculumCache = window.__EMBEDDED_CURRICULUM__ || (await (await fetch('curriculum.json')).json()); } catch(e) {}
+        }
+        const reg = _regulatoryCache[String(programId)];
+        if (!reg || !Array.isArray(reg.courses) || reg.courses.length === 0) {
+            contentEl.innerHTML = '<div class="workflow-meta">No regulatory approved-course list on file for this program.</div>';
+            return;
+        }
+        const currHtml = (_curriculumCache || {})[String(programId)] || '';
+        const approvedBySection = new Map();
+        for (const c of reg.courses) {
+            if (!c || !c.code) continue;
+            const key = c.code.toUpperCase().replace(/\\s+/g, ' ').trim();
+            if (!approvedBySection.has(key)) approvedBySection.set(key, new Set());
+            approvedBySection.get(key).add(
+                (normalizeSection ? normalizeSection(c.section || '') : (c.section || '').trim().toLowerCase())
+            );
+        }
+        const approvedCount = reg.courses.length;
+        if (!currHtml) {
+            contentEl.innerHTML = renderRegulatoryHeader(reg, 0, 0, 0, approvedCount)
+                + '<div class="workflow-meta">No proposed curriculum to compare.</div>';
+            return;
+        }
+        const items = extractCourseLines(cleanCurriculumHtml(currHtml));
+        let totalProposed = 0, missing = 0, moved = 0;
+        let rowsHtml = '';
+        for (const it of items) {
+            if (it.isHeader) {
+                rowsHtml += `<tr><td class="reg-section" colspan="4">${escapeHtml(it.title)}</td></tr>`;
+                continue;
+            }
+            if (!it.code) continue;
+            totalProposed++;
+            const codeKey = it.code.toUpperCase().replace(/\\s+/g, ' ').trim();
+            let flag = 'ok', flagLabel = '';
+            if (!approvedBySection.has(codeKey)) {
+                flag = 'missing';
+                flagLabel = 'Not on approved list';
+                missing++;
+            } else {
+                const approvedSections = approvedBySection.get(codeKey);
+                const proposalSection = normalizeSection ? normalizeSection(it.section || '') : (it.section || '').trim().toLowerCase();
+                const anyMatch = !proposalSection ||
+                    approvedSections.has(proposalSection) ||
+                    approvedSections.has('');
+                if (!anyMatch) {
+                    flag = 'moved';
+                    flagLabel = 'Approved, but in a different section';
+                    moved++;
+                }
+            }
+            const titleDisplay = it.hours ? `${it.title} (${it.hours}SH)` : it.title;
+            rowsHtml += `<tr class="regflag-${flag}" title="${escapeHtml(flagLabel)}">` +
+                `<td class="reg-flag">${flag === 'missing' ? '&#9888;' : flag === 'moved' ? '&#9651;' : ''}</td>` +
+                `<td class="reg-code">${escapeHtml(it.code)}</td>` +
+                `<td class="reg-title">${escapeHtml(titleDisplay)}</td>` +
+                `<td class="reg-note">${escapeHtml(flagLabel)}</td>` +
+                `</tr>`;
+        }
+        contentEl.innerHTML = renderRegulatoryHeader(reg, totalProposed, missing, moved, approvedCount) +
+            '<table class="regulatory-table">' +
+            '<thead><tr><th></th><th>Code</th><th>Title</th><th>Status</th></tr></thead>' +
+            '<tbody>' + rowsHtml + '</tbody></table>';
     };
 
     // Patch campus groups to use static data

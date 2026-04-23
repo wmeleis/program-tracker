@@ -300,6 +300,48 @@ Additional dropdown between College and Campus on the Courses view. Populates wi
 ### Unified Button Styling
 Type filter (`.type-btn`), Smart View (`.smart-view-btn`), Programs/Courses toggle (`.toggle-btn`), and the proposal "All" (`active-all`) buttons now share the pipeline-style active state: light-blue fill (`#eff6ff`), blue border (`var(--accent)`), blue text. The Proposal buttons retain their semantic colors for New (green), Edited (blue), and Inactivated (red) since those convey meaningful status. This was a consistency fix — previously type/smart-view used solid black and courses/programs used a segmented-control pill.
 
+### Regulatory Tab (approved-courses check)
+Fourth tab on each program's expandable row (shown only for programs at the seven regulatory campuses with a matching SharePoint workbook on file). Flags each course in the current proposal against a per-campus "Approved Courses" workbook maintained by Global Regulatory Affairs.
+
+- **Source files:** SharePoint folder `GlobalRegulatoryAffairs/Shared Documents/Resources/Master Portfolio/CURRENT APPROVED CURRICULUM`. Seven `.xlsx` workbooks — one per regulatory campus:
+  - `BC Approved Courses.xlsx` → Vancouver
+  - `FL Approved Courses.xlsx` → Miami
+  - `ME Approved Courses.xlsx` → Portland
+  - `NC Approved Courses.xlsx` → Charlotte
+  - `Ontario Approved Courses.xlsx` → Toronto
+  - `VA Approved Courses.xlsx` → Arlington
+  - `WA Approved Courses.xlsx` → Seattle
+- **Workbook shape:** one sheet per program. Row-0 col-A is the full program title; row-0 col-D is an "Edited by … on …" provenance string. Row 1 has the column headers (`Course #`, `Course Title`, `SH` or `QH`, optional `Notes`). Section rows appear as text-only rows in col A ("Core Requirements", "Electives", "Theory and Security", etc.). Each course row has `code`, `title`, `credit hours`, `note`.
+- **Download:** The scraper uses the logged-in Chrome session on the SharePoint site (match substring `sharepoint.com/sites/GlobalRegulatoryAffairs`). SharePoint's REST endpoint `/_api/web/GetFileByServerRelativeUrl('<path>')/$value` returns the `.xlsx` bytes; Python pulls them in base64 chunks via AppleScript (same pattern as `fetch_reference_curricula`). All 7 files download in parallel per scan (~1.3 MB total).
+- **Parser (`xlsx_parser.py`):** Pure stdlib (`zipfile` + `xml.etree`). `parse_workbook(bytes_or_path)` returns a list of `{sheet_name, title, edited_by, unit_header, courses, sections}`. Section tracking: rows with text only in col A and no course-code pattern become the `current_section`; subsequent course rows inherit that section.
+- **Sheet → CIM program matching (`match_sheets_to_programs`):**
+  - Scope is per workbook (one workbook ↔ one campus).
+  - For each sheet, build a "stem" + degree bucket from the row-0 title if it looks like a program name (contains "Master"/"Bachelor"/"Doctor"/"Certificate"); else fall back to the sheet tab name (stripping `VAN `/`TOR ` etc. campus prefix).
+  - Normalize: lowercase → strip head phrases (`master of science in`, `doctor of philosophy in`, `master of public administration`, …; longest-match wins; bare `master of` / `doctor of` / `bachelor of` kept as generic prefixes so the subject remains) → drop degree-acronym tokens (`MS`, `MSCS`, `MSIS`, `MSECE`, `MPS`, `MPA`, `MPP`, `MPH`, `MBA`, `PhD`, `EdD`, `CERTG`, `CAGS`, …) → drop stop words (`with`, `major`, `in`, `of`, `for`, `and`, `the`, …) → drop numeric credit hints (`32sh`, `45qh`).
+  - Degree buckets keep `MS`/`MSCS`/`MSIS`/`MSECE`/`MPS` together (all Master of Science family) while separating `MPA`, `MPP`, `MPH`, `MBA`, `PhD`, `EdD`, `BS`, `CERT`. Mismatched buckets never match — this prevents "Computer Science, MSCS" from matching a "PhD Computer Science" sheet.
+  - Suffix tokens (`align`, `connect`, `bridge`, `advanced`, `entry`) must match exactly so program variants (`MS—Align`, `MPS—Connect`, `MSIS—Bridge`) stay distinct.
+  - Scoring: exact stem → 1.0; Jaccard ≥ 0.8 → that score; subset with ≥2 tokens → 0.75; single-token subset with matching degree bucket → 0.70; else 0. Confidence under 100% is surfaced on the tab header so the user can audit fuzzy matches.
+  - **SH vs QH tiebreak** (Ontario Project Management has both): when multiple sheets score equally, the one whose course codes overlap most with the CIM proposal's `curriculum_html` wins. The Toronto PM program is switching quarters → semesters, so Semesters (SH) and Quarters (QH) workbooks each fit a different cohort's proposal and course-code overlap picks the right one automatically.
+  - **Placeholder sheets are skipped** (A1 starts with `"As of"`, `"TBD"`, or `"Course #"`) per explicit project preference.
+  - **Unmatched programs hide the tab** (no "missing" state is shown to the user).
+- **Database:** `regulatory_approved_courses` table (`program_id` PK, `campus`, `source_file`, `sheet_name`, `sheet_title`, `edited_by`, `unit_header`, `confidence`, `match_reason`, `courses_json`, `sections_json`, `fetched_at`). Functions: `upsert_regulatory_approved()`, `delete_regulatory_approved()`, `get_regulatory_approved()`, `get_all_regulatory_approved()`. Programs that lose their match on a subsequent scan have their row deleted.
+- **Scraper integration:** `fetch_regulatory_approved(program_ids)` in `scraper.py` runs after `fetch_reference_curricula()` during every scan (`app.py` `do_scan`). Pulls all 7 workbooks in parallel, parses each, scopes CIM programs by campus-in-name parenthetical, and upserts matches. Any failure (SharePoint tab closed, session expired) logs a warning and skips the step — it never blocks programs/courses/reference. `REGULATORY_CAMPUS_FILES` (campus → filename dict) and `_REGULATORY_FOLDER_URL` at the top of `scraper.py` are the single points of control if the files move.
+- **API:** `GET /api/program/<id>/regulatory` returns `{available, campus, source_file, sheet_name, sheet_title, edited_by, unit_header, confidence, match_reason, fetched_at, courses, sections}` or `404` with `{available: false}`. `/api/programs` now includes a `has_regulatory` boolean on each program so the frontend can show/hide the tab without a probe.
+- **Frontend (`static/app.js`):**
+  - `loadRegulatoryDetail(programId)` loads the current proposal curriculum + regulatory data, extracts proposal courses via `extractCourseLines()` (shared with Compare tab), then flags each:
+    - **Plain**: code is on the approved list and, if a semantic section is given, in a matching section.
+    - **Amber** (`regflag-moved`): code is on the approved list but in a different semantic section than the proposal places it.
+    - **Red** (`regflag-missing`): code is not in the approved list at all.
+  - Approved-list sections may list the same course under multiple sections (range summaries etc.); the matcher therefore tracks `code -> Set(normalizedSection)` and accepts a proposal section that matches any one of them.
+  - `normalizeSection()` uses `standardizeHeader()` (the Compare tab's helper) to map "Core Requirements"/"Required Courses"/"Program Requirement" → "Required Courses" etc., and returns `''` for range-style labels like `CS 5100-CS 7880` so they don't trigger false "moved" flags.
+  - Header summary at the top: `<source file> · <sheet name> · Edited by …` then three badges (`N approved`, `N in different section`, `N not on approved list`) plus the total size of the approved list. Match-confidence below 100% is shown as a small pill so the user can see when the sheet-to-program match was fuzzy.
+  - Tab button rendered only when `program.has_regulatory === true`.
+- **Static site:** `export_static.py` writes `regulatory.json.enc` alongside the other encrypted data files (lazy-loaded on first tab expand; registered in the gate's `ENC_FILES` set). The override `window.loadRegulatoryDetail = …` in `build_static_js()` reads from `regulatory.json` instead of hitting the API. The `has_regulatory` flag is baked into `data.json` by `export_data()` so the tab button's visibility matches Flask mode.
+- **Failure modes (graceful):**
+  - SharePoint tab not open in Chrome → download step logs a warning and skips the campus; existing `regulatory_approved_courses` rows stay untouched (scan before/after behavior the same).
+  - SharePoint session expired → 401 response → same as above.
+  - Workbook file removed from SharePoint → the campus's download returns an error, any existing rows for that campus stay. (If the workbook *is present* but empty/new-shaped, unmatched CIM programs' rows get cleared, so the tab cleanly disappears.)
+
 ### Courses View
 Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggled via the Courses/Programs buttons in the header (Courses is now first).
 
