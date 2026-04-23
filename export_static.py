@@ -219,7 +219,11 @@ def build_static_site():
     _write_json_encrypted(data, os.path.join(EXPORT_DIR, 'data.json'), key)
 
     # Curriculum + reference (large; lazy-fetched + decrypted on expand)
+    from html_cleaner import clean_curriculum_html
     curriculum = get_all_curriculum()
+    for pid, html in list(curriculum.items()):
+        if html:
+            curriculum[pid] = clean_curriculum_html(html)
     _write_json_encrypted(curriculum, os.path.join(EXPORT_DIR, 'curriculum.json'), key)
 
     reference = get_all_reference_curriculum()
@@ -250,6 +254,14 @@ def build_static_site():
                 'version_date': f"Custom reference (via Boston counterpart): {custom.get('name', '')}",
                 'html': custom.get('curriculum_html', ''),
             }
+
+    # Apply server-side HTML cleaner (strips plan-of-study sections etc.) so
+    # the static site's Reference + Compare tabs get the same cleanup as Flask.
+    for pid, entry in reference.items():
+        if isinstance(entry, dict) and entry.get('html'):
+            entry['html'] = clean_curriculum_html(entry['html'])
+        elif isinstance(entry, dict) and entry.get('curriculum_html'):
+            entry['curriculum_html'] = clean_curriculum_html(entry['curriculum_html'])
 
     _write_json_encrypted(reference, os.path.join(EXPORT_DIR, 'reference.json'), key)
     campus_groups = {
