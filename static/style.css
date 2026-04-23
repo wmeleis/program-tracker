@@ -690,9 +690,29 @@ tr.program-row.expanded td {
 .detail-tabs {
     display: flex;
     gap: 0;
+    align-items: center;
     border-bottom: 2px solid #e2e8f0;
     margin-bottom: 12px;
 }
+
+.detail-search {
+    margin-left: auto;
+    margin-right: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #fff;
+    width: 200px;
+    color: #334155;
+}
+
+.detail-search:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 
 .detail-tab {
     padding: 6px 18px;

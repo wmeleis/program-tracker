@@ -887,6 +887,11 @@ function renderTable(items) {
                     <td colspan="5">
                         <div class="detail-tabs">
                             ${tabs}
+                            <input type="text" class="detail-search"
+                                id="detail-search-${id}"
+                                placeholder="Search within this page..."
+                                oninput="filterDetailContent(${id})"
+                                onclick="event.stopPropagation()">
                         </div>
                         <div class="detail-content" id="detail-content-${id}">
                             <div class="workflow-loading">Loading...</div>
@@ -1643,15 +1648,18 @@ function diffLines(oldLines, newLines) {
     return result;
 }
 
-// Render a single side's cell content
+// Render a single side's cell content. Two columns per side: code + title
+// (with hours inlined into title as "(NSH)" by html_cleaner).
 function renderCourseCell(item, cls) {
-    if (!item) return `<td class="${cls}" colspan="3"></td>`;
+    if (!item) return `<td class="${cls}" colspan="2"></td>`;
     if (item.isHeader) {
-        return `<td class="${cls} cmp-header" colspan="3">${escapeHtml(item.title)}</td>`;
+        return `<td class="${cls} cmp-header" colspan="2">${escapeHtml(item.title)}</td>`;
     }
+    const titleWithHours = item.hours
+        ? `${item.title} (${item.hours}SH)`
+        : item.title;
     return `<td class="${cls} cmp-code">${escapeHtml(item.code)}</td>` +
-           `<td class="${cls} cmp-title">${escapeHtml(item.title)}</td>` +
-           `<td class="${cls} cmp-hours">${escapeHtml(item.hours)}</td>`;
+           `<td class="${cls} cmp-title">${escapeHtml(titleWithHours)}</td>`;
 }
 
 // Render a side-by-side comparison table
@@ -1678,9 +1686,9 @@ function renderSideBySide(diff, leftLabel, rightLabel) {
 
     return `<table class="compare-table">
         <thead><tr>
-            <th colspan="3" class="cmp-left-header">${escapeHtml(leftLabel)}</th>
+            <th colspan="2" class="cmp-left-header">${escapeHtml(leftLabel)}</th>
             <th class="cmp-divider"></th>
-            <th colspan="3" class="cmp-right-header">${escapeHtml(rightLabel)}</th>
+            <th colspan="2" class="cmp-right-header">${escapeHtml(rightLabel)}</th>
         </tr></thead>
         <tbody>${rows}</tbody>
     </table>`;
@@ -1929,6 +1937,50 @@ function renderChanges(changes) {
 }
 
 // ==================== Interactions ====================
+
+// In-page search for the expanded detail tabs. Filters <tr> rows in the
+// content area down to those whose text contains the query. Heading/section
+// rows (areaheader, h2/h3) are kept visible when any of their following
+// rows match, to preserve context.
+function filterDetailContent(programId) {
+    const input = document.getElementById(`detail-search-${programId}`);
+    const content = document.getElementById(`detail-content-${programId}`);
+    if (!input || !content) return;
+    const q = input.value.trim().toLowerCase();
+    const rows = Array.from(content.querySelectorAll('tr'));
+    if (!q) {
+        rows.forEach(r => { r.style.display = ''; });
+        // Clear any prior highlights
+        content.querySelectorAll('mark.detail-hl').forEach(m => {
+            const t = document.createTextNode(m.textContent);
+            m.parentNode.replaceChild(t, m);
+        });
+        return;
+    }
+    // First pass: mark each row's own match status
+    const rowMatches = rows.map(r => r.textContent.toLowerCase().includes(q));
+    // Heading rows (areaheader / h2/h3/h4-equivalent): show if any following
+    // non-heading row matches until the next heading.
+    const isHeading = r =>
+        r.classList.contains('areaheader') ||
+        r.querySelector('.areaheader, h2, h3, h4') !== null;
+    const show = new Array(rows.length).fill(false);
+    for (let i = 0; i < rows.length; i++) {
+        if (rowMatches[i]) show[i] = true;
+    }
+    // Propagate: a heading shows if any descendant row (up to next heading) matches
+    for (let i = 0; i < rows.length; i++) {
+        if (!isHeading(rows[i])) continue;
+        let j = i + 1;
+        let anyMatch = false;
+        while (j < rows.length && !isHeading(rows[j])) {
+            if (rowMatches[j]) { anyMatch = true; break; }
+            j++;
+        }
+        if (anyMatch) show[i] = true;
+    }
+    rows.forEach((r, i) => { r.style.display = show[i] ? '' : 'none'; });
+}
 
 function toggleRow(programId) {
     if (expandedRows.has(programId)) {
