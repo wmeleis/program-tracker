@@ -1063,9 +1063,16 @@ function cleanCurriculumHtml(html) {
     // (e.g., "Process Sciences Focus"). "Pathway" is NOT in this list — pathways
     // (Program Pathway, Project Pathway) are meaningful structural choices.
     const DECORATIVE_SUFFIX_RE = /\b(focus|track|area|group)s?\s*$/i;
-    div.querySelectorAll('tr.areaheader').forEach(tr => {
+    // "Complete the 3 Semester Hours Project Course..." style preambles
+    // that just describe the course row immediately following them.
+    const REDUNDANT_COURSE_INTRO_RE = /^complete\s+(?:the|a)\s+\d+\s+semester\s+hour.*?\bcourse\b/i;
+    div.querySelectorAll('tr.areaheader, tr.areasubheader').forEach(tr => {
         const text = (tr.textContent || '').trim();
         if (!text) return;
+        if (REDUNDANT_COURSE_INTRO_RE.test(text)) {
+            tr.remove();
+            return;
+        }
         const isChoice = CHOICE_RE.test(text);
         const isDecorative = !isChoice && DECORATIVE_SUFFIX_RE.test(text);
         if (isDecorative) {
@@ -1289,8 +1296,28 @@ function normForCompare(s) {
 // Standardize section heading text for consistent display in Compare tab.
 // Maps common CIM variations to uniform labels while preserving meaningful distinctions.
 // Returns '' for instructional preambles that don't define a new section.
+// Diff match key for header titles. Used to align concentration headings
+// regardless of whether the source used "X Concentration", "Concentration in X",
+// or just "X". Display still preserves the word "Concentration".
+function headerMatchKey(title) {
+    return (title || '').trim()
+        .replace(/^Concentration\s+in\s+/i, '')
+        .replace(/\s+Concentration\s*$/i, '')
+        .trim()
+        .toLowerCase();
+}
+
 function standardizeHeader(text) {
-    const t = text.trim();
+    // Normalize concentration headings so their DISPLAY form consistently ends
+    // with "Concentration". "Concentration in X" becomes "X Concentration".
+    // Variants without "Concentration" get the suffix added when the heading
+    // looks like a concentration name (ends a concentration-list context
+    // detected later by headerMatchKey overlap). For now: only reword the
+    // explicit "Concentration in X" prefix. Bare names keep their text as-is;
+    // diff matching in diffLines relies on headerMatchKey, not title.
+    let t = text.trim()
+        .replace(/^Concentration\s+in\s+(.+)$/i, '$1 Concentration')
+        .trim();
     const s = t.toLowerCase();
     // Suppress instructional preambles that don't define a new section
     // (these appear as courselistcomment rows under an existing h2/h3 heading)
@@ -1424,10 +1451,22 @@ function extractCourseLines(html) {
 // false-flagging different wording for the same category.
 function classifySection(sectionText) {
     const s = sectionText.toLowerCase();
-    if (/\belective/.test(s) || /\bcomplete\s+one\s+of/.test(s) || /\bchoose\s/.test(s) || /\bselect\s/.test(s)) {
-        return 'elective';
+    // Explicit required/core markers win over elective keywords.
+    if (/\brequired\s+core\b/.test(s) || /^required\s*$/i.test(s) || /^core\b/i.test(s)) {
+        return 'required';
     }
-    // "required", "core", "complete all", or generic instruction → required/core
+    if (/\bcomplete\s+all\b/.test(s)) return 'required';
+    // Elective patterns. A section is an "elective list" if it describes a
+    // choice among multiple courses — choose/select/any/in consultation/from the
+    // following/semester hours from, etc.
+    if (/\belective/.test(s)) return 'elective';
+    if (/\b(choose|select)\b/.test(s)) return 'elective';
+    if (/\bcomplete\s+\w+\s+of\s+the\s+following/.test(s)) return 'elective';
+    if (/\bcomplete\s+\d+\s+(?:semester\s+)?(?:sh|s\.h\.|hours?|credits?)\s+(?:from|based|in|with)/.test(s)) return 'elective';
+    if (/\bin consultation\s+with/.test(s)) return 'elective';
+    if (/\bfrom the following\b/.test(s)) return 'elective';
+    if (/\bany\s+\d+/.test(s)) return 'elective';
+    // Default to required for strict/unknown markers.
     return 'required';
 }
 
@@ -1435,21 +1474,48 @@ function classifySection(sectionText) {
 // Compares using case-insensitive normalization but preserves original structured data
 // Headers are excluded from diff matching and re-inserted as context rows
 function diffLines(oldLines, newLines) {
-    // Separate headers from courses, tracking which header precedes each course
+    // Within each stretch of consecutive non-header lines (i.e. an elective
+    // list under a single subheading), sort courses by code. Elective lists
+    // are semantically sets — the same courses in a different order is not a
+    // real curriculum change — so canonicalizing order lets LCS match 1-to-1.
+    function canonicalize(lines) {
+        const out = [];
+        let buffer = [];
+        const flush = () => {
+            if (buffer.length) {
+                buffer.sort((a, b) =>
+                    (a.key || a.code || '').localeCompare(b.key || b.code || ''));
+                out.push(...buffer);
+                buffer = [];
+            }
+        };
+        for (const l of lines) {
+            if (l.isHeader) { flush(); out.push(l); }
+            else buffer.push(l);
+        }
+        flush();
+        return out;
+    }
+    oldLines = canonicalize(oldLines);
+    newLines = canonicalize(newLines);
+
+    // Separate headers from courses, tracking ALL consecutive headers that
+    // precede each course. (Previously only kept the last header, which lost
+    // concentration-level headings when a sub-heading like "Required" followed.)
     function splitHeadersAndCourses(lines) {
         const courses = [];
-        const headerMap = {}; // courseIndex -> header item
-        let lastHeader = null;
+        const headersMap = {}; // courseIndex -> array of header items
+        let pendingHeaders = [];
         for (const line of lines) {
             if (line.isHeader) {
-                lastHeader = line;
+                pendingHeaders.push(line);
             } else {
-                headerMap[courses.length] = lastHeader;
+                headersMap[courses.length] = pendingHeaders;
                 courses.push(line);
-                lastHeader = null;
+                pendingHeaders = [];
             }
         }
-        return { courses, headerMap };
+        return { courses, headersMap };
     }
     const oldSplit = splitHeadersAndCourses(oldLines);
     const newSplit = splitHeadersAndCourses(newLines);
@@ -1488,24 +1554,41 @@ function diffLines(oldLines, newLines) {
     const usedRightHeaders = new Set();
     const emptyHeader = {key: '', code: '', title: '', hours: '', isHeader: true};
     for (const d of courseDiff) {
-        const lh = d.leftIdx !== null ? oldSplit.headerMap[d.leftIdx] : null;
-        const rh = d.rightIdx !== null ? newSplit.headerMap[d.rightIdx] : null;
-        const showLeft = lh && !usedLeftHeaders.has(lh.title);
-        const showRight = rh && !usedRightHeaders.has(rh.title);
-
-        if (showLeft && showRight && normForCompare(lh.title) === normForCompare(rh.title)) {
-            // Same header on both sides — single row
-            result.push({type: 'same', left: lh, right: rh});
-            usedLeftHeaders.add(lh.title);
-            usedRightHeaders.add(rh.title);
-        } else {
-            if (showLeft) {
-                result.push({type: 'same', left: lh, right: emptyHeader});
+        const lHdrs = d.leftIdx !== null ? (oldSplit.headersMap[d.leftIdx] || []) : [];
+        const rHdrs = d.rightIdx !== null ? (newSplit.headersMap[d.rightIdx] || []) : [];
+        // Emit each pre-course header in order. Headers with matching (normalized)
+        // titles on both sides are rendered as a single combined row; otherwise
+        // the side-specific header is rendered with an empty cell opposite.
+        const maxH = Math.max(lHdrs.length, rHdrs.length);
+        for (let k = 0; k < maxH; k++) {
+            const lh = lHdrs[k] || null;
+            const rh = rHdrs[k] || null;
+            const showLeft = lh && !usedLeftHeaders.has(lh.title);
+            const showRight = rh && !usedRightHeaders.has(rh.title);
+            if (showLeft && showRight && headerMatchKey(lh.title) === headerMatchKey(rh.title)) {
+                // When both sides' headers normalize to the same key, prefer the
+                // title that contains the word "Concentration" so the rendered
+                // output consistently shows "X Concentration" on both sides.
+                const lHasConc = /\bconcentration\b/i.test(lh.title);
+                const rHasConc = /\bconcentration\b/i.test(rh.title);
+                let displayTitle;
+                if (lHasConc && !rHasConc) displayTitle = lh.title;
+                else if (rHasConc && !lHasConc) displayTitle = rh.title;
+                else displayTitle = lh.title.length >= rh.title.length ? lh.title : rh.title;
+                const lOut = {...lh, title: displayTitle};
+                const rOut = {...rh, title: displayTitle};
+                result.push({type: 'same', left: lOut, right: rOut});
                 usedLeftHeaders.add(lh.title);
-            }
-            if (showRight) {
-                result.push({type: 'same', left: emptyHeader, right: rh});
                 usedRightHeaders.add(rh.title);
+            } else {
+                if (showLeft) {
+                    result.push({type: 'same', left: lh, right: emptyHeader});
+                    usedLeftHeaders.add(lh.title);
+                }
+                if (showRight) {
+                    result.push({type: 'same', left: emptyHeader, right: rh});
+                    usedRightHeaders.add(rh.title);
+                }
             }
         }
         // Mark courses that match but moved between section categories
