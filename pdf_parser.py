@@ -284,7 +284,8 @@ def parse_pdf(data):
             # not overwrite the current section heading or the classifier loses
             # the elective-signaling keywords.
             noise_re = re.compile(
-                r'^\s*(?:course\s+list|code\s+title\s+hours?|page\s+\d+(?:\s+of\s+\d+)?)\s*$',
+                r'^\s*(?:course\s+list|code\s+title\s+hours?|page\s+\d+(?:\s+of\s+\d+)?'
+                r'|transfer|catalog|overview|description|admissions?|notes?)\s*$',
                 re.I,
             )
             text_section_heading = current_heading
@@ -295,27 +296,71 @@ def parse_pdf(data):
             # up as one section label with the key elective-signaling phrases.
             pending_heading_parts = []
 
+            curriculum_heading_re = re.compile(
+                r'^(required core|core requirements?|elective|restricted electives?|'
+                r'general electives?|electives? list|electives? option|experiential learning|'
+                r'concentration|program requirements?|optional co-op experience)\b',
+                re.I,
+            )
+
             def commit_pending():
                 nonlocal text_section_heading, pending_heading_parts
-                if pending_heading_parts:
+                if not pending_heading_parts:
+                    return
+                # Prefer a recognized curriculum-section line if present —
+                # trailing fragments (multi-line comments) are appended so the
+                # elective classifier still sees the keywords.
+                curr_idx = None
+                for i, p in enumerate(pending_heading_parts):
+                    if curriculum_heading_re.match(p.strip()):
+                        curr_idx = i
+                        break
+                if curr_idx is not None:
+                    kept = pending_heading_parts[curr_idx:]
+                    text_section_heading = ' '.join(kept).strip()
+                else:
                     text_section_heading = ' '.join(pending_heading_parts).strip()
-                    pending_heading_parts = []
+                pending_heading_parts = []
+
+            # Track codes already emitted by table parsing (to avoid double-counting
+            # a course that came from a properly-extracted table cell).
+            emitted_codes = {r['code'].strip().upper() for s in sections for r in s.get('courses', []) if not r.get('is_header')}
 
             for l in lines:
-                if line_in_any_table(l):
-                    continue
                 txt = l['text'].strip()
                 if not txt:
                     continue
                 cm = line_course_re.match(txt) or line_or_course_re.match(txt)
+                # Lines inside a detected table that don't match a course shape
+                # belong to the table extractor — skip in the text fallback so
+                # we don't accidentally stomp headings with cell fragments.
+                # Course-shaped lines, however, are processed here even when
+                # inside a table bbox: pdfplumber sometimes fails to extract them
+                # as rows ("Or BIOT 7244 ..." under the Required Core table).
+                if not cm and line_in_any_table(l):
+                    continue
                 if cm:
-                    commit_pending()
                     or_m = line_or_course_re.match(txt)
+                    # Dedup against codes already emitted by table parsing
+                    candidate_code = (
+                        f'{or_m.group(2)} {or_m.group(3)}' if or_m
+                        else f'{cm.group(1)} {cm.group(2)}'
+                    ).strip().upper()
+                    if candidate_code in emitted_codes and not or_m:
+                        pending_heading_parts = []
+                        continue
+                    emitted_codes.add(candidate_code)
                     if or_m:
                         prefix = or_m.group(1).lower()
                         code = f'{prefix} {or_m.group(2)} {or_m.group(3)}'
                         title = or_m.group(4).strip()
+                        # Or/And alternatives belong with the preceding primary
+                        # course row. Ignore any pending heading fragments that
+                        # appeared between the primary and this alternative —
+                        # they're form-metadata noise, not a real section break.
+                        pending_heading_parts = []
                     else:
+                        commit_pending()
                         code = f'{cm.group(1)} {cm.group(2)}'
                         title = cm.group(3).strip()
                     hrs_m = re.search(r'\s+(\d+(?:-\d+)?)\s*$', title)
