@@ -1063,7 +1063,7 @@ function cleanCurriculumHtml(html) {
     // (e.g., "Process Sciences Focus"). "Pathway" is NOT in this list — pathways
     // (Program Pathway, Project Pathway) are meaningful structural choices.
     const DECORATIVE_SUFFIX_RE = /\b(focus|track|area|group)s?\s*$/i;
-    div.querySelectorAll('tr.areaheader').forEach(tr => {
+    div.querySelectorAll('tr.areaheader, tr.areasubheader').forEach(tr => {
         const text = (tr.textContent || '').trim();
         if (!text) return;
         const isChoice = CHOICE_RE.test(text);
