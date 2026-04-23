@@ -243,8 +243,11 @@ def build_static_site():
 
     # Propagate Boston's custom override to non-Boston deployments so their
     # Compare tab sees the same umbrella reference (matches app.py's runtime
-    # /api/program/<id>/reference logic).
+    # /api/program/<id>/reference logic). Deployments that already have their
+    # own override keep it.
     for deployment_id, boston_id in deployment_to_boston.items():
+        if deployment_id in overrides:
+            continue
         boston_custom_id = overrides.get(boston_id)
         if not boston_custom_id:
             continue
