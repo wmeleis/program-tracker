@@ -351,6 +351,31 @@ def api_session_check():
     return jsonify(result), status_code
 
 
+@app.route('/api/heal', methods=['POST'])
+def api_heal():
+    """On-demand lightweight heal: re-query live Approve Pages for each
+    tracked role and clear stale `current_step` values where the DB has a
+    program at a role but live does not. ~30s; no per-program fetches.
+
+    Mirrors the logic in the post-scan validation pass so staleness that
+    outlasts a scan (CourseLeaf pending-list cache persisting through the
+    scan's double-check window) can be fixed without waiting for the next
+    scheduled scan.
+    """
+    from scraper import heal_stale_program_steps
+    session = check_courseleaf_session()
+    if not session.get('ok'):
+        return jsonify({
+            'error': session.get('error', 'session_invalid'),
+            'detail': session.get('detail', 'CourseLeaf session invalid'),
+        }), 503
+    try:
+        warnings, healed = heal_stale_program_steps(log=True)
+        return jsonify({'warnings': warnings, 'healed': healed})
+    except Exception as e:
+        return jsonify({'error': 'heal_failed', 'detail': str(e)}), 500
+
+
 @app.route('/api/scan/trigger', methods=['POST'])
 def api_scan_trigger():
     """Trigger a manual scan.
@@ -425,6 +450,31 @@ def api_scan_trigger():
                 # Regulatory fetch is best-effort — a missing SharePoint tab
                 # or expired session must not block the rest of the scan.
                 print(f"Regulatory fetch error: {e}")
+
+            # Weekly historical sweep: if >=7 days since the last sweep, re-walk
+            # all CIM program IDs so completed programs' data stays fresh.
+            scan_status['phase'] = 'Checking historical sweep...'
+            scan_status['progress'] = 87
+            try:
+                from database import get_db
+                from scraper import sweep_all_program_ids
+                with get_db() as conn:
+                    last = conn.execute(
+                        "SELECT scan_time FROM scans WHERE programs_scanned = -1 "
+                        "ORDER BY scan_time DESC LIMIT 1"
+                    ).fetchone()
+                last_iso = last['scan_time'] if last else None
+                due = True
+                if last_iso:
+                    last_dt = datetime.fromisoformat(last_iso)
+                    due = (datetime.now() - last_dt).days >= 7
+                if due:
+                    scan_status['phase'] = 'Weekly historical sweep...'
+                    sweep_all_program_ids(start_id=1, end_id=2100, log=True)
+            except Exception as e:
+                # Sweep is a background refresh — failures shouldn't break the
+                # main scan or the static export that follows.
+                print(f"Historical sweep error: {e}")
 
             # Auto-export and deploy to GitHub Pages
             scan_status['phase'] = 'Exporting & deploying...'

@@ -526,6 +526,16 @@ function getDaysAtStep(program) {
     return Math.floor((new Date() - d) / 86400000);
 }
 
+// Format a completion date for the Days column on completed rows.
+// Accepts ISO or the "Tue, 03 Feb 2026 17:21:11 GMT" CIM format; returns
+// "Approved MM/DD/YYYY" (or the raw string if we can't parse it).
+function formatCompletionDate(s) {
+    if (!s) return 'Approved';
+    const d = new Date(s);
+    if (isNaN(d)) return 'Approved ' + s;
+    return 'Approved ' + (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+}
+
 function setSmartView(view) {
     smartView = view;
     document.querySelectorAll('.smart-view-btn').forEach(btn => {
@@ -639,6 +649,22 @@ function renderPipeline(pipeline, baseFiltered) {
             </div>
         `;
     }).join('');
+
+    // "Complete" tile — programs & courses that finished the workflow.
+    // No count by design; it shows up as a label-only tile (users treat
+    // this as a filter toggle, not a queue size). Courses view doesn't
+    // have a completion_date field today, so hide the tile there.
+    if (!isCourseView) {
+        const completeActive = pipelineFilter === '__complete__' ? ' active' : '';
+        const allComplete = (allPrograms || []).filter(p => p.completion_date).length;
+        html += `
+            <div class="pipeline-step pipeline-step-label${completeActive}"
+                 onclick="togglePipelineFilter('__complete__')"
+                 title="Completed programs (${allComplete} total in history)">
+                <span class="step-name">Complete</span>
+            </div>
+        `;
+    }
     bar.innerHTML = html;
 }
 
@@ -754,11 +780,16 @@ async function applyFilters() {
         : null;
     let filtered = baseFiltered.filter(p => {
         if (pipelineFilter === '__college__' && !collegeDetector(p.current_step)) return false;
+        if (pipelineFilter === '__complete__') {
+            return !!p.completion_date;
+        }
         if (pipelineFilter && pipelineFilter !== '__college__') {
             if (bucketDef) {
                 if (!bucketDef.match(p.current_step)) return false;
             } else if (p.current_step !== pipelineFilter) return false;
         }
+        // Default: hide completed programs unless the Complete tile is active
+        if (!pipelineFilter && p.completion_date && !p.current_step) return false;
         return true;
     });
 
@@ -840,31 +871,43 @@ function renderTable(items) {
         const itemTitle = isCourseView ? item.code : item.name;
         const itemDisplay = isCourseView ? `${item.code}: ${item.title}` : item.name;
         const collegeDisplay = abbreviateCollege(item.college);
-        const progress = item.total_steps > 0 ? (item.completed_steps / item.total_steps * 100) : 0;
-        const progressClass = progress < 33 ? 'early' : progress < 66 ? 'mid' : 'late';
+        const isComplete = !!item.completion_date && !item.current_step;
+        const progress = isComplete ? 100 :
+            (item.total_steps > 0 ? (item.completed_steps / item.total_steps * 100) : 0);
+        const progressClass = isComplete ? 'complete' :
+            (progress < 33 ? 'early' : progress < 66 ? 'mid' : 'late');
         const rowClass =
-            item.status === 'Added' ? 'row-added' :
-            item.status === 'Edited' ? 'row-edited' :
-            item.status === 'Deactivated' ? 'row-deactivated' : 'row-edited';
+            (item.status === 'Added' ? 'row-added' :
+             item.status === 'Edited' ? 'row-edited' :
+             item.status === 'Deactivated' ? 'row-deactivated' : 'row-edited') +
+            (isComplete ? ' row-complete' : '');
         const days = getDaysAtStep(item);
         const daysClass = days < 14 ? 'fresh' : days < STUCK_THRESHOLD_DAYS ? 'aging' : 'stuck';
+
+        const stepCellText = isComplete
+            ? `<em class="muted">Approved</em>`
+            : (item.current_step || '—');
+        const progressCell = isComplete
+            ? `<div class="progress-container">
+                <div class="progress-bar"><div class="progress-fill complete" style="width:100%"></div></div>
+                <span class="progress-text">${item.total_steps}/${item.total_steps}</span>
+               </div>`
+            : `<div class="progress-container">
+                <div class="progress-bar"><div class="progress-fill ${progressClass}" style="width: ${progress}%"></div></div>
+                <span class="progress-text">${item.completed_steps}/${item.total_steps}</span>
+               </div>`;
+        const daysCell = isComplete
+            ? `<span class="days-at-step complete" title="Approved on ${escapeHtml(item.completion_date || '')}">${escapeHtml(formatCompletionDate(item.completion_date))}</span>`
+            : `<span class="days-at-step ${daysClass}" title="Days at current step">${days}d</span>`;
 
         html += `
             <tr class="program-row ${rowClass} ${expanded ? 'expanded' : ''}"
                 onclick="toggleRow('${id}')">
                 <td><strong>${escapeHtml(itemDisplay)}</strong></td>
                 <td title="${escapeHtml(item.college || '')}">${escapeHtml(collegeDisplay)}</td>
-                <td>${escapeHtml(item.current_step || '—')}</td>
-                <td>
-                    <div class="progress-container">
-                        <div class="progress-bar">
-                            <div class="progress-fill ${progressClass}"
-                                 style="width: ${progress}%"></div>
-                        </div>
-                        <span class="progress-text">${item.completed_steps}/${item.total_steps}</span>
-                    </div>
-                </td>
-                <td><span class="days-at-step ${daysClass}" title="Days at current step">${days}d</span></td>
+                <td>${stepCellText}</td>
+                <td>${progressCell}</td>
+                <td>${daysCell}</td>
             </tr>
         `;
 
