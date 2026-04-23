@@ -1258,6 +1258,274 @@ def fetch_reference_curricula(program_ids, batch_size=10):
     return fetched
 
 
+# ---------------------------------------------------------------------------
+# Regulatory approved-curriculum fetch (from GlobalRegulatoryAffairs SharePoint)
+# ---------------------------------------------------------------------------
+
+# 1:1 mapping between campus name (as it appears in CIM program names) and
+# the SharePoint filename prefix (and the workbook itself).
+REGULATORY_CAMPUS_FILES = {
+    'Vancouver': 'BC Approved Courses.xlsx',
+    'Miami':     'FL Approved Courses.xlsx',
+    'Portland':  'ME Approved Courses.xlsx',
+    'Charlotte': 'NC Approved Courses.xlsx',
+    'Toronto':   'Ontario Approved Courses.xlsx',
+    'Arlington': 'VA Approved Courses.xlsx',
+    'Seattle':   'WA Approved Courses.xlsx',
+}
+
+# Path of the SharePoint folder containing the workbooks. Changing this is
+# the single point of control if the curriculum committee moves the files.
+_REGULATORY_FOLDER_URL = (
+    "/sites/GlobalRegulatoryAffairs/Shared%20Documents/Resources/"
+    "Master%20Portfolio/CURRENT%20APPROVED%20CURRICULUM"
+)
+
+# Chrome tab match substring for SharePoint (any tab on the GRA site works).
+_REGULATORY_TAB_MATCH = "sharepoint.com/sites/GlobalRegulatoryAffairs"
+
+
+def _download_regulatory_workbooks():
+    """Fetch the 7 workbook .xlsx files from SharePoint via the logged-in session.
+
+    Uses the same Chrome/AppleScript bridge the CourseLeaf scraper relies on.
+    The SharePoint REST endpoint `/_api/web/GetFileByServerRelativeUrl(...)/$value`
+    returns the file bytes when the browser has an authenticated session cookie.
+
+    Returns:
+        dict of {campus: bytes or None}. A None value means the download failed.
+    """
+    import base64 as _b64
+
+    # Kick off all 7 downloads in parallel; each writes base64 result into
+    # window.__regwb[<campus>] so Python can pull them after.
+    files_json = json.dumps([
+        {'campus': c, 'filename': fn}
+        for c, fn in REGULATORY_CAMPUS_FILES.items()
+    ])
+    folder_url = _REGULATORY_FOLDER_URL
+
+    kickoff_js = f'''
+(function(){{
+    window.__regwb = {{}};
+    window.__regwb_status = "running";
+    var files = {files_json};
+    var folder = "{folder_url}";
+
+    function fetchOne(entry) {{
+        var encoded = encodeURIComponent(entry.filename);
+        var url = location.origin +
+            "/sites/GlobalRegulatoryAffairs/_api/web/GetFileByServerRelativeUrl('" +
+            folder + "/" + encoded + "')/$value";
+        return new Promise(function(resolve) {{
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url, true);
+            xhr.responseType = "arraybuffer";
+            xhr.onload = function(){{
+                if (xhr.status >= 200 && xhr.status < 300) {{
+                    var b = new Uint8Array(xhr.response);
+                    var bin = "";
+                    // Chunk-wise to avoid call-stack limits on very large files
+                    var step = 32768;
+                    for (var i = 0; i < b.length; i += step) {{
+                        bin += String.fromCharCode.apply(null, b.subarray(i, i+step));
+                    }}
+                    window.__regwb[entry.campus] = {{ status: xhr.status, len: b.length, b64: btoa(bin) }};
+                }} else {{
+                    window.__regwb[entry.campus] = {{ status: xhr.status, error: "http" }};
+                }}
+                resolve();
+            }};
+            xhr.onerror = function(){{
+                window.__regwb[entry.campus] = {{ error: "network" }};
+                resolve();
+            }};
+            xhr.send();
+        }});
+    }}
+
+    Promise.all(files.map(fetchOne)).then(function(){{
+        window.__regwb_status = "done";
+    }}).catch(function(e){{
+        window.__regwb_status = "error:" + (e && e.message || e);
+    }});
+    return "fired";
+}})();
+'''
+    fired = run_js_in_tab(_REGULATORY_TAB_MATCH, kickoff_js, match_by='url', timeout=30)
+    if not fired or fired == 'missing value':
+        print("  SharePoint tab not open — skipping regulatory fetch")
+        return {c: None for c in REGULATORY_CAMPUS_FILES}
+
+    # Poll for completion
+    status_js = 'window.__regwb_status || "missing"'
+    for _ in range(90):  # up to 180s
+        time.sleep(2)
+        status = run_js_in_tab(_REGULATORY_TAB_MATCH, status_js, match_by='url', timeout=15)
+        if status == "done":
+            break
+        if status and status.startswith("error:"):
+            print(f"  Regulatory fetch JS error: {status}")
+            break
+    else:
+        print("  Regulatory fetch timed out after 180s")
+
+    # Pull each workbook's base64 in chunks
+    results = {}
+    for campus in REGULATORY_CAMPUS_FILES:
+        meta_js = (
+            'JSON.stringify(window.__regwb && window.__regwb[' + json.dumps(campus) +
+            '] ? {status: window.__regwb[' + json.dumps(campus) + '].status || null,'
+            ' len: window.__regwb[' + json.dumps(campus) + '].len || 0,'
+            ' b64len: (window.__regwb[' + json.dumps(campus) + '].b64 || "").length,'
+            ' error: window.__regwb[' + json.dumps(campus) + '].error || null} : null)'
+        )
+        meta = run_js_in_tab(_REGULATORY_TAB_MATCH, meta_js, match_by='url', timeout=15)
+        if not meta or meta == 'missing value' or meta == 'null':
+            print(f"  {campus}: no download result")
+            results[campus] = None
+            continue
+        try:
+            m = json.loads(meta)
+        except json.JSONDecodeError:
+            results[campus] = None
+            continue
+        if m.get('error') or not m.get('b64len'):
+            err = m.get('error') or f"status {m.get('status')}"
+            print(f"  {campus}: download failed ({err})")
+            results[campus] = None
+            continue
+        total = m['b64len']
+        chunk = 200000
+        parts = []
+        for offset in range(0, total, chunk):
+            js = (
+                'window.__regwb[' + json.dumps(campus) + '].b64.substr(' +
+                f'{offset},{chunk})'
+            )
+            part = run_js_in_tab(_REGULATORY_TAB_MATCH, js, match_by='url', timeout=30)
+            if part and part != 'missing value':
+                parts.append(part)
+        try:
+            data = _b64.b64decode(''.join(parts))
+        except Exception as e:
+            print(f"  {campus}: base64 decode failed ({e})")
+            results[campus] = None
+            continue
+        if len(data) != m['len']:
+            print(f"  {campus}: length mismatch (expected {m['len']}, got {len(data)})")
+        results[campus] = data
+        print(f"  {campus}: downloaded {len(data)} bytes from {REGULATORY_CAMPUS_FILES[campus]}")
+
+    # Clean up window state
+    run_js_in_tab(_REGULATORY_TAB_MATCH,
+                  'try{delete window.__regwb; delete window.__regwb_status;}catch(e){}',
+                  match_by='url', timeout=10)
+
+    return results
+
+
+def fetch_regulatory_approved(program_ids):
+    """Download the 7 regulatory workbooks from SharePoint and match them to
+    CIM programs in `program_ids`. Upserts `regulatory_approved_courses`.
+
+    Requires a Chrome tab open on the GlobalRegulatoryAffairs SharePoint site
+    (any page on that site will have the auth cookie).
+
+    Returns (matched_count, unmatched_count, skipped_campuses_count).
+    """
+    import json as _json
+    from database import (
+        upsert_regulatory_approved, delete_regulatory_approved, get_db,
+    )
+    try:
+        from xlsx_parser import parse_workbook, match_sheets_to_programs
+    except ImportError as e:
+        print(f"  xlsx_parser unavailable: {e}")
+        return (0, 0, 0)
+
+    if not program_ids:
+        return (0, 0, 0)
+
+    print("\nFetching regulatory approved curricula from SharePoint...")
+    workbooks = _download_regulatory_workbooks()
+    skipped = sum(1 for v in workbooks.values() if v is None)
+
+    # Build {campus: [cim_program_dict]} for programs that are in program_ids
+    # AND have a campus parenthetical matching one of the regulatory campuses.
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, name, curriculum_html FROM programs WHERE id IN "
+            f"({','.join('?'*len(program_ids))})",
+            program_ids,
+        ).fetchall()
+
+    by_campus = {c: [] for c in REGULATORY_CAMPUS_FILES}
+    all_scan_ids_per_campus = {c: [] for c in REGULATORY_CAMPUS_FILES}
+    for row in rows:
+        _base, campus = _parse_campus_from_name(row['name'])
+        if campus not in REGULATORY_CAMPUS_FILES:
+            continue
+        codes = set()
+        if row['curriculum_html']:
+            for m in re.finditer(r'\b([A-Z]{2,5})\s*(\d{4}[A-Z]?)\b', row['curriculum_html']):
+                codes.add(f"{m.group(1)} {m.group(2)}")
+        by_campus[campus].append({
+            'id': row['id'],
+            'name': row['name'],
+            'curriculum_codes': codes,
+        })
+        all_scan_ids_per_campus[campus].append(row['id'])
+
+    total_matched = 0
+    total_unmatched = 0
+
+    for campus, cim_programs in by_campus.items():
+        if not cim_programs:
+            continue
+        data = workbooks.get(campus)
+        if data is None:
+            # Workbook download failed — don't touch any existing rows.
+            total_unmatched += len(cim_programs)
+            continue
+        try:
+            sheets = parse_workbook(data)
+        except Exception as e:
+            print(f"  {campus}: parse error {e}")
+            total_unmatched += len(cim_programs)
+            continue
+
+        matches = match_sheets_to_programs(sheets, cim_programs, campus)
+        matched_ids = set()
+        for m in matches:
+            sheet = sheets[m['sheet_index']]
+            upsert_regulatory_approved(
+                program_id=m['program_id'],
+                campus=campus,
+                source_file=REGULATORY_CAMPUS_FILES[campus],
+                sheet_name=sheet['sheet_name'],
+                sheet_title=sheet.get('title', ''),
+                edited_by=sheet.get('edited_by', ''),
+                unit_header=sheet.get('unit_header', ''),
+                confidence=m['confidence'],
+                match_reason=m['reason'],
+                courses_json=_json.dumps(sheet.get('courses', [])),
+                sections_json=_json.dumps(sheet.get('sections', [])),
+            )
+            matched_ids.add(m['program_id'])
+        # Clear rows for scanned programs that no longer match (workbook changed).
+        for pid in all_scan_ids_per_campus[campus]:
+            if pid not in matched_ids:
+                delete_regulatory_approved(pid)
+        total_matched += len(matched_ids)
+        total_unmatched += (len(cim_programs) - len(matched_ids))
+        print(f"  {campus}: matched {len(matched_ids)}/{len(cim_programs)} CIM programs")
+
+    print(f"Regulatory approved: {total_matched} matched, "
+          f"{total_unmatched} unmatched, {skipped} workbook(s) unavailable")
+    return (total_matched, total_unmatched, skipped)
+
+
 def scrape_courses_from_role(role_name):
     """Select a role on Approve Pages and extract pending courses.
 
