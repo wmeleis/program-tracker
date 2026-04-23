@@ -279,6 +279,13 @@ def parse_pdf(data):
             line_course_re = re.compile(r'^([A-Z]{2,5})\s+(\d{4}[A-Z]?)\s+(.+)$')
             line_or_course_re = re.compile(r'^or\s+([A-Z]{2,5})\s+(\d{4}[A-Z]?)\s+(.+)$', re.I)
 
+            # Noise lines that are PDF page-header / column-header bleed — must
+            # not overwrite the current section heading or the classifier loses
+            # the elective-signaling keywords.
+            noise_re = re.compile(
+                r'^\s*(?:course\s+list|code\s+title\s+hours?|page\s+\d+(?:\s+of\s+\d+)?)\s*$',
+                re.I,
+            )
             text_section_heading = current_heading
             text_rows = []
             # Accumulate non-course lines as the pending heading; concatenate so
@@ -317,6 +324,10 @@ def parse_pdf(data):
                         '_section': text_section_heading,
                     })
                 else:
+                    # Skip PDF column-header / page-header bleed so it doesn't
+                    # stomp the current section heading.
+                    if noise_re.match(txt):
+                        continue
                     # Flush any already-collected course rows so they stay with
                     # the previous heading, then start accumulating a new one.
                     if text_rows:
