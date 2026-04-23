@@ -179,7 +179,7 @@ def _tag_concentration_headings(html):
 
 _TR_RE = re.compile(r'<tr\b[^>]*>.*?</tr>', re.DOTALL | re.I)
 _CODECOL_RE = re.compile(
-    r'<td[^>]*\bcodecol\b[^>]*>(?:<[^>]+>|\s)*(?:or\s+)?(?:<[^>]+>)*([A-Z]{2,5}\s*\d{4}[A-Z]?)',
+    r'<td[^>]*\bcodecol\b[^>]*>(?:<[^>]+>|\s)*(?:(?:or|and)\s+)?(?:<[^>]+>)*([A-Z]{2,5}\s*\d{4}[A-Z]?)',
     re.I,
 )
 

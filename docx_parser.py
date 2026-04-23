@@ -32,8 +32,8 @@ W = f'{{{NS["w"]}}}'
 
 # Course code pattern: 2-5 uppercase letters, optional space or nbsp, 4 digits, optional suffix letter
 COURSE_CODE_RE = re.compile(r'^([A-Z]{2,5})\s*(\d{4}[A-Z]?)\b')
-# "or BIOT 6214" / "or NNMD 5370" — alternative course in an or-class row
-OR_COURSE_CODE_RE = re.compile(r'^or\s+([A-Z]{2,5}\s*\d{4}[A-Z]?)\b(.*)$', re.I)
+# "or BIOT 6214" / "and BIOT 5630" — alternative/additional course row
+OR_COURSE_CODE_RE = re.compile(r'^(or|and)\s+([A-Z]{2,5}\s*\d{4}[A-Z]?)\b(.*)$', re.I)
 
 
 def _paragraph_text_and_style(p):
@@ -148,15 +148,16 @@ def _parse_table(tbl):
                 'hours': hours.strip(),
             })
         elif (m := OR_COURSE_CODE_RE.match(code_cell)):
-            code = _normalize_code(m.group(1))
-            rest = m.group(2).strip()
+            prefix = m.group(1).lower()
+            code = _normalize_code(m.group(2))
+            rest = m.group(3).strip()
             title = cells[1] if len(cells) > 1 and cells[1].strip() else rest
             hours = cells[2] if len(cells) > 2 else ''
             rows.append({
                 'is_header': False,
-                # Preserve "or" prefix in display — Compare strips it when
-                # normalizing for diff matching, so it's purely visual.
-                'code': f'or {code}',
+                # Preserve "or"/"and" prefix in display — Compare strips it
+                # when normalizing for diff matching, so it's purely visual.
+                'code': f'{prefix} {code}',
                 'title': title,
                 'hours': hours.strip(),
             })

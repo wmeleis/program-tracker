@@ -16,7 +16,7 @@ import pdfplumber
 
 # Course code pattern: 2-5 uppercase letters, optional space/nbsp, 4 digits
 COURSE_CODE_RE = re.compile(r'^([A-Z]{2,5})\s*(\d{4}[A-Z]?)\b')
-OR_COURSE_CODE_RE = re.compile(r'^or\s+([A-Z]{2,5}\s*\d{4}[A-Z]?)\b(.*)$', re.I)
+OR_COURSE_CODE_RE = re.compile(r'^(or|and)\s+([A-Z]{2,5}\s*\d{4}[A-Z]?)\b(.*)$', re.I)
 
 
 def _normalize(s):
@@ -62,13 +62,14 @@ def _parse_table(table):
                 'hours': hours.strip(),
             })
         elif (m := OR_COURSE_CODE_RE.match(code_cell)):
-            code = _normalize(m.group(1))
-            rest = m.group(2).strip()
+            prefix = m.group(1).lower()
+            code = _normalize(m.group(2))
+            rest = m.group(3).strip()
             title = cells[1] if len(cells) > 1 and cells[1].strip() else rest
             hours = cells[2] if len(cells) > 2 else ''
             rows.append({
                 'is_header': False,
-                'code': f'or {code}',
+                'code': f'{prefix} {code}',
                 'title': title,
                 'hours': hours.strip(),
             })
@@ -277,7 +278,7 @@ def parse_pdf(data):
                 return False
 
             line_course_re = re.compile(r'^([A-Z]{2,5})\s+(\d{4}[A-Z]?)\s+(.+)$')
-            line_or_course_re = re.compile(r'^or\s+([A-Z]{2,5})\s+(\d{4}[A-Z]?)\s+(.+)$', re.I)
+            line_or_course_re = re.compile(r'^(or|and)\s+([A-Z]{2,5})\s+(\d{4}[A-Z]?)\s+(.+)$', re.I)
 
             # Noise lines that are PDF page-header / column-header bleed — must
             # not overwrite the current section heading or the classifier loses
@@ -309,11 +310,14 @@ def parse_pdf(data):
                 cm = line_course_re.match(txt) or line_or_course_re.match(txt)
                 if cm:
                     commit_pending()
-                    is_or = bool(line_or_course_re.match(txt))
-                    code = f'{cm.group(1)} {cm.group(2)}'
-                    if is_or:
-                        code = f'or {code}'
-                    title = cm.group(3).strip()
+                    or_m = line_or_course_re.match(txt)
+                    if or_m:
+                        prefix = or_m.group(1).lower()
+                        code = f'{prefix} {or_m.group(2)} {or_m.group(3)}'
+                        title = or_m.group(4).strip()
+                    else:
+                        code = f'{cm.group(1)} {cm.group(2)}'
+                        title = cm.group(3).strip()
                     hrs_m = re.search(r'\s+(\d+(?:-\d+)?)\s*$', title)
                     hours = ''
                     if hrs_m:
