@@ -323,20 +323,17 @@ def _promote_program_pathway_section(sections):
     # appear together as a readable comparison, and the concentrations/electives
     # (shared between both) follow after.
     #
-    # The Program Pathway's distinct content is the "Options A/B/C" choice
-    # (BIOT 7244 / 7245 / 7246). In the source docx these rows live inside
-    # Core Requirements; we extract and show them under Program Pathway so the
-    # pathway's actual content is visible alongside its heading.
-    program_pathway_courses = _extract_options_abc_from_core(sections)
-    synthetic_courses = [
-        {'is_header': True,
-         'text': 'Students following the Program Pathway complete a concentration or the electives option (shown below), plus Option A, B, or C:'},
-    ]
-    synthetic_courses.extend(program_pathway_courses)
+    # Program Pathway has no content of its own in the source docx — the
+    # Options A/B/C live in Core Requirements and students following this
+    # pathway just take them as shown there. We just add a descriptive line
+    # referencing Core Requirements rather than duplicating the course rows.
     synthetic = {
         'heading': 'Program Pathway',
-        'courses': synthetic_courses,
-        'has_courses': bool(program_pathway_courses),
+        'courses': [
+            {'is_header': True,
+             'text': 'Students following the Program Pathway complete the Core Requirements (including the Option A, B, or C choice above) plus a concentration or the electives option (shown below).'},
+        ],
+        'has_courses': False,
     }
     # Extract the existing Project Pathway section so we can reposition it
     project_idx = next(
