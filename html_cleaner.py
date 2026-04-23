@@ -44,14 +44,25 @@ def _remove_labeled_section(html, heading_text):
     return pattern.sub('', html)
 
 
+REDUNDANT_COURSE_INTRO_RE = re.compile(
+    r'^complete\s+(?:the|a)\s+\d+\s+semester\s+hour.*?\bcourse\b',
+    re.I,
+)
+
+
 def _remove_decorative_areaheader_rows(html):
-    """Strip <tr class=\"...areaheader...\"> rows whose text ends in
-    Focus/Track/Area/Group and isn't a choice-marker row."""
-    def is_decorative(match):
+    """Strip <tr class=\"...areaheader...\"> rows that are:
+    - pure grouping labels ending in Focus/Track/Area/Group, OR
+    - redundant preambles like "Complete the 3 Semester Hours Project Course"
+      that are immediately followed by the course row anyway.
+    """
+    def should_remove(match):
         inner = match.group(0)
         text = _strip_tags(inner)
         if not text:
             return False
+        if REDUNDANT_COURSE_INTRO_RE.match(text):
+            return True
         if CHOICE_RE.search(text):
             return False
         return bool(DECORATIVE_SUFFIX_RE.search(text))
@@ -62,7 +73,7 @@ def _remove_decorative_areaheader_rows(html):
         r'<tr[^>]*\bareas?u?b?header\b[^>]*>.*?</tr>',
         re.DOTALL | re.I,
     )
-    return pattern.sub(lambda m: '' if is_decorative(m) else m.group(0), html)
+    return pattern.sub(lambda m: '' if should_remove(m) else m.group(0), html)
 
 
 def _remove_course_not_found(html):
