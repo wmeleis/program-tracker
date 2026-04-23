@@ -244,6 +244,52 @@ def _strip_campus_metadata_rows(sections):
     return sections
 
 
+def _extract_options_abc_from_core(sections):
+    """Find the 'Complete one of the following ... options' block in the
+    Core Requirements section and return its rows (the Option A/B/C headers
+    and their course entries). Returns [] if no such block is found.
+
+    Non-destructive: the rows remain in their original section.
+    """
+    # Find Core Requirements section
+    core_idx = next(
+        (i for i, sec in enumerate(sections)
+         if re.search(r'\bcore requirements?\b', sec['heading'], re.I)),
+        None,
+    )
+    if core_idx is None:
+        return []
+    rows = sections[core_idx]['courses']
+    # Find the "Complete one of the following ... options" header row
+    start = None
+    for i, r in enumerate(rows):
+        if r.get('is_header'):
+            text = r.get('text', '')
+            if re.search(r'complete\s+(?:one|any)\s+of\s+the\s+following.*options', text, re.I):
+                start = i
+                break
+    if start is None:
+        return []
+    # Collect rows from start until the next header that isn't an Option marker
+    collected = [rows[start]]
+    i = start + 1
+    while i < len(rows):
+        r = rows[i]
+        if r.get('is_header'):
+            text = r.get('text', '')
+            # Option A:/B:/C: continues the block
+            if re.match(r'^option\s+[A-Z]', text, re.I):
+                collected.append(r)
+                i += 1
+                continue
+            # Another kind of header ends the block
+            break
+        else:
+            collected.append(r)
+            i += 1
+    return collected
+
+
 def _promote_program_pathway_section(sections):
     """If the doc mentions 'Program Pathway' (in a pathway options form) and
     later has a 'Project Pathway' section, insert a synthetic 'Program Pathway'
@@ -272,18 +318,25 @@ def _promote_program_pathway_section(sections):
     if concentration_idx is None:
         return sections
 
-    # Insert a synthetic Program Pathway section heading with a brief descriptive
-    # row clarifying what this pathway consists of, and move the existing
+    # Insert a synthetic Program Pathway section heading, and move the existing
     # Project Pathway section to sit right after it. This way the two pathways
     # appear together as a readable comparison, and the concentrations/electives
     # (shared between both) follow after.
+    #
+    # The Program Pathway's distinct content is the "Options A/B/C" choice
+    # (BIOT 7244 / 7245 / 7246). In the source docx these rows live inside
+    # Core Requirements; we extract and show them under Program Pathway so the
+    # pathway's actual content is visible alongside its heading.
+    program_pathway_courses = _extract_options_abc_from_core(sections)
+    synthetic_courses = [
+        {'is_header': True,
+         'text': 'Students following the Program Pathway complete a concentration or the electives option (shown below), plus Option A, B, or C:'},
+    ]
+    synthetic_courses.extend(program_pathway_courses)
     synthetic = {
         'heading': 'Program Pathway',
-        'courses': [
-            {'is_header': True,
-             'text': 'Students following the Program Pathway complete a concentration or the electives option (shown below), plus Option A, B, or C from Core Requirements.'},
-        ],
-        'has_courses': False,
+        'courses': synthetic_courses,
+        'has_courses': bool(program_pathway_courses),
     }
     # Extract the existing Project Pathway section so we can reposition it
     project_idx = next(
