@@ -249,13 +249,21 @@ def _inline_hours_into_title(html):
         open_title, title_html, mid, hours_text, close = m.groups()
         hours = hours_text.replace('\xa0', ' ').strip()
         if not hours:
-            return m.group(0)
-        # Skip when hours isn't numeric (e.g. already empty or "Hours" header)
+            # Empty hours column: still drop the now-useless <td>
+            return f'{open_title}{title_html}</td>'
         if not re.match(r'^[\d.\-]+$', hours):
             return m.group(0)
-        return f'{open_title}{title_html.rstrip()} ({hours}SH){mid}{close}'
+        return f'{open_title}{title_html.rstrip()} ({hours}SH)</td>'
 
-    return pattern.sub(sub_one, html)
+    out = pattern.sub(sub_one, html)
+    # Also drop any remaining standalone hourscol <td> (e.g. in areaheader rows)
+    out = re.sub(
+        r'<td[^>]*\bhourscol\b[^>]*>[^<]*</td>',
+        '',
+        out,
+        flags=re.I,
+    )
+    return out
 
 
 def clean_curriculum_html(html):
