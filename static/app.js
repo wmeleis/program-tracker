@@ -1452,6 +1452,31 @@ function classifySection(sectionText) {
 // Compares using case-insensitive normalization but preserves original structured data
 // Headers are excluded from diff matching and re-inserted as context rows
 function diffLines(oldLines, newLines) {
+    // Within each stretch of consecutive non-header lines (i.e. an elective
+    // list under a single subheading), sort courses by code. Elective lists
+    // are semantically sets — the same courses in a different order is not a
+    // real curriculum change — so canonicalizing order lets LCS match 1-to-1.
+    function canonicalize(lines) {
+        const out = [];
+        let buffer = [];
+        const flush = () => {
+            if (buffer.length) {
+                buffer.sort((a, b) =>
+                    (a.key || a.code || '').localeCompare(b.key || b.code || ''));
+                out.push(...buffer);
+                buffer = [];
+            }
+        };
+        for (const l of lines) {
+            if (l.isHeader) { flush(); out.push(l); }
+            else buffer.push(l);
+        }
+        flush();
+        return out;
+    }
+    oldLines = canonicalize(oldLines);
+    newLines = canonicalize(newLines);
+
     // Separate headers from courses, tracking ALL consecutive headers that
     // precede each course. (Previously only kept the last header, which lost
     // concentration-level headings when a sub-heading like "Required" followed.)
