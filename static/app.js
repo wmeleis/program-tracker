@@ -1296,17 +1296,27 @@ function normForCompare(s) {
 // Standardize section heading text for consistent display in Compare tab.
 // Maps common CIM variations to uniform labels while preserving meaningful distinctions.
 // Returns '' for instructional preambles that don't define a new section.
-function standardizeHeader(text) {
-    // Normalize concentration headings so variants all collapse to the same form.
-    // Different deployments use different wordings:
-    //   - "Agricultural Biotechnology Concentration"  (Boston)
-    //   - "Biotechnology Operations"                  (Oakland, no suffix)
-    //   - "Concentration in Agricultural Biotechnology"  (Toronto)
-    // Strip leading "Concentration in" and trailing "Concentration" so all three
-    // collapse to "Agricultural Biotechnology" in the diff.
-    let t = text.trim()
+// Diff match key for header titles. Used to align concentration headings
+// regardless of whether the source used "X Concentration", "Concentration in X",
+// or just "X". Display still preserves the word "Concentration".
+function headerMatchKey(title) {
+    return (title || '').trim()
         .replace(/^Concentration\s+in\s+/i, '')
         .replace(/\s+Concentration\s*$/i, '')
+        .trim()
+        .toLowerCase();
+}
+
+function standardizeHeader(text) {
+    // Normalize concentration headings so their DISPLAY form consistently ends
+    // with "Concentration". "Concentration in X" becomes "X Concentration".
+    // Variants without "Concentration" get the suffix added when the heading
+    // looks like a concentration name (ends a concentration-list context
+    // detected later by headerMatchKey overlap). For now: only reword the
+    // explicit "Concentration in X" prefix. Bare names keep their text as-is;
+    // diff matching in diffLines relies on headerMatchKey, not title.
+    let t = text.trim()
+        .replace(/^Concentration\s+in\s+(.+)$/i, '$1 Concentration')
         .trim();
     const s = t.toLowerCase();
     // Suppress instructional preambles that don't define a new section
@@ -1555,8 +1565,19 @@ function diffLines(oldLines, newLines) {
             const rh = rHdrs[k] || null;
             const showLeft = lh && !usedLeftHeaders.has(lh.title);
             const showRight = rh && !usedRightHeaders.has(rh.title);
-            if (showLeft && showRight && normForCompare(lh.title) === normForCompare(rh.title)) {
-                result.push({type: 'same', left: lh, right: rh});
+            if (showLeft && showRight && headerMatchKey(lh.title) === headerMatchKey(rh.title)) {
+                // When both sides' headers normalize to the same key, prefer the
+                // title that contains the word "Concentration" so the rendered
+                // output consistently shows "X Concentration" on both sides.
+                const lHasConc = /\bconcentration\b/i.test(lh.title);
+                const rHasConc = /\bconcentration\b/i.test(rh.title);
+                let displayTitle;
+                if (lHasConc && !rHasConc) displayTitle = lh.title;
+                else if (rHasConc && !lHasConc) displayTitle = rh.title;
+                else displayTitle = lh.title.length >= rh.title.length ? lh.title : rh.title;
+                const lOut = {...lh, title: displayTitle};
+                const rOut = {...rh, title: displayTitle};
+                result.push({type: 'same', left: lOut, right: rOut});
                 usedLeftHeaders.add(lh.title);
                 usedRightHeaders.add(rh.title);
             } else {
