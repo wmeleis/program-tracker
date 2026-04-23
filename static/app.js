@@ -1441,10 +1441,22 @@ function extractCourseLines(html) {
 // false-flagging different wording for the same category.
 function classifySection(sectionText) {
     const s = sectionText.toLowerCase();
-    if (/\belective/.test(s) || /\bcomplete\s+one\s+of/.test(s) || /\bchoose\s/.test(s) || /\bselect\s/.test(s)) {
-        return 'elective';
+    // Explicit required/core markers win over elective keywords.
+    if (/\brequired\s+core\b/.test(s) || /^required\s*$/i.test(s) || /^core\b/i.test(s)) {
+        return 'required';
     }
-    // "required", "core", "complete all", or generic instruction → required/core
+    if (/\bcomplete\s+all\b/.test(s)) return 'required';
+    // Elective patterns. A section is an "elective list" if it describes a
+    // choice among multiple courses — choose/select/any/in consultation/from the
+    // following/semester hours from, etc.
+    if (/\belective/.test(s)) return 'elective';
+    if (/\b(choose|select)\b/.test(s)) return 'elective';
+    if (/\bcomplete\s+\w+\s+of\s+the\s+following/.test(s)) return 'elective';
+    if (/\bcomplete\s+\d+\s+(?:semester\s+)?(?:sh|s\.h\.|hours?|credits?)\s+(?:from|based|in|with)/.test(s)) return 'elective';
+    if (/\bin consultation\s+with/.test(s)) return 'elective';
+    if (/\bfrom the following\b/.test(s)) return 'elective';
+    if (/\bany\s+\d+/.test(s)) return 'elective';
+    // Default to required for strict/unknown markers.
     return 'required';
 }
 
