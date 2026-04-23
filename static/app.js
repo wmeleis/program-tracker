@@ -1445,21 +1445,23 @@ function classifySection(sectionText) {
 // Compares using case-insensitive normalization but preserves original structured data
 // Headers are excluded from diff matching and re-inserted as context rows
 function diffLines(oldLines, newLines) {
-    // Separate headers from courses, tracking which header precedes each course
+    // Separate headers from courses, tracking ALL consecutive headers that
+    // precede each course. (Previously only kept the last header, which lost
+    // concentration-level headings when a sub-heading like "Required" followed.)
     function splitHeadersAndCourses(lines) {
         const courses = [];
-        const headerMap = {}; // courseIndex -> header item
-        let lastHeader = null;
+        const headersMap = {}; // courseIndex -> array of header items
+        let pendingHeaders = [];
         for (const line of lines) {
             if (line.isHeader) {
-                lastHeader = line;
+                pendingHeaders.push(line);
             } else {
-                headerMap[courses.length] = lastHeader;
+                headersMap[courses.length] = pendingHeaders;
                 courses.push(line);
-                lastHeader = null;
+                pendingHeaders = [];
             }
         }
-        return { courses, headerMap };
+        return { courses, headersMap };
     }
     const oldSplit = splitHeadersAndCourses(oldLines);
     const newSplit = splitHeadersAndCourses(newLines);
@@ -1498,24 +1500,30 @@ function diffLines(oldLines, newLines) {
     const usedRightHeaders = new Set();
     const emptyHeader = {key: '', code: '', title: '', hours: '', isHeader: true};
     for (const d of courseDiff) {
-        const lh = d.leftIdx !== null ? oldSplit.headerMap[d.leftIdx] : null;
-        const rh = d.rightIdx !== null ? newSplit.headerMap[d.rightIdx] : null;
-        const showLeft = lh && !usedLeftHeaders.has(lh.title);
-        const showRight = rh && !usedRightHeaders.has(rh.title);
-
-        if (showLeft && showRight && normForCompare(lh.title) === normForCompare(rh.title)) {
-            // Same header on both sides — single row
-            result.push({type: 'same', left: lh, right: rh});
-            usedLeftHeaders.add(lh.title);
-            usedRightHeaders.add(rh.title);
-        } else {
-            if (showLeft) {
-                result.push({type: 'same', left: lh, right: emptyHeader});
+        const lHdrs = d.leftIdx !== null ? (oldSplit.headersMap[d.leftIdx] || []) : [];
+        const rHdrs = d.rightIdx !== null ? (newSplit.headersMap[d.rightIdx] || []) : [];
+        // Emit each pre-course header in order. Headers with matching (normalized)
+        // titles on both sides are rendered as a single combined row; otherwise
+        // the side-specific header is rendered with an empty cell opposite.
+        const maxH = Math.max(lHdrs.length, rHdrs.length);
+        for (let k = 0; k < maxH; k++) {
+            const lh = lHdrs[k] || null;
+            const rh = rHdrs[k] || null;
+            const showLeft = lh && !usedLeftHeaders.has(lh.title);
+            const showRight = rh && !usedRightHeaders.has(rh.title);
+            if (showLeft && showRight && normForCompare(lh.title) === normForCompare(rh.title)) {
+                result.push({type: 'same', left: lh, right: rh});
                 usedLeftHeaders.add(lh.title);
-            }
-            if (showRight) {
-                result.push({type: 'same', left: emptyHeader, right: rh});
                 usedRightHeaders.add(rh.title);
+            } else {
+                if (showLeft) {
+                    result.push({type: 'same', left: lh, right: emptyHeader});
+                    usedLeftHeaders.add(lh.title);
+                }
+                if (showRight) {
+                    result.push({type: 'same', left: emptyHeader, right: rh});
+                    usedRightHeaders.add(rh.title);
+                }
             }
         }
         // Mark courses that match but moved between section categories
