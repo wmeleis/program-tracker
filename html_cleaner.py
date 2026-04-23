@@ -34,6 +34,32 @@ PLAN_OF_STUDY_HEADING_RES = [
     re.compile(r'^\s*concentration\s+in\s+', re.I),
     re.compile(r'^\s*(?:sample\s+)?plan\s+of\s+study\b', re.I),
     re.compile(r'^\s*\*', re.I),  # footnotes that h2-rendered from source
+    # Proposal-form metadata that slips into PDF-parsed references
+    re.compile(r'^\s*content\s*/\s*program\s+type\b', re.I),
+    re.compile(r'^\s*department\s+(?:one|two|three)\b', re.I),
+    re.compile(r'^\s*major\s+cip\s+code\b', re.I),
+    re.compile(r'^\s*campus\s+and\s+modality\b', re.I),
+]
+
+# H2 headings that should be stripped (heading tag removed, following content
+# preserved) — not full-section removal like PLAN_OF_STUDY_HEADING_RES.
+STRIP_HEADING_ONLY_RES = [
+    re.compile(r'^\s*code\s+title\s+hours\s*$', re.I),
+]
+
+# Proposal-form metadata lines (appear as areaheader spans or courselistcomment
+# rows in PDF-parsed references). Match on text content of the row.
+FORM_METADATA_RES = [
+    re.compile(r"dean\(s\)\s+and\s+the\s+provost", re.I),
+    re.compile(r'subject\s+code\s+associated\s+with\s+this\s+program', re.I),
+    re.compile(r'should\s+this\s+program\s+be\s+published\s+in\s+the\s+catalog', re.I),
+    re.compile(r'choose\s+one\s+campus', re.I),
+    re.compile(r'where\s+will\s+this\s+program\s+be\s+offered', re.I),
+    re.compile(r'^\s*modalities\s*:', re.I),
+    re.compile(r'^\s*content\s*/\s*program\s+type\b', re.I),
+    re.compile(r'^\s*campus\s+and\s+modality\s*$', re.I),
+    re.compile(r'^\s*department\s+(?:one|two|three)\s*:', re.I),
+    re.compile(r'^\s*major\s+cip\s+code\b', re.I),
 ]
 
 
@@ -81,13 +107,17 @@ def _remove_decorative_areaheader_rows(html):
     """Strip <tr class=\"...areaheader...\"> rows that are:
     - pure grouping labels ending in Focus/Track/Area/Group, OR
     - redundant preambles like "Complete the 3 Semester Hours Project Course"
-      that are immediately followed by the course row anyway.
+      that are immediately followed by the course row anyway, OR
+    - proposal-form metadata slurped in from a PDF source.
     """
     def should_remove(match):
         inner = match.group(0)
         text = _strip_tags(inner)
         if not text:
             return False
+        for rx in FORM_METADATA_RES:
+            if rx.search(text):
+                return True
         if REDUNDANT_COURSE_INTRO_RE.match(text):
             return True
         if CHOICE_RE.search(text):
@@ -210,6 +240,14 @@ def clean_curriculum_html(html):
         out = _remove_labeled_section(out, label)
     # Plan-of-study section removal (Year N, Concentration in X, Plan of Study, footnotes)
     out = _remove_plan_of_study_sections(out)
+    # Strip noise h2 headings (keep following content) — e.g., PDF column-header bleed
+    def _strip_one(m):
+        text = _strip_tags(m.group(3)).strip()
+        for rx in STRIP_HEADING_ONLY_RES:
+            if rx.search(text):
+                return ''
+        return m.group(0)
+    out = re.sub(r'(<h([1-6])[^>]*>)(.*?)(</h\2>)', _strip_one, out, flags=re.DOTALL | re.I)
     # Sort course rows alphabetically within each areaheader-delimited group
     out = _sort_rows_within_sections(out)
     # Decorative areaheader row removal
