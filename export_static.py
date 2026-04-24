@@ -134,6 +134,15 @@ def export_data():
     pipeline_counts = get_pipeline_counts(TRACKED_ROLES)
     changes = get_recent_changes(limit=100)
     last_scan = get_last_scan()
+    # Attach server-local TZ to the naive stored scan_time so browsers parse
+    # it as an absolute instant (not "12:08 in the viewer's local timezone").
+    if last_scan and last_scan.get('scan_time'):
+        try:
+            dt = datetime.fromisoformat(last_scan['scan_time'])
+            if dt.tzinfo is None:
+                last_scan = {**last_scan, 'scan_time': dt.astimezone().isoformat()}
+        except (ValueError, TypeError):
+            pass
     colleges = get_colleges()
     approvers = get_current_approvers()
 

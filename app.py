@@ -330,10 +330,33 @@ def api_changes():
     return jsonify({'changes': changes})
 
 
+def _with_local_tz(iso_str):
+    """Attach the machine's local timezone offset to a naive ISO timestamp
+    so browsers parse it correctly regardless of their own timezone.
+
+    Historical scan_time values are stored via `datetime.now().isoformat()`
+    (no tz), which browsers then interpret as their own local time — off
+    by the server<->client tz gap. Here we attach the server's local tz
+    so "2026-04-24T12:08:47" becomes "2026-04-24T12:08:47-07:00".
+    """
+    if not iso_str:
+        return iso_str
+    try:
+        dt = datetime.fromisoformat(iso_str)
+    except ValueError:
+        return iso_str
+    if dt.tzinfo is not None:
+        return dt.isoformat()
+    return dt.astimezone().isoformat()
+
+
 @app.route('/api/scan/status')
 def api_scan_status():
     """Get current scan status."""
     last_scan = get_last_scan()
+    if last_scan and 'scan_time' in last_scan:
+        last_scan = dict(last_scan)
+        last_scan['scan_time'] = _with_local_tz(last_scan['scan_time'])
     return jsonify({
         'running': scan_status['running'],
         'error': scan_status['error'],
