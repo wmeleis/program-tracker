@@ -1375,6 +1375,17 @@ def heal_stale_program_steps(log=False):
 
     if log:
         print(f"Sync complete: {fixed} changed, {warnings} unfetchable")
+
+    # Record a scan row so the dashboard's "Updated" label reflects this
+    # refresh. Without it, the label would still show the last full scan
+    # (which could be hours/days older than the heal).
+    from database import record_scan
+    record_scan(
+        datetime.now().isoformat(),
+        programs_scanned=len(program_ids),
+        programs_with_workflow=len(program_ids) - warnings,
+        changes_detected=fixed,
+    )
     return warnings, fixed
 
 
@@ -1475,6 +1486,14 @@ def heal_stale_course_steps(log=False):
 
     if log:
         print(f"Course sync complete: {fixed} changed, {warnings} unfetchable")
+
+    from database import record_course_scan
+    record_course_scan(
+        datetime.now().isoformat(),
+        courses_scanned=len(course_ids),
+        courses_with_workflow=len(course_ids) - warnings,
+        changes_detected=fixed,
+    )
     return warnings, fixed
 
 

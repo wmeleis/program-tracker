@@ -402,10 +402,18 @@ def get_recent_changes(limit=50):
 
 
 def get_last_scan():
-    """Get the most recent scan info."""
+    """Get the most recent real scan (excludes historical-sweep sentinels).
+
+    Historical sweeps write rows with `programs_scanned = -1` so the weekly
+    auto-trigger knows when they last ran; those rows should NOT drive the
+    dashboard's "Updated" label because they don't reflect a pipeline refresh
+    the user initiated.
+    """
     with get_db() as conn:
         result = conn.execute("""
-            SELECT * FROM scans ORDER BY scan_time DESC LIMIT 1
+            SELECT * FROM scans
+            WHERE programs_scanned != -1
+            ORDER BY scan_time DESC LIMIT 1
         """).fetchone()
         return dict(result) if result else None
 
