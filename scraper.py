@@ -838,22 +838,26 @@ def run_full_scan():
         # Calculate progress
         total = len(steps)
         completed = sum(1 for s in steps if s.get('status') == 'approved')
-        # The per-program workflow HTML `<li class="current">` marker is
-        # THE authoritative source of current_step. The Approve Pages role
-        # dropdown returns a role-specific list that's filtered by the
-        # viewer's session permissions (we've observed it returning 2
-        # programs where the actual provost reviewer sees 9). Workflow
-        # HTML is derived from each program's real approval history and
-        # is accessible for every program via /programadmin/{id}/.
+        # current_step comes from Phase 1 Approve Pages discovery — that's
+        # the role's pending list, which is what the user sees at
+        # /courseleaf/approve/. The dashboard mirrors that view exactly.
+        # Per-program workflow HTML can disagree (we observed cases where
+        # the workflow div lagged the pending list); we DO NOT use it to
+        # override the Approve Pages assignment. Workflow HTML's `current`
+        # marker only fills in `current_emails` and acts as a fallback if
+        # Phase 1 produced nothing for this program.
         html_current = next((s for s in steps if s.get('status') == 'current'), None)
-        if html_current:
+        current_step = info.get('current_step', '')
+        current_emails = ''
+        matched = next((s for s in steps if s.get('name') == current_step), None)
+        if matched:
+            current_emails = matched.get('emails', '')
+        elif not current_step and html_current:
             current_step = html_current.get('name', '')
             current_emails = html_current.get('emails', '')
-        else:
-            current_step = ''
-            current_emails = ''
 
-        # Derive completion_date when workflow HTML has no current step.
+        # completion_date is set only when Approve Pages had no assignment AND
+        # workflow HTML shows the program is fully approved.
         is_complete = (total > 0 and completed == total and not current_step)
         completion_date = meta.get('last_approval_date', '') if is_complete else ''
 
@@ -2708,15 +2712,19 @@ def process_course_scans(courses):
 
         total_steps = len(steps)
         completed_steps = sum(1 for s in steps if s.get('status') == 'approved')
-        # Workflow HTML is authoritative (same reasoning as programs path):
-        # Approve Pages queues are role-session-filtered and undercount.
+        # current_step from Phase 1 Approve Pages discovery (mirrors live
+        # pending list, which is what the user sees at /courseleaf/approve/).
+        # Workflow HTML's `current` marker only fills in approver emails or
+        # acts as a fallback when Phase 1 had no role assignment for this id.
         html_current = next((s for s in steps if s.get('status') == 'current'), None)
-        if html_current:
+        current_step_from_aq = c.get('current_step', '')
+        current_emails = ''
+        matched = next((s for s in steps if s.get('name') == current_step_from_aq), None)
+        if matched:
+            current_emails = matched.get('emails', '')
+        elif not current_step_from_aq and html_current:
             current_step_from_aq = html_current.get('name', '')
             current_emails = html_current.get('emails', '')
-        else:
-            current_step_from_aq = ''
-            current_emails = ''
 
         college_code = meta.get('college', '')
         college_name = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
