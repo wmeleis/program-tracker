@@ -158,33 +158,23 @@ const COURSE_PIPELINE_STEPS = new Set([
     "Editor",
 ]);
 
-function isCourseCollegeStep(step) {
-    if (!step) return false;
-    if (COURSE_PIPELINE_STEPS.has(step)) return false;
-    // Anything starting with "Provost" is a provost-level step, not a college step
-    if (step.startsWith('Provost')) return false;
-    if (step.startsWith('REGISTRAR')) return false;
-    if (step.startsWith('Course Review Group')) return false;
-    return true;
-}
-
 // Course pipeline buckets: several raw workflow steps collapse to one button.
 // Display only — underlying DB step names are unchanged.
+//
+// Ordering: appears in the pipeline bar left-to-right in roughly chronological
+// workflow order (Checkpoint and Course Review groups early; Data Entry /
+// Registrar / Banner / Editor late). The "College" pseudo-bucket is rendered
+// separately as the first tile.
 const COURSE_BUCKETS = [
     {
-        role: 'Data Entry',
-        short_name: 'Data Entry',
-        match: step => typeof step === 'string' && step.startsWith('Data Entry'),
-    },
-    {
-        role: 'Banner',
-        short_name: 'Banner',
-        match: step => typeof step === 'string' && (step === 'Banner' || step.startsWith('Banner ') || step.startsWith('Banner-')),
+        role: 'Checkpoint',
+        short_name: 'Checkpoint',
+        match: step => step === 'Checkpoint',
     },
     {
         role: 'Course Review',
         short_name: 'Course Review',
-        match: step => step === 'Course Review 2' || step === 'Course Review 3',
+        match: step => step === 'Course Review 2' || step === 'Course Review 3' || step === 'PS Course Review',
     },
     {
         role: 'Course Review Group',
@@ -194,14 +184,52 @@ const COURSE_BUCKETS = [
     {
         role: 'OTP',
         short_name: 'OTP',
-        match: step => typeof step === 'string' && step.startsWith('Provost'),
+        // "Provost ..." is the OTP family. "Program Provost ..." also covers
+        // provost-level course steps that chain into program approval.
+        match: step => typeof step === 'string' &&
+            (step.startsWith('Provost') || step.startsWith('Program Provost')),
+    },
+    {
+        role: 'GRA Regulatory',
+        short_name: 'GRA Reg',
+        match: step => step === 'Course GRA Regulatory Validation',
+    },
+    {
+        role: 'Data Entry',
+        short_name: 'Data Entry',
+        match: step => typeof step === 'string' && step.startsWith('Data Entry'),
     },
     {
         role: 'Registrar',
         short_name: 'Registrar',
-        match: step => typeof step === 'string' && step.startsWith('REGISTRAR'),
+        match: step => typeof step === 'string' &&
+            (step.startsWith('REGISTRAR') || step === 'Degree Audit Courses'),
+    },
+    {
+        role: 'Banner',
+        short_name: 'Banner',
+        match: step => typeof step === 'string' && (step === 'Banner' || step.startsWith('Banner ') || step.startsWith('Banner-')),
+    },
+    {
+        role: 'Editor',
+        short_name: 'Editor',
+        match: step => typeof step === 'string' &&
+            (step === 'Editor' || step.startsWith('Editor ') || step.startsWith('Editor-')),
     },
 ];
+
+function isCourseCollegeStep(step) {
+    // The "College" tile is a catch-all: any course step that is NOT matched
+    // by one of the explicit COURSE_BUCKETS above (e.g. department chairs,
+    // college committees, graduate council subcommittees, UUCC subcommittees,
+    // individual reviewers assigned directly) falls here. Guarantees every
+    // active course maps to exactly one pipeline tile.
+    if (!step) return false;
+    for (const b of COURSE_BUCKETS) {
+        if (b.match(step)) return false;
+    }
+    return true;
+}
 
 function getCourseBucket(step) {
     for (const b of COURSE_BUCKETS) {
@@ -224,9 +252,11 @@ function collapseCoursePipeline(pipeline) {
                 .filter(s => getCourseBucket(s.role) === bucket)
                 .reduce((n, s) => n + (s.count || 0), 0);
             result.push({ role: def.role, short_name: def.short_name, count: total, _bucket: true });
-        } else {
-            result.push(step);
         }
+        // Unbucketed roles (e.g. Graduate Council Subcommittee One/Two,
+        // Graduate Curriculum Committee Chair, individual reviewers) don't get
+        // their own pipeline tile — they're caught by the College pseudo-tile
+        // which counts via isCourseCollegeStep per course.
     }
     return result;
 }
