@@ -527,10 +527,13 @@ function getDaysAtStep(program) {
 }
 
 // Format a completion date for the Days column on completed rows.
-// Accepts ISO or the "Tue, 03 Feb 2026 17:21:11 GMT" CIM format; returns
-// "Approved MM/DD/YYYY" (or the raw string if we can't parse it).
+// Accepts:
+//   - ISO or the "Tue, 03 Feb 2026 17:21:11 GMT" CIM format → "Approved MM/DD/YYYY"
+//   - "Catalog 2022-2023" surrogate (when CIM didn't expose a real date) → returned as-is
+//   - "Approved" placeholder → returned as-is
 function formatCompletionDate(s) {
     if (!s) return 'Approved';
+    if (s.startsWith('Catalog ') || s === 'Approved') return s;
     const d = new Date(s);
     if (isNaN(d)) return 'Approved ' + s;
     return 'Approved ' + (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();

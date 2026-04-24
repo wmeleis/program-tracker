@@ -335,64 +335,69 @@ def scrape_program_workflow(program_id):
 
 
 def batch_fetch_program_details(program_ids, batch_size=25):
-    """Fetch workflow + metadata for multiple programs using XHR (no page navigation).
+    """Fetch workflow + metadata for multiple programs in parallel via async fetch().
 
-    Uses synchronous XHR to fetch each program's HTML page (for workflow steps)
-    and XML API (for metadata like college, department, banner code, etc.).
-    ~200ms per program vs ~5s with page navigation.
+    Chrome 147+ blocks synchronous XHR in main-thread documents (the call
+    silently hangs without throwing), so we kick off async fetches with
+    Promise.all, store the JSON in a hidden div, and poll from Python.
+    Same pattern as `fetch_reference_curricula`.
+
+    For each program: HTML page (workflow + approval history + proposal type)
+    plus XML API (college, department, banner code, campus, curriculum_html).
+    Per-batch parallelism is bounded by the network; each AppleScript round
+    trip handles one batch.
     """
+    if not program_ids:
+        return {}
+
     all_results = {}
     batches = [program_ids[i:i+batch_size] for i in range(0, len(program_ids), batch_size)]
 
     for batch_num, batch in enumerate(batches):
         ids_json = json.dumps(batch)
-        js_code = f'''
+        batch_tag = f"__detbatch_{batch_num}_{int(time.time())}"
+        kickoff_js = f'''
 (function() {{
+    var existing = document.getElementById("{batch_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{batch_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+
     var ids = {ids_json};
-    var results = {{}};
     var parser = new DOMParser();
 
-    for (var i = 0; i < ids.length; i++) {{
-        var id = ids[i];
+    function processOne(id, idx) {{
         var result = {{steps: [], meta: {{}}}};
-
-        try {{
-            // Fetch HTML page for workflow steps and approval dates
-            var xhr1 = new XMLHttpRequest();
-            xhr1.open("GET", "/programadmin/" + id + "/", false);
-            xhr1.send();
-
-            if (xhr1.status === 200) {{
-                var doc = parser.parseFromString(xhr1.responseText, "text/html");
-
-                // Extract workflow steps
+        var htmlPromise = fetch("/programadmin/" + id + "/")
+            .then(function(r) {{ return r.ok ? r.text() : ""; }})
+            .then(function(html) {{
+                if (!html) return;
+                var doc = parser.parseFromString(html, "text/html");
                 var wfDiv = doc.getElementById("workflow");
                 if (wfDiv) {{
                     var items = wfDiv.querySelectorAll("li");
-                    items.forEach(function(li, idx) {{
+                    items.forEach(function(li, ord) {{
                         var link = li.querySelector("a");
                         result.steps.push({{
-                            order: idx,
+                            order: ord,
                             name: (li.textContent || "").trim(),
                             status: li.className.trim() || "pending",
                             emails: link ? link.getAttribute("href").replace("mailto:", "") : ""
                         }});
                     }});
                 }}
-
-                // Extract proposal type and approval dates from page text
                 var text = doc.body ? doc.body.textContent : "";
                 if (text.indexOf("New Program Proposal") !== -1) result.meta.proposal_type = "New Program Proposal";
                 else if (text.indexOf("Inactivation Proposal") !== -1) result.meta.proposal_type = "Inactivation Proposal";
                 else if (text.indexOf("Rationale for Changes") !== -1) result.meta.proposal_type = "Program Revision Proposal";
                 else result.meta.proposal_type = "Program Revision Proposal";
 
-                // Extract date submitted
                 var dsMatch = text.match(/Date Submitted:\\s*([^\\n]+)/);
                 if (dsMatch) result.meta.date_submitted = dsMatch[1].trim();
 
-                // Extract approval dates for step_entered_date AND all historical approvals
-                // (used to cross-check Approve Pages staleness in Phase 3).
                 var approvalDates = [];
                 var apMatch;
                 var apPattern = /([A-Z][a-z]{{2}}, \\d+ [A-Z][a-z]+ \\d{{4}} [\\d:]+ GMT)[\\s\\S]*?Approved for ([^<\\n]+)/g;
@@ -403,20 +408,17 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                     result.meta.last_approval_date = approvalDates[approvalDates.length - 1].date;
                 }}
                 result.meta.approvals = approvalDates;
-            }}
-        }} catch(e) {{
-            result.html_error = e.message;
-        }}
+            }})
+            .catch(function(e) {{ result.html_error = e.message || String(e); }});
 
-        try {{
-            // Fetch XML for metadata (college, department, degree, banner code, campus)
-            var xhr2 = new XMLHttpRequest();
-            xhr2.open("GET", "/programadmin/" + id + "/index.xml", false);
-            xhr2.send();
-
-            result.meta.xml_status = xhr2.status;
-            if (xhr2.status === 200) {{
-                var xmlDoc = parser.parseFromString(xhr2.responseText, "text/xml");
+        var xmlPromise = fetch("/programadmin/" + id + "/index.xml")
+            .then(function(r) {{
+                result.meta.xml_status = r.status;
+                return r.ok ? r.text() : "";
+            }})
+            .then(function(xml) {{
+                if (!xml) return;
+                var xmlDoc = parser.parseFromString(xml, "text/xml");
                 var getXml = function(tag) {{
                     var el = xmlDoc.querySelector(tag);
                     return el ? el.textContent.trim() : "";
@@ -428,46 +430,99 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 result.meta.program_title = getXml("programtitle");
                 result.meta.campus = getXml("campus");
                 result.meta.prog_acad_level = getXml("prog_acad_level");
-                // Curriculum body (HTML with course tables)
+                result.meta.eff_term = getXml("eff_term");
+                result.meta.eff_cat = getXml("eff_cat");
                 var bodyEl = xmlDoc.querySelector("body");
                 result.meta.curriculum_html = bodyEl ? bodyEl.innerHTML : "";
                 result.meta.req_degree_credits = getXml("req_degree_credits");
-                // deletejustification non-empty implies inactivation
                 var dj = getXml("deletejustification");
-                if (dj) result.meta.proposal_type = "Inactivation Proposal";
-                // Debug: capture tag names from first program in batch
-                if (i === 0) {{
-                    var tags = [];
-                    var els = xmlDoc.querySelectorAll("*");
-                    for (var t = 0; t < Math.min(els.length, 50); t++) {{
-                        tags.push(els[t].tagName);
-                    }}
-                    result.meta._xml_tags = tags.join(",");
-                    result.meta._xml_sample = xhr2.responseText.substring(0, 500);
+                if (dj) {{
+                    result.meta.proposal_type = "Inactivation Proposal";
+                    result.meta.delete_justification = dj;
                 }}
-            }}
-        }} catch(e) {{
-            result.xml_error = e.message;
-        }}
+            }})
+            .catch(function(e) {{ result.xml_error = e.message || String(e); }});
 
-        results[id] = result;
+        return Promise.all([htmlPromise, xmlPromise]).then(function() {{
+            return [id, result];
+        }});
     }}
 
-    return JSON.stringify(results);
-}})()
+    Promise.all(ids.map(processOne)).then(function(pairs) {{
+        var out = {{}};
+        for (var i = 0; i < pairs.length; i++) out[pairs[i][0]] = pairs[i][1];
+        holder.textContent = JSON.stringify(out);
+        holder.setAttribute("data-status", "done");
+    }}).catch(function(e) {{
+        holder.textContent = "ERROR:" + (e && e.message || e);
+        holder.setAttribute("data-status", "error");
+    }});
+    return "fired";
+}})();
 '''
-        result = run_js_in_tab("programadmin", js_code, match_by='url', timeout=120)
-        if not result or result == 'missing value':
-            print(f"    Batch {batch_num+1}/{len(batches)}: FAILED (no response)")
+        run_js_in_tab("programadmin", kickoff_js, match_by='url', timeout=20)
+
+        check_js = f'''(function() {{
+    var el = document.getElementById("{batch_tag}");
+    if (!el) return "MISSING";
+    var s = el.getAttribute("data-status");
+    if (s === "done") return "DONE";
+    if (s === "error") return "ERR:" + el.textContent.substring(0, 200);
+    return "RUNNING";
+}})();'''
+        batch_results = None
+        for _ in range(60):  # up to 120s per batch
+            time.sleep(2)
+            status = run_js_in_tab("programadmin", check_js, match_by='url', timeout=15)
+            if status == "DONE":
+                len_js = (
+                    f'(function(){{ var el = document.getElementById("{batch_tag}"); '
+                    f'return el ? el.textContent.length : 0; }})();'
+                )
+                total_len = int(run_js_in_tab("programadmin", len_js, match_by='url', timeout=15) or 0)
+                if total_len == 0:
+                    batch_results = {}
+                    break
+                chunk_size = 200000
+                chunks = []
+                for offset in range(0, total_len, chunk_size):
+                    chunk_js = (
+                        f'(function(){{ var el = document.getElementById("{batch_tag}"); '
+                        f'return el ? el.textContent.substring({offset}, {offset + chunk_size}) : ""; }})();'
+                    )
+                    part = run_js_in_tab("programadmin", chunk_js, match_by='url', timeout=30)
+                    if part and part != 'missing value':
+                        chunks.append(part)
+                try:
+                    batch_results = json.loads(''.join(chunks))
+                except json.JSONDecodeError as e:
+                    print(f"    Batch {batch_num+1}/{len(batches)}: JSON parse error ({e})")
+                    batch_results = {}
+                run_js_in_tab(
+                    "programadmin",
+                    f'var e=document.getElementById("{batch_tag}"); if(e) e.remove();',
+                    match_by='url', timeout=10,
+                )
+                break
+            if status and status.startswith("ERR"):
+                print(f"    Batch {batch_num+1}/{len(batches)}: JS error: {status}")
+                batch_results = {}
+                break
+
+        if batch_results is None:
+            print(f"    Batch {batch_num+1}/{len(batches)}: timed out after 120s")
             continue
 
-        try:
-            batch_results = json.loads(result)
-            for pid_str, data in batch_results.items():
-                all_results[int(pid_str)] = data
-            print(f"    Batch {batch_num+1}/{len(batches)}: fetched {len(batch_results)} programs")
-        except json.JSONDecodeError as e:
-            print(f"    Batch {batch_num+1}/{len(batches)}: FAILED (JSON error: {e})")
+        for pid_str, data in batch_results.items():
+            all_results[int(pid_str)] = data
+        print(f"    Batch {batch_num+1}/{len(batches)}: fetched {len(batch_results)} programs")
+
+    # Clean up any leftover holder divs from this run
+    run_js_in_tab(
+        "programadmin",
+        'document.querySelectorAll("[id^=__detbatch_]").forEach(function(e){e.remove();});',
+        match_by='url', timeout=10,
+    )
 
     return all_results
 
@@ -528,27 +583,65 @@ def check_courseleaf_session():
                       'Open https://nextcatalog.northeastern.edu/programadmin/ in Chrome window 1.'
         }
 
-    # Step 2: Probe the XML API for a known program to verify session
-    probe_js = '''
-(function() {
-    try {
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/programadmin/2/index.xml", false);
-        xhr.send();
-        var txt = xhr.responseText || "";
-        if (xhr.status !== 200) return "HTTP:" + xhr.status;
-        // A valid session returns XML that starts with <?xml> and contains <courseleaf>
-        if (txt.indexOf("<courseleaf>") === -1) return "NOT_XML";
-        // A logged-out response often redirects to login HTML (starts with <!DOCTYPE or <html)
-        if (txt.trimStart().toLowerCase().indexOf("<!doctype") === 0) return "LOGIN_REDIRECT";
-        if (txt.length < 500) return "SHORT:" + txt.length;
-        return "OK:" + txt.length;
-    } catch(e) {
-        return "ERR:" + e.message;
-    }
-})();
+    # Step 2: Probe the XML API for a known program to verify session.
+    # Uses async fetch + polling (Chrome 147+ blocks sync XHR silently).
+    probe_tag = f"__sessprobe_{int(time.time())}"
+    kickoff_js = f'''
+(function() {{
+    var existing = document.getElementById("{probe_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{probe_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+    fetch("/programadmin/2/index.xml")
+        .then(function(r) {{
+            return r.text().then(function(txt) {{ return [r.status, txt]; }});
+        }})
+        .then(function(pair) {{
+            var status = pair[0];
+            var txt = pair[1] || "";
+            var verdict;
+            if (status !== 200) verdict = "HTTP:" + status;
+            else if (txt.indexOf("<courseleaf>") === -1) verdict = "NOT_XML";
+            else if (txt.trimStart().toLowerCase().indexOf("<!doctype") === 0) verdict = "LOGIN_REDIRECT";
+            else if (txt.length < 500) verdict = "SHORT:" + txt.length;
+            else verdict = "OK:" + txt.length;
+            holder.textContent = verdict;
+            holder.setAttribute("data-status", "done");
+        }})
+        .catch(function(e) {{
+            holder.textContent = "ERR:" + (e && e.message || e);
+            holder.setAttribute("data-status", "done");
+        }});
+    return "fired";
+}})();
 '''
-    result = run_js_in_tab('programadmin', probe_js, match_by='url', timeout=15)
+    fired = run_js_in_tab('programadmin', kickoff_js, match_by='url', timeout=10)
+    if not fired or fired == 'missing value':
+        return {
+            'ok': False,
+            'error': 'probe_failed',
+            'detail': 'Could not start CourseLeaf probe. Check that Chrome is running.'
+        }
+    result = None
+    for _ in range(15):  # up to ~15s
+        time.sleep(1)
+        check = run_js_in_tab(
+            'programadmin',
+            f'(function(){{var el=document.getElementById("{probe_tag}");return el && el.getAttribute("data-status")==="done" ? el.textContent : "";}})();',
+            match_by='url', timeout=10,
+        )
+        if check and check != 'missing value' and check.strip():
+            result = check.strip()
+            break
+    # Cleanup
+    run_js_in_tab(
+        'programadmin',
+        f'var e=document.getElementById("{probe_tag}"); if(e) e.remove();',
+        match_by='url', timeout=10,
+    )
     if not result or result == 'missing value':
         return {
             'ok': False,
@@ -883,16 +976,29 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
         approved_count = sum(1 for s in steps if s.get('status') == 'approved')
         html_current = next((s for s in steps if s.get('status') == 'current'), None)
 
-        is_complete = (total > 0 and approved_count == total and html_current is None)
-        completion_date = meta.get('last_approval_date', '') if is_complete else ''
+        # A program is "complete / historical" when it has no active workflow
+        # proposal in CIM. CourseLeaf only renders the workflow div while a
+        # proposal is in flight; once approved (or for programs that haven't
+        # been revised in years), the workflow div disappears entirely.
+        # We therefore treat ANY program with a present XML record but no
+        # workflow as completed — using the catalog year (eff_cat) as the
+        # surrogate "approval date" since CIM doesn't expose the actual one.
+        no_workflow = (total == 0)
+        all_approved = (total > 0 and approved_count == total and html_current is None)
+        is_complete = no_workflow or all_approved
 
-        # Don't touch current_step for programs still in an active step —
-        # the regular scan's Approve Pages discovery is canonical there.
-        # For completed programs we must clear current_step.
         if is_complete:
+            if all_approved:
+                completion_date = meta.get('last_approval_date', '')
+            else:
+                # No workflow — best surrogate for "when this program was
+                # last formally approved" is the catalog year it took effect.
+                eff = meta.get('eff_cat') or meta.get('eff_term') or ''
+                completion_date = ('Catalog ' + eff) if eff else 'Approved'
             current_step = ''
             current_emails = ''
         else:
+            completion_date = ''
             # Preserve whatever the regular scan set; the sweep's HTML
             # current marker can itself lag, so we leave it alone.
             prev = existing.get(prog_id, {})
