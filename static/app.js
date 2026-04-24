@@ -1345,7 +1345,7 @@ async function loadReferenceDetail(programId) {
             return;
         }
         const cleaned = cleanCurriculumHtml(data.curriculum_html);
-        const label = data.source === 'custom' ? 'Custom reference' : 'Last approved version';
+        const label = data.source === 'custom' ? 'Custom reference' : 'Reference version';
         const header = data.version_date
             ? `<div class="reference-header">${label}: ${escapeHtml(data.version_date)}</div>`
             : '';

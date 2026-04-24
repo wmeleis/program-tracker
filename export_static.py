@@ -800,7 +800,7 @@ function __staticInit() {
         if (ref && ref.html) {
             const cleaned = cleanCurriculumHtml(ref.html);
             const header = ref.version_date
-                ? `<div class="reference-header">Last approved version: ${ref.version_date}</div>`
+                ? `<div class="reference-header">Reference version: ${ref.version_date}</div>`
                 : '';
             contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {

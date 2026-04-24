@@ -1345,7 +1345,7 @@ async function loadReferenceDetail(programId) {
             return;
         }
         const cleaned = cleanCurriculumHtml(data.curriculum_html);
-        const label = data.source === 'custom' ? 'Custom reference' : 'Last approved version';
+        const label = data.source === 'custom' ? 'Custom reference' : 'Reference version';
         const header = data.version_date
             ? `<div class="reference-header">${label}: ${escapeHtml(data.version_date)}</div>`
             : '';
@@ -2613,7 +2613,7 @@ function __staticInit() {
         if (ref && ref.html) {
             const cleaned = cleanCurriculumHtml(ref.html);
             const header = ref.version_date
-                ? `<div class="reference-header">Last approved version: ${ref.version_date}</div>`
+                ? `<div class="reference-header">Reference version: ${ref.version_date}</div>`
                 : '';
             contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {
