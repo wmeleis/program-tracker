@@ -39,20 +39,25 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 | `update.sh` | Launched by launchd. Checks Chrome + session validity, starts Flask if needed, triggers scan, waits for completion. Sends macOS notifications. |
 
 ### Scheduled Execution
-- **launchd agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
-- **Schedule:** `StartCalendarInterval` at 9am, 1pm, 5pm ET (every 4 hours, starting at 9am). macOS fires any missed firing on wake.
-- **Runs:** `update.sh`, which decides whether to actually scan based on these rules:
-  1. Current day must be Mon–Fri ET (weekends skipped).
-  2. Current time must be inside the 9am–8pm ET window (exclusive on 8pm).
-  3. At least 4 hours must have passed since the last successful scan, recorded in `data/last_scan_unix`.
-  4. Chrome must be running with a live CourseLeaf session.
+The system runs in two cadences: a once-daily heavy "full scan" via launchd, and a fast on-demand "Update Now" heal (the **Update Now** button in the dashboard or `POST /api/heal`).
 
-  This layered design is deliberate: launchd's scheduled times are just *opportunities*; the gap check in `update.sh` is what enforces the rule, so waking from sleep (which causes launchd to fire missed intervals in a cluster) won't cause duplicate scans. If a scan is skipped, the next firing reconsiders.
-- **Requirement:** Chrome must be open with valid CourseLeaf session when a scan fires.
+**Full scan — launchd, once daily**
+- **Agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
+- **Schedule:** `StartCalendarInterval` at 9am ET (single firing). macOS reruns missed firings on wake.
+- **Runs:** `update.sh`, which gates on:
+  1. Mon–Fri ET (weekends skipped).
+  2. Inside the 9am–8pm ET window.
+  3. At least 20 hours since the last successful scan (`data/last_scan_unix`) — once-daily, so the gap dedupe absorbs any launchd retries.
+  4. Chrome running with a live CourseLeaf session.
+- **What the full scan does:** discovers brand-new program/course IDs via Approve Pages, re-fetches reference + regulatory data, runs the historical sweep when due (≥7 days), exports + pushes to GitHub Pages. Takes 30–45 min.
+
+**Update Now (quick heal) — on-demand**
+- The dashboard's "Update Now" button (and `POST /api/heal`) runs the lightweight Approve-Pages-mirror sync, then auto-runs `export_static.py` + `git push`. Takes ~6 min for programs (no course step yet from the button).
+- See "Heal: mirror DB to live Approve Pages" below for the precise semantics.
 
 ### How the Scraper Works
 
-**Step 1 - Program Discovery (~3 min):** Iterates through 46 roles (14 tracked pipeline + 32 college) on the Approve Pages tab. For each role, selects it in the dropdown via `showPendingList()`, waits 2s, extracts program IDs and names from page text matching `/programadmin/(\d+):\s*(.+)/`.
+**Step 1 - Program Discovery (~6 min):** Iterates through 46 roles (14 tracked pipeline + 32 college) on the Approve Pages tab. For each role, `scrape_approve_pages_role()` selects it in the dropdown via `showPendingList()`, then runs an async poll-until-stable loop (extracts every 500ms, returns when count is non-zero AND stable across 3 polls, with a 15s ceiling). Replaced the old fixed 2s sleep, which was undercounting on slow async loads. Extracts program IDs and names from page text matching `/programadmin/(\d+):\s*(.+)/`. The same pattern is in `scrape_courses_from_role()` for `/courseadmin/`.
 
 **Step 2 - Batch Detail Fetch (~2-7 min):** Uses synchronous XHR (batches of 25) executed via AppleScript in the `programadmin` tab:
 - Fetches each program's HTML page (`/programadmin/{id}/`) and parses the `#workflow` div for steps (name, status, approver emails)
@@ -152,9 +157,9 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 **`build_static_js()` bootstrap:** the static-mode overrides used to be wrapped in `document.addEventListener('DOMContentLoaded', ...)`. Since `app.js` is injected by the gate *after* DOMContentLoaded has already fired, the wrapper is now readyState-aware (runs immediately if the document is already loaded, otherwise waits for the event). If you ever load `app.js` via a normal `<script>` tag, both paths still work.
 
 **Other static-site notes:**
-- "Update Now" button reaches `localhost:5001` to trigger a local scan (shows "Cannot reach local server" if Flask isn't running)
+- "Update Now" button (in `build_static_js()` `window.triggerScan` override) reaches `http://localhost:5001/api/heal` cross-origin (CORS enabled on `/api/*`) and POSTs `{scope: "both", active_only: true, deploy: true}`. Polls `/api/scan/status` every 10s for completion. Shows "Cannot reach local server" only when the fetch itself throws (Flask down or unreachable).
 - Auto-refresh interval is disabled on static site (data doesn't change between scans)
-- Timestamps displayed in Eastern Time (America/New_York) with "ET" suffix
+- Timestamps displayed in Eastern Time (America/New_York) with "ET" suffix. The server stores `scan_time` as a naive local-time ISO string; `/api/scan/status` and `export_static.py` attach the local TZ offset before emitting (`datetime.fromisoformat(s).astimezone().isoformat()`) so browsers in any timezone parse it as the correct absolute instant.
 
 **Dependency:** `pip install cryptography` for the Python-side AES-GCM + PBKDF2. No JS libraries needed — WebCrypto is built into every modern browser.
 
@@ -174,7 +179,7 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 8. **Programs not in workflow** - Some program IDs from Approve Pages may have 0 workflow steps (e.g., archived programs). These are stored but filtered out in display (WHERE current_step IS NOT NULL AND current_step != '').
 
 ### Auto-Deploy After Scan
-After each scan completes, `app.py` automatically runs `export_static.py`, then `git add docs/ && git commit && git push`. This requires the working directory to resolve correctly (uses `os.path.abspath(__file__)`).
+After a full scan completes (`do_scan` in `app.py`) AND after every "Update Now" heal (`api_heal` background thread), the system automatically runs `export_static.py` then `git add docs/ && git commit && git push`. The heal commits with message `"Quick update YYYY-MM-DD HH:MM"`; the full scan commits with `"Auto-update YYYY-MM-DD HH:MM"`. Both rely on `os.path.abspath(__file__)` to resolve cwd.
 
 ## Dependencies
 - Python 3.9+ (macOS system Python works)
@@ -347,8 +352,12 @@ Both Programs and Courses views have a **Complete** button at the right end of t
 
 - **DB:** `programs.completion_date` and `courses.completion_date` (both TEXT, nullable). `programs.campus` captures the XML `<campus>` code so we don't have to re-parse the name. `get_all_programs()` and `get_all_courses()` both return rows that have either a non-empty `current_step` OR a non-empty `completion_date` — the frontend hides completed items by default and shows them only when the Complete button is active.
 - **Scraper completion detection:** in `run_full_scan` (programs) and `process_course_scans` (courses), an item is flagged complete when `total_steps > 0` AND `completed_steps == total_steps` AND the workflow HTML has no `current` step. The regular discovery path rarely catches completions (completed items drop off the Approve Pages queue), so the **historical sweep** is the authoritative ingester of completed items.
-- **Source of truth for `current_step`:** each program's per-page workflow HTML at `/programadmin/{id}/` — specifically the `<li class="current">` marker in the `<div id="workflow">`. CourseLeaf's Approve Pages role dropdown IS NOT authoritative: it returns different program lists depending on the viewer's session permissions (we hit a case where the scraper's session saw 2 programs at GPR while the actual provost reviewer saw 9). The workflow div is derived from each program's real approval history and is accessible for every program regardless of role permissions. Phase 3 ingestion reads `current_step` straight from the `current` marker; Approve Pages iteration is used only to enumerate which program IDs to fetch.
-- **On-demand heal:** `POST /api/heal` calls `scraper.heal_stale_program_steps(log=True)`, which iterates every program in the DB, re-fetches its workflow HTML, and syncs `current_step` / `completion_date` from the `current` marker. Sibling `heal_stale_course_steps()` does the same for courses. Both reuse the async batch fetchers and run in ~3-5 min for 1600 programs / 700 courses respectively.
+- **Source of truth for `current_step`:** the **live Approve Pages pending list at `/courseleaf/approve/`** — the screen the user uses to approve programs. The dashboard mirrors that view exactly. (We tried per-program workflow HTML earlier; CIM's two pages can disagree because the per-program `<li class="current">` marker can lag the pending list, and operationally the user trusts the pending list — that's where the work gets done.)
+- **Heal: mirror DB to live Approve Pages — `heal_stale_program_steps()` / `heal_stale_course_steps()`:** iterates every role in `ALL_ROLES` (programs) or `get_all_approve_roles()` (courses), queries each role's pending list via `scrape_approve_pages_role()` / `scrape_courses_from_role()`, builds a `pid → role` map, then:
+  1. For each `(pid, role)` in the live map: ensure the DB row's `current_step = role`. Brand-new programs (in live, not in DB) are batch-fetched once for full metadata.
+  2. For DB rows with a non-empty `current_step` whose ID is NOT in the live map: clear `current_step` (the program has moved off every queue — gone from CIM's reviewer view).
+  Each role query uses an async poll-until-stable loop (CourseLeaf populates the list via XHR; the old fixed 2s sleep undercounted). Total time ≈ 6 min for 46 program roles.
+- **On-demand heal endpoint:** `POST /api/heal` runs `heal_stale_program_steps` then `heal_stale_course_steps`. Body: `{"scope": "programs"|"courses"|"both", "deploy": true|false}`. The "Update Now" dashboard button posts `{scope: "both", deploy: true}` so it re-syncs and re-deploys in one click. Status is exposed via `/api/scan/status` (sets `running: true` while heal is in flight).
 - **Historical sweep — `sweep_all_program_ids()` / `sweep_all_course_ids()`:** walk every CIM ID in a range (default programs 1..2100, courses 1..25000), fetch each via `batch_fetch_program_details` / `batch_fetch_course_details`, and upsert both active and completed items. Treats any item without a workflow div as completed/historical (CIM only renders the workflow during an active proposal). Surrogate completion dates:
   - Programs: `"Catalog 2025-2026"` from XML `<eff_cat>`
   - Courses: `"Term 202630"` from XML `<eff_term>` (CIM course XML doesn't expose `<eff_cat>`)
@@ -377,7 +386,7 @@ Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggl
   - Approval history — all `([Weekday], DD Mon YYYY HH:MM:SS GMT) ... Approved for (step)` pairs; the last one becomes `last_approval_date` (when current step was entered)
 - **step_entered_date priority:** `last_approval_date` → `date_submitted` → `now`. `upsert_course` overwrites an existing stale value when the scraper provides a historical date, so first-scan "now" defaults get corrected on subsequent scans.
 - **Database:** `courses`, `course_workflow_steps`, `course_changes` tables. `courses` includes `credits`, `description`, `academic_level` (UG/GR/CP/GR-UG codes from XML).
-- **Pipeline bucketing (display only):** `static/app.js` defines `COURSE_BUCKETS` that collapse many discrete role names into a handful of pipeline columns — `OTP` (any step starting with "Provost"), `Registrar` (any "REGISTRAR"), `Course Review` (Course Review 2 + 3), `Course Review Group` (anything starting with "Course Review Group", including "Complete - Hold"), `Data Entry`, `Banner`. Everything else (department chairs, college committees, program directors) aggregates into `College`. `isCourseCollegeStep()` excludes these prefixes from the College bucket.
+- **Pipeline bucketing (display only):** `static/app.js` defines `COURSE_BUCKETS` that collapse many discrete role names into a handful of pipeline columns — `Checkpoint`, `Course Review` (Course Review 2/3 + PS Course Review), `Course Review Group` (anything starting with "Course Review Group", incl. "Complete - Hold"), `OTP` (any step starting with "Provost" or "Program Provost"), `Subcommittees` (Graduate Council Subcommittee One/Two + UUCC Subcommittee One/Two), `Grad Curric` (Graduate Curriculum Committee Chair + Undergraduate Curriculum Committee Chair), `GRA Regulatory` (Course GRA Regulatory Validation), `Data Entry` (any "Data Entry *"), `Registrar` (any "REGISTRAR *" + "Degree Audit Courses"), `Banner` (any "Banner *"), `Editor` (any "Editor *"). Everything else (department chairs, individual reviewers like "Tammy Dow", etc.) aggregates into `College` — `isCourseCollegeStep()` is a catch-all that returns true for any step not matched by an explicit bucket above. `collapseCoursePipeline()` also drops unbucketed server-side roles from rendering so they don't get noisy stand-alone tiles.
 - **Course-level type filter:** `classifyCourseLevel()` maps `acad_level` codes to Undergraduate/Graduate/Continuing (CP), with a course-number fallback (1000–4999 UG, 5000+ GR). `GR-UG` / `UG-GR` → Graduate. A "Continuing" button appears on Courses view only.
 - **Course table columns:** both programs and courses share the same 5-column table (Title / College / Current Step / Progress / Days). Column 2 header is always "College"; for courses, `classifyCourseLevel` is used for filtering but the displayed value is the abbreviated college name.
 - **Approver filter isolation:** separate `/api/course_approvers` + `/api/course_approver/<email>` endpoints. The programs version was keyed by `program.id`, which collided numerically with course IDs, causing false-positive matches across views.
