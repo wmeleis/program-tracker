@@ -1675,10 +1675,35 @@ function extractCourseLines(html) {
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
+
+            // Some programs (especially AI / AI—Align Boston) put a PAIR of
+            // required courses on a single row: "CS 5001 and CS 5003" in the
+            // codecol with a combined title and combined credit hours. For
+            // diffing to work against deployments that may list only one of
+            // them, we split these into separate course lines here. Each
+            // stacked code becomes its own item; the shared title is kept on
+            // the first line (display only — diff key is code).
+            const normalizedCode = codecol.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(?:or|and)\s+/i, '');
+            const allCodes = normalizedCode.match(/[A-Z]{2,5}\s+\d{4}[A-Z]?/gi) || [];
+            if (allCodes.length >= 2 && /\band\s+[A-Z]{2,5}\s+\d{4}/i.test(normalizedCode)) {
+                allCodes.forEach((code, idx) => {
+                    const upper = code.toUpperCase().replace(/\s+/g, ' ');
+                    lines.push({
+                        key: upper,
+                        code: upper,
+                        title: idx === 0 ? titlecol : '',
+                        hours: idx === 0 ? hourscol : '',
+                        isHeader: false,
+                        section: currentSection,
+                    });
+                });
+                return;
+            }
+
             // Match on course code alone. Titles and hours can drift (renamed,
             // minor edits, different campus wording) without representing a real
             // curriculum change. If the code matches, the course matches.
-            const normCode = codecol.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(?:or|and)\s+/i, '').toUpperCase();
+            const normCode = normalizedCode.toUpperCase();
             lines.push({key: normCode, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
         } else {
             // Non-course context row — run through standardizeHeader to suppress
