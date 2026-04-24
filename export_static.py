@@ -1021,7 +1021,9 @@ function __staticInit() {
         }
     };
 
-    // Update button tries to reach local Flask server to trigger scan + deploy
+    // Update button: reach local Flask to trigger the quick heal (~4-5 min)
+    // which refreshes active program + course current_step values from
+    // workflow HTML and auto-pushes to GitHub Pages when done.
     window.triggerScan = async function() {
         const btn = document.getElementById('scan-btn');
         const statusEl = document.getElementById('scan-status');
@@ -1029,24 +1031,33 @@ function __staticInit() {
         statusEl.innerHTML = '<span class="spinner"></span> Connecting...';
         statusEl.className = 'scan-status running';
         try {
-            const res = await fetch('http://localhost:5001/api/scan/trigger', {method: 'POST', mode: 'cors'});
+            const res = await fetch('http://localhost:5001/api/heal', {
+                method: 'POST',
+                mode: 'cors',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({scope: 'both', active_only: true, deploy: true}),
+            });
             if (res.ok) {
-                statusEl.innerHTML = '<span class="spinner"></span> Updating (this takes ~20 min)...';
-                // Poll local server for completion
+                statusEl.innerHTML = '<span class="spinner"></span> Updating (this takes ~5 min)...';
                 const poll = setInterval(async () => {
                     try {
                         const s = await fetch('http://localhost:5001/api/scan/status');
                         const d = await s.json();
                         if (!d.running) {
                             clearInterval(poll);
-                            statusEl.textContent = 'Update complete! Page will refresh with new data shortly.';
+                            statusEl.textContent = 'Update complete! Refresh the page to see the new data.';
                             btn.disabled = false;
                         }
                     } catch(e) { clearInterval(poll); btn.disabled = false; }
-                }, 15000);
+                }, 10000);
+            } else {
+                let detail = 'Update could not start.';
+                try { detail = (await res.json()).detail || detail; } catch (_) {}
+                statusEl.textContent = detail;
+                btn.disabled = false;
             }
         } catch(e) {
-            statusEl.textContent = 'Cannot reach local server. Run update.sh on your Mac.';
+            statusEl.textContent = 'Cannot reach local server. Make sure Flask is running (python3 app.py) on your Mac.';
             btn.disabled = false;
         }
     };
