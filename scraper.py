@@ -1260,250 +1260,305 @@ def sweep_all_course_ids(start_id=1, end_id=25000, batch_size=25, log=True):
 
 
 def heal_stale_program_steps(log=False, active_only=True):
-    """Re-fetch every program's workflow HTML and sync current_step from it.
+    """Mirror DB current_step to live CourseLeaf Approve Pages pending lists.
 
-    Workflow HTML (/programadmin/{id}/) is the authoritative source — the
-    `<li class="current">` marker is derived from each program's real
-    approval history. The Approve Pages role dropdown is unreliable because
-    CourseLeaf filters its response by the viewer's session permissions,
-    and in practice undercounts roles we don't have direct assignment to.
+    The dashboard's "where is each program" must match what you see when you
+    visit /courseleaf/approve/ — the screen you use to approve programs.
+    For each tracked role, we query its live pending list and set every
+    program in that list to current_step = role. Programs in the DB at any
+    tracked role but no longer on any live list get current_step cleared.
 
-    For every program in get_all_programs(), we fetch its workflow HTML and:
-      - If HTML has a current marker → set current_step to that marker's name.
-      - If HTML has no current (all approved) → clear current_step and set
-        completion_date from last approval history.
-      - If HTML fetch failed → leave the row alone (don't make changes based
-        on missing data).
+    Why not the per-program workflow HTML? Two CIM pages can disagree:
+    the per-program /programadmin/{id}/ workflow panel can lag the pending
+    list (we observed 9 programs whose workflow panel said "current=GPR"
+    but who weren't in the GPR pending list). The pending list is the
+    operational source — it's what the approver acts from. We mirror that.
 
-    Safe to call any time. Runs in ~30s for ~1600 programs since it reuses
-    the existing async batch_fetch_program_details pipeline.
+    Brand-new programs found in a pending list but unknown to the DB are
+    fetched in a small batch so we have name / college / banner to display.
 
     Args:
         log: if True, print a running commentary.
+        active_only: kept for backwards-compat; this function always
+            iterates every tracked role (which IS active-only by definition
+            — completed programs aren't in any pending list).
 
     Returns:
-        (warnings, fixed) -- fixed counts programs whose current_step or
-        completion_date was changed. warnings counts programs we couldn't
-        fetch.
+        (warnings, fixed) -- fixed counts programs whose current_step changed.
     """
-    from database import get_all_programs, get_db, upsert_program, upsert_workflow_steps
+    from database import (
+        get_all_programs, get_db, upsert_program, upsert_workflow_steps, record_scan,
+    )
 
-    programs = get_all_programs()
-    if active_only:
-        # Skip completed historical programs — their workflow is frozen, so
-        # re-fetching them every heal just burns time. The weekly historical
-        # sweep refreshes them.
-        programs = [p for p in programs if p.get('current_step')]
-    program_ids = [p['id'] for p in programs]
     if log:
-        scope = 'active-only' if active_only else 'all programs'
-        print(f"\nSyncing {len(program_ids)} programs' current_step from workflow HTML ({scope})...")
+        print(f"\nMirroring DB to live Approve Pages pending lists "
+              f"({len(ALL_ROLES)} roles)...")
 
-    details = batch_fetch_program_details(program_ids, batch_size=25)
+    # Step 1: build pid -> role map from live pending lists
+    live_assignments = {}  # pid -> {role, name, user}
+    for role in ALL_ROLES:
+        progs = scrape_approve_pages_role(role)
+        for p in progs:
+            pid = p['id']
+            if pid not in live_assignments:
+                live_assignments[pid] = {
+                    'role': role,
+                    'name': p.get('name', ''),
+                    'user': p.get('user', ''),
+                }
+        if log and progs:
+            print(f"  {role}: {len(progs)}")
 
-    # Index existing DB rows for quick comparison
-    existing_by_id = {p['id']: p for p in programs}
+    if log:
+        print(f"\nLive: {len(live_assignments)} unique programs")
 
-    warnings = 0
+    # Step 2: snapshot current DB state
+    db_programs = {p['id']: p for p in get_all_programs()}
+
     fixed = 0
-    for pid in program_ids:
-        d = details.get(pid, {})
-        steps = d.get('steps') or []
-        meta = d.get('meta') or {}
-        if not steps:
-            # No workflow HTML came back (or page had no workflow div, meaning
-            # the program has no active proposal). For completed/historical
-            # programs this is the expected state — don't treat as a warning.
-            existing = existing_by_id.get(pid, {})
-            if existing.get('completion_date'):
-                continue  # historical program, no change needed
-            # Otherwise it's likely a transient fetch failure — log and skip.
-            warnings += 1
-            if log:
-                print(f"  {pid}: no workflow HTML (skipping)")
+    new_program_ids = []
+
+    # Step 3a: programs in live → ensure DB matches
+    for pid, info in live_assignments.items():
+        existing = db_programs.get(pid)
+        if existing and existing.get('current_step') == info['role']:
+            continue  # already correct
+        if not existing:
+            # Brand-new program — defer to a single batched detail fetch below
+            new_program_ids.append(pid)
             continue
-
-        html_current = next((s for s in steps if s.get('status') == 'current'), None)
-        total = len(steps)
-        approved = sum(1 for s in steps if s.get('status') == 'approved')
-        new_step = html_current.get('name', '') if html_current else ''
-        new_emails = html_current.get('emails', '') if html_current else ''
-        is_complete = (total > 0 and approved == total and html_current is None)
-        new_completion = meta.get('last_approval_date', '') if is_complete else ''
-
-        existing = existing_by_id.get(pid, {})
-        old_step = existing.get('current_step') or ''
-        old_completion = existing.get('completion_date') or ''
-
-        if old_step == new_step and old_completion == new_completion:
-            continue  # nothing changed
-
-        # Build upsert payload — preserve non-empty existing metadata fields.
-        name = meta.get('program_title') or existing.get('name') or f'Program #{pid}'
-        college_code = meta.get('college', '')
-        college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
-
-        proposal_type = meta.get('proposal_type', '')
-        if 'New Program' in proposal_type:
-            status = 'Added'
-        elif 'Inactivation' in proposal_type:
-            status = 'Deactivated'
-        else:
-            status = existing.get('status') or 'Edited'
-
-        program_data = {
-            'id': pid,
-            'name': name,
-            'banner_code': meta.get('banner_code') or existing.get('banner_code', ''),
-            'status': status,
-            'current_step': new_step,
-            'total_steps': total,
-            'completed_steps': approved,
-            'current_approver_emails': new_emails,
-            'program_type': classify_program_type(name, steps),
-            'college': college or existing.get('college', ''),
-            'department': meta.get('department') or existing.get('department', ''),
-            'degree': meta.get('degree') or existing.get('degree', ''),
-            'date_submitted': meta.get('date_submitted') or existing.get('date_submitted', ''),
-            'step_entered_date': meta.get('last_approval_date') or existing.get('step_entered_date', ''),
-            'curriculum_html': (meta.get('curriculum_html', '') or '')
-                               .replace('<![CDATA[', '').replace(']]>', '').strip()
-                               or existing.get('curriculum_html', ''),
-            'completion_date': new_completion,
-            'campus': meta.get('campus') or existing.get('campus', ''),
-        }
-        upsert_program(program_data)
-        upsert_workflow_steps(pid, steps)
+        # Existing program at a different (or no) step — update directly.
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE programs SET current_step = ?, completion_date = '', "
+                "last_updated = ? WHERE id = ?",
+                (info['role'], datetime.now().isoformat(), pid),
+            )
         fixed += 1
         if log and fixed <= 50:
-            target = f'completed ({new_completion})' if is_complete else new_step
-            print(f"  {pid}: {old_step!r} → {target!r}")
+            print(f"  {pid}: {(existing.get('current_step') or '(empty)')!r} → {info['role']!r}")
 
-    if log:
-        print(f"Sync complete: {fixed} changed, {warnings} unfetchable")
+    # Step 3b: programs in DB at any step but no longer in live → clear
+    for pid, p in db_programs.items():
+        if not p.get('current_step'):
+            continue
+        if pid in live_assignments:
+            continue  # already handled
+        # No longer in any live pending list. Either the program completed
+        # or moved into an untracked role — either way, it's no longer in
+        # any approver's queue, so the dashboard pipeline shouldn't show it.
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE programs SET current_step = '', current_approver_emails = '', "
+                "last_updated = ? WHERE id = ?",
+                (datetime.now().isoformat(), pid),
+            )
+        fixed += 1
+        if log and fixed <= 50:
+            print(f"  {pid}: {p.get('current_step')!r} → '' (gone from all pending lists)")
 
-    # Record a scan row so the dashboard's "Updated" label reflects this
-    # refresh. Without it, the label would still show the last full scan
-    # (which could be hours/days older than the heal).
-    from database import record_scan
+    # Step 3c: brand-new programs — batch-fetch details for full metadata
+    if new_program_ids:
+        if log:
+            print(f"\nFetching full details for {len(new_program_ids)} new programs...")
+        details = batch_fetch_program_details(new_program_ids, batch_size=25)
+        for pid in new_program_ids:
+            d = details.get(pid, {})
+            steps = d.get('steps') or []
+            meta = d.get('meta') or {}
+            info = live_assignments[pid]
+            name = meta.get('program_title') or info.get('name') or f'Program #{pid}'
+            college_code = meta.get('college', '')
+            college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
+            proposal_type = meta.get('proposal_type', '')
+            if 'New Program' in proposal_type:
+                status = 'Added'
+            elif 'Inactivation' in proposal_type:
+                status = 'Deactivated'
+            else:
+                status = 'Edited'
+            program_data = {
+                'id': pid,
+                'name': name,
+                'banner_code': meta.get('banner_code', ''),
+                'status': status,
+                'current_step': info['role'],  # from Approve Pages
+                'total_steps': len(steps),
+                'completed_steps': sum(1 for s in steps if s.get('status') == 'approved'),
+                'current_approver_emails': '',
+                'program_type': classify_program_type(name, steps),
+                'college': college,
+                'department': meta.get('department', ''),
+                'degree': meta.get('degree', ''),
+                'date_submitted': meta.get('date_submitted', ''),
+                'step_entered_date': meta.get('last_approval_date', ''),
+                'curriculum_html': (meta.get('curriculum_html', '') or '')
+                                   .replace('<![CDATA[', '').replace(']]>', '').strip(),
+                'completion_date': '',
+                'campus': meta.get('campus', ''),
+            }
+            upsert_program(program_data)
+            if steps:
+                upsert_workflow_steps(pid, steps)
+            fixed += 1
+            if log:
+                print(f"  {pid}: NEW → {info['role']!r}")
+
     record_scan(
         datetime.now().isoformat(),
-        programs_scanned=len(program_ids),
-        programs_with_workflow=len(program_ids) - warnings,
+        programs_scanned=len(live_assignments),
+        programs_with_workflow=len(live_assignments),
         changes_detected=fixed,
     )
-    return warnings, fixed
+
+    if log:
+        print(f"Sync complete: {fixed} program changes")
+    return 0, fixed
 
 
 def heal_stale_course_steps(log=False, active_only=True):
-    """Course-side analog of heal_stale_program_steps. Re-fetches each
-    course's workflow HTML and syncs current_step / completion_date from it.
+    """Mirror DB course current_step to live Approve Pages pending lists.
 
-    Same rationale: Approve Pages queues are role-session-filtered and
-    undercount; each course's per-page workflow HTML is authoritative.
+    Same logic as heal_stale_program_steps but for courses. Iterates every
+    course-bearing role's pending list (from get_all_approve_roles), sets
+    current_step from the live list, and clears anything in DB no longer
+    on any list.
+
+    `active_only` is kept for API compatibility but doesn't affect behavior
+    — completed courses aren't in any pending list, so they're naturally
+    untouched.
     """
-    from database import get_all_courses, upsert_course, upsert_course_workflow_steps
+    from database import (
+        get_all_courses, get_db, upsert_course, upsert_course_workflow_steps,
+        record_course_scan,
+    )
 
-    courses = get_all_courses()
-    if active_only:
-        courses = [c for c in courses if c.get('current_step')]
-    course_ids = [c['id'] for c in courses]
     if log:
-        scope = 'active-only' if active_only else 'all courses'
-        print(f"\nSyncing {len(course_ids)} courses' current_step from workflow HTML ({scope})...")
+        print(f"\nMirroring DB courses to live Approve Pages pending lists...")
 
-    details = batch_fetch_course_details(course_ids, batch_size=25)
-    existing_by_id = {c['id']: c for c in courses}
+    # Gather every role available in the dropdown (covers course-related
+    # roles plus a few program ones that don't have courses; iterating
+    # extras is cheap and avoids missing course roles).
+    all_roles = get_all_approve_roles() or COURSE_TRACKED_ROLES
 
-    warnings = 0
+    live_assignments = {}  # cid -> {role, name, user}
+    for role in all_roles:
+        rows = scrape_courses_from_role(role)
+        for r in rows:
+            cid = r['id']
+            if cid not in live_assignments:
+                live_assignments[cid] = {
+                    'role': role,
+                    'name': r.get('name', ''),
+                    'user': r.get('user', ''),
+                }
+        if log and rows:
+            print(f"  {role}: {len(rows)}")
+
+    if log:
+        print(f"\nLive: {len(live_assignments)} unique courses")
+
+    db_courses = {c['id']: c for c in get_all_courses()}
     fixed = 0
-    for cid in course_ids:
-        d = details.get(cid, {})
-        steps = d.get('steps') or []
-        meta = d.get('meta') or {}
-        existing = existing_by_id.get(cid, {})
+    new_course_ids = []
 
-        if not steps:
-            if existing.get('completion_date'):
-                continue  # historical, expected
-            warnings += 1
-            if log:
-                print(f"  {cid}: no workflow HTML (skipping)")
+    # 3a: courses in live → ensure DB matches
+    for cid, info in live_assignments.items():
+        existing = db_courses.get(cid)
+        if existing and existing.get('current_step') == info['role']:
             continue
-
-        html_current = next((s for s in steps if s.get('status') == 'current'), None)
-        total = len(steps)
-        approved = sum(1 for s in steps if s.get('status') == 'approved')
-        new_step = html_current.get('name', '') if html_current else ''
-        new_emails = html_current.get('emails', '') if html_current else ''
-        is_complete = (total > 0 and approved == total and html_current is None)
-        if is_complete:
-            new_completion = meta.get('last_approval_date') or 'Approved'
-        else:
-            new_completion = ''
-
-        old_step = existing.get('current_step') or ''
-        old_completion = existing.get('completion_date') or ''
-        if old_step == new_step and old_completion == new_completion:
+        if not existing:
+            new_course_ids.append(cid)
             continue
-
-        # Code / title from XML
-        course_code = (meta.get('course_code') or '').strip()
-        if not course_code:
-            subject = (meta.get('subject') or '').strip()
-            number = (meta.get('course_number') or '').strip()
-            course_code = (subject + ' ' + number).strip() if (subject and number) else existing.get('code') or cid
-        title = meta.get('course_title') or existing.get('title') or course_code
-        college_code = meta.get('college', '')
-        college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
-
-        ptype = meta.get('proposal_type', '')
-        if 'New Course' in ptype:
-            status = 'Added'
-        elif 'Inactivation' in ptype:
-            status = 'Deactivated'
-        else:
-            status = existing.get('status') or 'Edited'
-
-        course_data = {
-            'id': cid,
-            'code': course_code,
-            'title': title,
-            'status': status,
-            'current_step': new_step,
-            'total_steps': total,
-            'completed_steps': approved,
-            'current_approver_emails': new_emails,
-            'college': college or existing.get('college', ''),
-            'date_submitted': meta.get('date_submitted') or existing.get('date_submitted', ''),
-            'credits': meta.get('credits') or existing.get('credits', ''),
-            'description': meta.get('description') or existing.get('description', ''),
-            'academic_level': meta.get('acad_level') or existing.get('academic_level', ''),
-            'completion_date': new_completion,
-            'step_entered_date': meta.get('last_approval_date') or existing.get('step_entered_date', ''),
-        }
-        upsert_course(course_data)
-        upsert_course_workflow_steps(cid, [
-            {'order': s.get('order', i), 'name': s.get('name', ''),
-             'status': s.get('status', 'pending'), 'emails': s.get('emails', '')}
-            for i, s in enumerate(steps)
-        ])
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE courses SET current_step = ?, completion_date = '', "
+                "last_updated = ? WHERE id = ?",
+                (info['role'], datetime.now().isoformat(), cid),
+            )
         fixed += 1
         if log and fixed <= 50:
-            target = f'completed ({new_completion})' if is_complete else new_step
-            print(f"  {cid}: {old_step!r} → {target!r}")
+            print(f"  {cid}: {(existing.get('current_step') or '(empty)')!r} → {info['role']!r}")
 
-    if log:
-        print(f"Course sync complete: {fixed} changed, {warnings} unfetchable")
+    # 3b: courses in DB at any step but no longer in live → clear
+    for cid, c in db_courses.items():
+        if not c.get('current_step'):
+            continue
+        if cid in live_assignments:
+            continue
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE courses SET current_step = '', current_approver_emails = '', "
+                "last_updated = ? WHERE id = ?",
+                (datetime.now().isoformat(), cid),
+            )
+        fixed += 1
+        if log and fixed <= 50:
+            print(f"  {cid}: {c.get('current_step')!r} → '' (gone from all pending lists)")
 
-    from database import record_course_scan
+    # 3c: brand-new courses — batch-fetch full details
+    if new_course_ids:
+        if log:
+            print(f"\nFetching full details for {len(new_course_ids)} new courses...")
+        details = batch_fetch_course_details(new_course_ids, batch_size=25)
+        for cid in new_course_ids:
+            d = details.get(cid, {})
+            steps = d.get('steps') or []
+            meta = d.get('meta') or {}
+            info = live_assignments[cid]
+            course_code = (meta.get('course_code') or '').strip()
+            if not course_code:
+                subject = (meta.get('subject') or '').strip()
+                number = (meta.get('course_number') or '').strip()
+                course_code = (subject + ' ' + number).strip() if (subject and number) else cid
+            title = meta.get('course_title') or info.get('name') or course_code
+            college_code = meta.get('college', '')
+            college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
+            ptype = meta.get('proposal_type', '')
+            if 'New Course' in ptype:
+                status = 'Added'
+            elif 'Inactivation' in ptype:
+                status = 'Deactivated'
+            else:
+                status = 'Edited'
+            course_data = {
+                'id': cid,
+                'code': course_code,
+                'title': title,
+                'status': status,
+                'current_step': info['role'],
+                'total_steps': len(steps),
+                'completed_steps': sum(1 for s in steps if s.get('status') == 'approved'),
+                'current_approver_emails': '',
+                'college': college,
+                'date_submitted': meta.get('date_submitted', ''),
+                'credits': meta.get('credits', ''),
+                'description': meta.get('description', ''),
+                'academic_level': meta.get('acad_level', ''),
+                'completion_date': '',
+                'step_entered_date': meta.get('last_approval_date', ''),
+            }
+            upsert_course(course_data)
+            if steps:
+                upsert_course_workflow_steps(cid, [
+                    {'order': s.get('order', i), 'name': s.get('name', ''),
+                     'status': s.get('status', 'pending'), 'emails': s.get('emails', '')}
+                    for i, s in enumerate(steps)
+                ])
+            fixed += 1
+            if log:
+                print(f"  {cid}: NEW → {info['role']!r}")
+
     record_course_scan(
         datetime.now().isoformat(),
-        courses_scanned=len(course_ids),
-        courses_with_workflow=len(course_ids) - warnings,
+        courses_scanned=len(live_assignments),
+        courses_with_workflow=len(live_assignments),
         changes_detected=fixed,
     )
-    return warnings, fixed
+
+    if log:
+        print(f"Course sync complete: {fixed} course changes")
+    return 0, fixed
 
 
 def _parse_campus_from_name(name):
@@ -2262,57 +2317,99 @@ def fetch_regulatory_approved(program_ids):
 def scrape_courses_from_role(role_name):
     """Select a role on Approve Pages and extract pending courses.
 
+    Same poll-until-stable pattern as scrape_approve_pages_role — CourseLeaf
+    loads the list async and a fixed sleep was undercounting on slow loads.
+
     Returns list of dicts with course id, name, user (approver).
     """
-    # Select the role and trigger the pending-list display
-    js_select = f'''
+    poll_tag = f"__crsapp_{int(time.time() * 1000)}"
+    js = f'''
 (function() {{
+    var existing = document.getElementById("{poll_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{poll_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+
     var select = document.querySelector("select");
-    if (!select) return JSON.stringify({{error: "no select"}});
-    select.value = "{role_name}";
+    if (!select) {{
+        holder.textContent = JSON.stringify({{error: "no select"}});
+        holder.setAttribute("data-status", "done");
+        return "fired";
+    }}
+    select.value = {json.dumps(role_name)};
     if (typeof showPendingList === "function") {{
         showPendingList(select.value);
     }} else {{
         select.dispatchEvent(new Event("change", {{bubbles: true}}));
     }}
-    return "selected";
-}})()
+
+    function extract() {{
+        var lines = document.body.innerText.split("\\n");
+        var courses = [];
+        for (var i = 0; i < lines.length; i++) {{
+            var line = lines[i].trim();
+            var m = line.match(/^\\/courseadmin\\/(\\d+):\\s*(.+)/);
+            if (m) {{
+                var parts = m[2].split("\\t");
+                courses.push({{
+                    id: m[1],
+                    name: parts[0].trim(),
+                    user: parts.length > 1 ? parts[1].trim() : "",
+                }});
+            }}
+        }}
+        return courses;
+    }}
+
+    var lastSize = -1;
+    var stableCount = 0;
+    var elapsed = 0;
+    var interval = setInterval(function() {{
+        elapsed += 500;
+        var courses = extract();
+        if (courses.length === lastSize) stableCount++;
+        else stableCount = 0;
+        lastSize = courses.length;
+        if ((courses.length > 0 && stableCount >= 3) || elapsed >= 15000) {{
+            clearInterval(interval);
+            holder.textContent = JSON.stringify(courses);
+            holder.setAttribute("data-status", "done");
+        }}
+    }}, 500);
+    return "fired";
+}})();
 '''
-    result = run_js_in_tab("courseleaf/approve", js_select, match_by='url')
-    if not result or result == 'missing value':
+    fired = run_js_in_tab("courseleaf/approve", js, match_by='url', timeout=20)
+    if not fired or fired == 'missing value':
         return []
 
-    time.sleep(2)
+    check_js = f'''(function(){{ var el = document.getElementById("{poll_tag}"); if (!el) return "MISSING"; return el.getAttribute("data-status") === "done" ? el.textContent : "RUNNING"; }})();'''
+    payload = None
+    for _ in range(20):
+        time.sleep(1)
+        r = run_js_in_tab("courseleaf/approve", check_js, match_by='url', timeout=10)
+        if r and r != 'missing value' and r != 'RUNNING' and r != 'MISSING':
+            payload = r
+            break
 
-    # Extract courses using the /courseadmin/NNNNN: pattern
-    js_extract = '''
-(function() {
-    var text = document.body.innerText;
-    var lines = text.split("\\n");
-    var courses = [];
-    for (var i = 0; i < lines.length; i++) {
-        var line = lines[i].trim();
-        var match = line.match(/^\\/courseadmin\\/(\\d+):\\s*(.+)/);
-        if (match) {
-            var id = match[1];
-            var rest = match[2];
-            var parts = rest.split("\\t");
-            var nameRaw = parts[0].trim();
-            var user = parts.length > 1 ? parts[1].trim() : "";
-            courses.push({ id: id, name: nameRaw, user: user });
-        }
-    }
-    return JSON.stringify(courses);
-})()
-'''
-    result = run_js_in_tab("courseleaf/approve", js_extract, match_by='url')
-    if not result or result == 'missing value':
+    run_js_in_tab(
+        "courseleaf/approve",
+        f'var e=document.getElementById("{poll_tag}"); if(e) e.remove();',
+        match_by='url', timeout=5,
+    )
+
+    if not payload:
         return []
-
     try:
-        return json.loads(result)
+        data = json.loads(payload)
     except json.JSONDecodeError:
         return []
+    if isinstance(data, dict) and 'error' in data:
+        return []
+    return data
 
 
 def get_all_approve_roles():
