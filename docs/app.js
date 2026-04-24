@@ -2329,26 +2329,33 @@ async function checkSessionHealth() {
 async function triggerScan() {
     const btn = document.getElementById('scan-btn');
     btn.disabled = true;
-    document.getElementById('scan-status').innerHTML = '<span class="spinner"></span> Scanning...';
+    document.getElementById('scan-status').innerHTML = '<span class="spinner"></span> Updating...';
     document.getElementById('scan-status').className = 'scan-status running';
 
     try {
-        const res = await fetch('/api/scan/trigger', { method: 'POST' });
+        // "Update Now" runs the quick heal — re-fetches workflow HTML for
+        // every active program + course and syncs current_step. ~4-5 min.
+        // Auto-exports and pushes to GitHub Pages when done. The nightly
+        // launchd run does the full scan that discovers new IDs and
+        // refreshes reference + regulatory data.
+        const res = await fetch('/api/heal', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({scope: 'both', active_only: true, deploy: true}),
+        });
         if (!res.ok) {
-            // 503 = session check failed; show banner with the returned detail
-            let detail = 'Scan could not start.';
+            let detail = 'Update could not start.';
             try {
                 const data = await res.json();
                 detail = data.detail || data.error || detail;
             } catch (_) {}
-            showErrorBanner('Cannot start scan: ' + detail);
+            showErrorBanner('Cannot start update: ' + detail);
             btn.disabled = false;
             document.getElementById('scan-status').textContent = '';
             document.getElementById('scan-status').className = 'scan-status';
             return;
         }
         dismissErrorBanner();
-        // Poll for completion
         pollScanStatus();
     } catch (e) {
         console.error('Failed to trigger scan:', e);
