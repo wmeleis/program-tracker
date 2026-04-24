@@ -786,49 +786,28 @@ def run_full_scan():
         # Calculate progress
         total = len(steps)
         completed = sum(1 for s in steps if s.get('status') == 'approved')
-        # Default: trust Approve Pages queue (Phase 1) for current_step,
-        # because the per-program workflow HTML's `<li class="current">`
-        # marker used to lag in the opposite direction. But the approval
-        # history is the authoritative record — if Approve Pages put the
-        # program at step X but the history log shows X already approved,
-        # Approve Pages is stale (this exact failure caused MS Management
-        # Boston/Online to sit at "Graduate Provost Review" after they'd
-        # moved to GCC). In that case we defer to the workflow HTML's
-        # `current` marker instead.
+        # Approve Pages queue (Phase 1) is THE source of truth for current_step.
+        # CourseLeaf's per-program workflow HTML `<li class="current">` marker
+        # sometimes disagrees with the pending list — e.g. program 150 has a
+        # Nursing workflow (Banner → BV Audit → Catalog) whose HTML shows
+        # Catalog as current even while the program still sits in the
+        # Provost's pending queue. The pending queue is what reviewers see
+        # in CIM and what users check counts against, so we match it.
         current_step = info.get('current_step', '')
         current_emails = ''
-        approvals = meta.get('approvals', []) or []
-        approved_step_names = {
-            (a.get('step') or '').rstrip('</li>').strip()
-            for a in approvals
-        }
         html_current = next((s for s in steps if s.get('status') == 'current'), None)
+        matched = next((s for s in steps if s.get('name') == current_step), None)
+        if matched:
+            current_emails = matched.get('emails', '')
+        elif not current_step and html_current:
+            # Approve Pages had no assignment (program isn't in any tracked
+            # role's queue); fall back to the workflow div's marker as a
+            # last resort. This branch rarely fires during a full scan.
+            current_step = html_current.get('name', '')
+            current_emails = html_current.get('emails', '')
 
-        if current_step and current_step in approved_step_names:
-            # Approve Pages queue is stale — this step was already approved.
-            if html_current:
-                current_step = html_current.get('name', '')
-                current_emails = html_current.get('emails', '')
-            else:
-                # All steps approved per HTML → program has completed workflow.
-                current_step = ''
-                current_emails = ''
-        else:
-            matched = next((s for s in steps if s.get('name') == current_step), None)
-            if matched:
-                current_emails = matched.get('emails', '')
-            elif not current_step and html_current:
-                # Approve Pages had no assignment; fall back to workflow div.
-                current_step = html_current.get('name', '')
-                current_emails = html_current.get('emails', '')
-
-        # Derive completion_date when the workflow is fully approved.
-        is_complete = (
-            total > 0
-            and completed == total
-            and html_current is None
-            and not current_step
-        )
+        # Derive completion_date when there's no current step anywhere.
+        is_complete = (total > 0 and completed == total and not current_step)
         completion_date = meta.get('last_approval_date', '') if is_complete else ''
 
         prog_type = classify_program_type(prog_name, steps)
@@ -1234,30 +1213,27 @@ def sweep_all_course_ids(start_id=1, end_id=25000, batch_size=25, log=True):
 
 
 def heal_stale_program_steps(log=False):
-    """Reconcile DB program rows against live Approve Pages for each tracked role.
+    """Bidirectional reconcile of DB program rows against live Approve Pages
+    for each tracked role. Approve Pages is the source of truth.
 
-    For each role: re-query the live pending list; if the DB has programs at
-    that role that aren't on the live list, re-fetch each candidate's
-    workflow HTML directly and update the DB from that authoritative source
-    (not from a blind clear). Requires two back-to-back pending-list queries
-    to agree before acting (guards against CourseLeaf's transient stale
-    views).
+    For each role: re-query the live pending list, then:
+      (a) For DB programs at role X that live doesn't have: clear their
+          current_step (they've moved off the queue).
+      (b) For live programs at role X that DB doesn't have at X: fetch each
+          program's full detail and set current_step = X. This covers the
+          case where a program advanced into a new role between scans.
 
-    This verify-before-act design prevents the "pending list is stale in both
-    directions" failure mode: some programs linger at their old step (stale
-    positive) while newly-arrived programs don't appear in their new step's
-    pending list yet (stale negative). Either way, the per-program workflow
-    HTML at `/programadmin/{id}/` is the ground truth.
-
-    Safe to call outside a full scan — shared by end-of-scan validation
-    and the on-demand `/api/heal` endpoint.
+    Requires two back-to-back live queries to agree before acting in
+    direction (a); no double-check for (b) because adding a live-confirmed
+    program is low-risk (the worst case is one stale addition that the next
+    scan will correct).
 
     Args:
-        log: if True, print a running commentary (used by `run_full_scan`).
+        log: if True, print a running commentary.
 
     Returns:
-        (warnings, fixed) -- counts (`fixed` = rows whose current_step was
-        updated or cleared based on the workflow HTML truth).
+        (warnings, fixed) -- fixed counts all rows whose current_step was
+        updated in either direction.
     """
     from database import (
         get_pipeline_counts, get_programs_by_step, get_db,
@@ -1271,82 +1247,96 @@ def heal_stale_program_steps(log=False):
     for role in TRACKED_ROLES:
         live1 = scrape_approve_pages_role(role)
         db_c = db_counts.get(role, 0)
-        if len(live1) == db_c:
-            continue
+        live_count = len(live1)
+        if live_count == db_c:
+            # Even if counts match, composition could still differ. Cheap
+            # check: if the live-ID set matches what DB has, we're done.
+            db_progs = get_programs_by_step(role)
+            if {p['id'] for p in live1} == {p['id'] for p in db_progs}:
+                continue
 
         if log:
-            print(f"  WARNING: {role}: DB={db_c}, Live={len(live1)} (delta={len(live1) - db_c})")
+            print(f"  {role}: DB={db_c}, Live={live_count} (delta={live_count - db_c})")
         warnings += 1
 
-        if len(live1) >= db_c:
-            continue  # live has more → scanner missed something; don't speculate
-
-        live2 = scrape_approve_pages_role(role)
-        live_ids = {p['id'] for p in live1} & {p['id'] for p in live2}
-        if live_ids != {p['id'] for p in live1} or len(live2) != len(live1):
-            if log:
-                print(f"    Skipping heal for {role}: live view unstable across two queries")
-            continue
-
+        live_ids = {p['id'] for p in live1}
         db_progs = get_programs_by_step(role)
-        candidate_ids = [p['id'] for p in db_progs if p['id'] not in live_ids]
-        if not candidate_ids:
+        db_ids = {p['id'] for p in db_progs}
+
+        # (a) Programs DB has at this role but live doesn't — clear.
+        stale_ids = db_ids - live_ids
+        if stale_ids:
+            live2 = scrape_approve_pages_role(role)
+            live_ids_2 = {p['id'] for p in live2}
+            if live_ids_2 != live_ids or len(live2) != len(live1):
+                if log:
+                    print(f"    Skipping clears for {role}: live view unstable across two queries")
+            else:
+                with get_db() as conn:
+                    placeholders = ','.join('?' * len(stale_ids))
+                    conn.execute(
+                        f"UPDATE programs SET current_step = '', current_approver_emails = '' "
+                        f"WHERE id IN ({placeholders})",
+                        list(stale_ids),
+                    )
+                if log:
+                    print(f"    Cleared current_step for {len(stale_ids)} stale program(s): {sorted(stale_ids)}")
+                fixed += len(stale_ids)
+
+        # (b) Programs live has but DB doesn't have at this role — add.
+        missing_ids = live_ids - db_ids
+        if not missing_ids:
             continue
 
-        # Re-fetch each candidate's workflow HTML and treat that as truth.
-        details = batch_fetch_program_details(candidate_ids, batch_size=25)
-        for pid in candidate_ids:
+        # For programs we already know about from Phase 1 discovery (maybe at
+        # a different role in DB), we still need to move them to this role.
+        # Fetch full details so we can update name / college / etc. correctly
+        # for programs the DB has never seen (new arrivals).
+        live_programs = {p['id']: p for p in live1}
+        details = batch_fetch_program_details(list(missing_ids), batch_size=25)
+        for pid in missing_ids:
             d = details.get(pid, {})
             steps = d.get('steps') or []
             meta = d.get('meta') or {}
+            live_info = live_programs.get(pid, {})
 
-            if not steps:
-                # No workflow HTML came back — play it safe and leave DB alone
-                # rather than clearing based on a failed fetch.
-                if log:
-                    print(f"    Skipping {pid}: workflow HTML unavailable")
-                continue
+            # Find the matching step in the workflow HTML so we can pick up
+            # the approver emails; otherwise leave empty.
+            matched = next((s for s in steps if s.get('name') == role), None)
+            current_emails = matched.get('emails', '') if matched else ''
 
-            html_current = next((s for s in steps if s.get('status') == 'current'), None)
-            total = len(steps)
-            approved = sum(1 for s in steps if s.get('status') == 'approved')
-            if html_current and html_current.get('name') == role:
-                # HTML confirms the program IS still at this role — CourseLeaf's
-                # pending list is falsely missing it. Leave DB as-is.
-                if log:
-                    print(f"    Keeping {pid}: workflow HTML still shows 'current' at {role}")
-                continue
-
-            # HTML says the program moved (or completed). Load the existing
-            # DB row so we can preserve name / status / program_type while
-            # updating just the workflow-state fields.
+            # Load existing row (if any) to preserve unfilled fields.
             with get_db() as conn:
                 existing = conn.execute(
                     "SELECT * FROM programs WHERE id = ?", (pid,)
                 ).fetchone()
-            if not existing:
-                continue  # nothing to update
-            existing = dict(existing)
+            existing = dict(existing) if existing else {}
 
-            if html_current:
-                new_step = html_current.get('name', '')
-                new_emails = html_current.get('emails', '')
+            total = len(steps)
+            approved = sum(1 for s in steps if s.get('status') == 'approved')
+            name = meta.get('program_title') or existing.get('name') or live_info.get('name') or f'Program #{pid}'
+            college_code = meta.get('college', '')
+            college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
+
+            proposal_type = meta.get('proposal_type', '')
+            if 'New Program' in proposal_type:
+                status = 'Added'
+            elif 'Inactivation' in proposal_type:
+                status = 'Deactivated'
             else:
-                new_step = ''
-                new_emails = ''
-            is_complete = (total > 0 and approved == total and html_current is None)
+                status = existing.get('status') or 'Edited'
+
             program_data = {
                 'id': pid,
-                'name': existing.get('name') or '',
+                'name': name,
                 'banner_code': meta.get('banner_code') or existing.get('banner_code', ''),
-                'status': existing.get('status') or '',
-                'current_step': new_step,
+                'status': status,
+                'current_step': role,  # Approve Pages says this is where it is
                 'total_steps': total,
                 'completed_steps': approved,
-                'current_approver_emails': new_emails,
-                'program_type': existing.get('program_type') or 'Unknown',
-                'college': COLLEGE_NAMES.get(meta.get('college', ''), meta.get('college', ''))
-                           or existing.get('college', ''),
+                'current_approver_emails': current_emails,
+                'program_type': classify_program_type(name, steps),
+                'college': college or existing.get('college', ''),
                 'department': meta.get('department') or existing.get('department', ''),
                 'degree': meta.get('degree') or existing.get('degree', ''),
                 'date_submitted': meta.get('date_submitted') or existing.get('date_submitted', ''),
@@ -1354,15 +1344,15 @@ def heal_stale_program_steps(log=False):
                 'curriculum_html': (meta.get('curriculum_html', '') or '')
                                    .replace('<![CDATA[', '').replace(']]>', '').strip()
                                    or existing.get('curriculum_html', ''),
-                'completion_date': meta.get('last_approval_date', '') if is_complete else '',
+                'completion_date': '',  # program is active in Approve Pages, not complete
                 'campus': meta.get('campus') or existing.get('campus', ''),
             }
             upsert_program(program_data)
-            upsert_workflow_steps(pid, steps)
+            if steps:
+                upsert_workflow_steps(pid, steps)
             fixed += 1
             if log:
-                target = 'completed' if is_complete else new_step
-                print(f"    Fixed {pid}: {role} → {target!r}")
+                print(f"    Added {pid}: current_step → {role!r}")
 
     return warnings, fixed
 
