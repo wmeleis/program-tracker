@@ -451,26 +451,38 @@ def api_scan_trigger():
                 # or expired session must not block the rest of the scan.
                 print(f"Regulatory fetch error: {e}")
 
-            # Weekly historical sweep: if >=7 days since the last sweep, re-walk
-            # all CIM program IDs so completed programs' data stays fresh.
+            # Weekly historical sweeps: if >=7 days since the last program/course
+            # sweep, re-walk all IDs so completed items' data stays fresh.
             scan_status['phase'] = 'Checking historical sweep...'
             scan_status['progress'] = 87
             try:
                 from database import get_db
-                from scraper import sweep_all_program_ids
+                from scraper import sweep_all_program_ids, sweep_all_course_ids
+                # Programs sweep
                 with get_db() as conn:
-                    last = conn.execute(
+                    last_p = conn.execute(
                         "SELECT scan_time FROM scans WHERE programs_scanned = -1 "
                         "ORDER BY scan_time DESC LIMIT 1"
                     ).fetchone()
-                last_iso = last['scan_time'] if last else None
-                due = True
-                if last_iso:
-                    last_dt = datetime.fromisoformat(last_iso)
-                    due = (datetime.now() - last_dt).days >= 7
-                if due:
-                    scan_status['phase'] = 'Weekly historical sweep...'
+                p_due = True
+                if last_p and last_p['scan_time']:
+                    p_due = (datetime.now() - datetime.fromisoformat(last_p['scan_time'])).days >= 7
+                if p_due:
+                    scan_status['phase'] = 'Weekly program sweep...'
                     sweep_all_program_ids(start_id=1, end_id=2100, log=True)
+
+                # Courses sweep — sentinel `changes_detected = -1`
+                with get_db() as conn:
+                    last_c = conn.execute(
+                        "SELECT scan_time FROM course_scans WHERE changes_detected = -1 "
+                        "ORDER BY scan_time DESC LIMIT 1"
+                    ).fetchone()
+                c_due = True
+                if last_c and last_c['scan_time']:
+                    c_due = (datetime.now() - datetime.fromisoformat(last_c['scan_time'])).days >= 7
+                if c_due:
+                    scan_status['phase'] = 'Weekly course sweep...'
+                    sweep_all_course_ids(start_id=1, end_id=3000, log=True)
             except Exception as e:
                 # Sweep is a background refresh — failures shouldn't break the
                 # main scan or the static export that follows.

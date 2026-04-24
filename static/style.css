@@ -476,6 +476,7 @@ header h1 {
 .proposal-btn.active-edit { background: #dbeafe; color: #1e40af; border-color: #3b82f6; }
 .proposal-btn.active-inact { background: #fee2e2; color: #991b1b; border-color: #ef4444; }
 .proposal-btn.active-all { background: #eff6ff; color: var(--accent); border-color: var(--accent); }
+.proposal-btn.active-complete { background: #ecfdf5; color: #065f46; border-color: #22c55e; }
 
 /* Progress bar */
 .progress-container {
