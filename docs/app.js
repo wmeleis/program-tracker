@@ -1329,6 +1329,26 @@ async function buildRefSourcePickerHtml(programId, activeCustomRefId) {
     </div>`;
 }
 
+// Format CIM's version_date for display. Input comes in a few shapes:
+//   "Feb 24, 2023 by Nicole Davis (n.davis)"                         (own history)
+//   "Jun 12, 2021 by Kate Klepper (k.klepper) (Boston version)"      (Boston counterpart)
+//   "current proposal (Boston, in workflow)"                          (sentinel)
+//   "Current curriculum (no prior approved version on file)"          (synthetic self-ref)
+// For the two "approved" shapes we return "curriculum approved on <date> [suffix]";
+// sentinels and self-refs pass through unchanged.
+function formatReferenceVersionLabel(versionDate) {
+    if (!versionDate) return '';
+    const lower = versionDate.toLowerCase();
+    if (lower.includes('in workflow') || lower.includes('no prior approved')) {
+        return versionDate;
+    }
+    const m = versionDate.match(/^(.+?)\s+by\s+.+?\([^)]+\)(.*)$/);
+    if (!m) return versionDate;
+    const date = m[1].trim();
+    const suffix = m[2].trim();
+    return suffix ? `curriculum approved on ${date} ${suffix}` : `curriculum approved on ${date}`;
+}
+
 async function loadReferenceDetail(programId) {
     const contentEl = document.getElementById(`detail-content-${programId}`);
     if (!contentEl) return;
@@ -1346,8 +1366,11 @@ async function loadReferenceDetail(programId) {
         }
         const cleaned = cleanCurriculumHtml(data.curriculum_html);
         const label = data.source === 'custom' ? 'Custom reference' : 'Reference version';
-        const header = data.version_date
-            ? `<div class="reference-header">${label}: ${escapeHtml(data.version_date)}</div>`
+        const displayDate = data.source === 'custom'
+            ? data.version_date
+            : formatReferenceVersionLabel(data.version_date);
+        const header = displayDate
+            ? `<div class="reference-header">${label}: ${escapeHtml(displayDate)}</div>`
             : '';
         contentEl.innerHTML = `${picker}${header}<div class="curriculum-content">${cleaned}</div>`;
     } catch (e) {
@@ -2017,7 +2040,7 @@ async function loadCompareDetail(programId) {
                 : 'Curriculum is identical to the Boston reference.';
 
             const header = refData.version_date
-                ? `<div class="reference-header">Comparing against: ${escapeHtml(refData.version_date)}</div>`
+                ? `<div class="reference-header">Comparing against: ${escapeHtml(formatReferenceVersionLabel(refData.version_date))}</div>`
                 : '';
 
             if (identical) {
@@ -2612,8 +2635,11 @@ function __staticInit() {
         const ref = _referenceCache[String(programId)];
         if (ref && ref.html) {
             const cleaned = cleanCurriculumHtml(ref.html);
-            const header = ref.version_date
-                ? `<div class="reference-header">Reference version: ${ref.version_date}</div>`
+            const displayDate = typeof formatReferenceVersionLabel === 'function'
+                ? formatReferenceVersionLabel(ref.version_date)
+                : ref.version_date;
+            const header = displayDate
+                ? `<div class="reference-header">Reference version: ${displayDate}</div>`
                 : '';
             contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {

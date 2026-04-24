@@ -799,8 +799,11 @@ function __staticInit() {
         const ref = _referenceCache[String(programId)];
         if (ref && ref.html) {
             const cleaned = cleanCurriculumHtml(ref.html);
-            const header = ref.version_date
-                ? `<div class="reference-header">Reference version: ${ref.version_date}</div>`
+            const displayDate = typeof formatReferenceVersionLabel === 'function'
+                ? formatReferenceVersionLabel(ref.version_date)
+                : ref.version_date;
+            const header = displayDate
+                ? `<div class="reference-header">Reference version: ${displayDate}</div>`
                 : '';
             contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {
