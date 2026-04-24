@@ -190,6 +190,23 @@ const COURSE_BUCKETS = [
             (step.startsWith('Provost') || step.startsWith('Program Provost')),
     },
     {
+        role: 'Subcommittees',
+        short_name: 'Subcommittees',
+        // Graduate Council Subcommittees One/Two and Undergraduate UUCC
+        // Subcommittees One/Two — committee-stage course reviews.
+        match: step => typeof step === 'string' &&
+            (step.startsWith('Graduate Council Subcommittee') ||
+             step.startsWith('UUCC Subcommittee')),
+    },
+    {
+        role: 'Grad Curric',
+        short_name: 'Grad Curric',
+        // Graduate Curriculum Committee Chair (and the Undergraduate Chair
+        // for symmetry) — top-level curriculum committee review.
+        match: step => step === 'Graduate Curriculum Committee Chair'
+            || step === 'Undergraduate Curriculum Committee Chair',
+    },
+    {
         role: 'GRA Regulatory',
         short_name: 'GRA Reg',
         match: step => step === 'Course GRA Regulatory Validation',
