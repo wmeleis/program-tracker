@@ -443,6 +443,14 @@ function updateProposalCounts(programs) {
     });
     document.querySelectorAll('.proposal-btn').forEach(btn => {
         const s = btn.getAttribute('onclick').match(/'([^']*)'/)[1];
+        // The Complete button shares this row visually but is a workflow-state
+        // filter, not a proposal-type filter — show its own static count.
+        if (btn.id === 'btn-proposal-complete') {
+            const pool = currentView === 'courses' ? (allCourses || []) : (allPrograms || []);
+            const completeCount = pool.filter(p => p.completion_date).length;
+            btn.textContent = `Complete (${completeCount})`;
+            return;
+        }
         const count = counts[s] || 0;
         const newLabel = currentView === 'courses' ? 'New Courses' : 'New Programs';
         const labels = { '': 'All', 'Added': newLabel, 'Edited': 'Changes', 'Deactivated': 'Inactivations' };
@@ -529,11 +537,12 @@ function getDaysAtStep(program) {
 // Format a completion date for the Days column on completed rows.
 // Accepts:
 //   - ISO or the "Tue, 03 Feb 2026 17:21:11 GMT" CIM format → "Approved MM/DD/YYYY"
-//   - "Catalog 2022-2023" surrogate (when CIM didn't expose a real date) → returned as-is
-//   - "Approved" placeholder → returned as-is
+//   - "Catalog 2022-2023" surrogate (programs)            → returned as-is
+//   - "Term 202630" surrogate (courses)                   → returned as-is
+//   - "Approved" placeholder                              → returned as-is
 function formatCompletionDate(s) {
     if (!s) return 'Approved';
-    if (s.startsWith('Catalog ') || s === 'Approved') return s;
+    if (s.startsWith('Catalog ') || s.startsWith('Term ') || s === 'Approved') return s;
     const d = new Date(s);
     if (isNaN(d)) return 'Approved ' + s;
     return 'Approved ' + (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
@@ -653,22 +662,17 @@ function renderPipeline(pipeline, baseFiltered) {
         `;
     }).join('');
 
-    // "Complete" tile — programs & courses that finished the workflow.
-    // No count by design; it shows up as a label-only tile (users treat
-    // this as a filter toggle, not a queue size). Courses view doesn't
-    // have a completion_date field today, so hide the tile there.
-    if (!isCourseView) {
-        const completeActive = pipelineFilter === '__complete__' ? ' active' : '';
-        const allComplete = (allPrograms || []).filter(p => p.completion_date).length;
-        html += `
-            <div class="pipeline-step pipeline-step-label${completeActive}"
-                 onclick="togglePipelineFilter('__complete__')"
-                 title="Completed programs (${allComplete} total in history)">
-                <span class="step-name">Complete</span>
-            </div>
-        `;
-    }
     bar.innerHTML = html;
+
+    // The Complete filter button lives in the proposal-btn row (not the
+    // pipeline bar) — keep its active state in sync with pipelineFilter.
+    // Shown on both Programs and Courses views; the row-render logic handles
+    // the different table shapes.
+    const completeBtn = document.getElementById('btn-proposal-complete');
+    if (completeBtn) {
+        completeBtn.classList.toggle('active-complete', pipelineFilter === '__complete__');
+        completeBtn.style.display = '';
+    }
 }
 
 function populateCampusFilter() {

@@ -427,38 +427,15 @@ def api_scan_trigger():
                 import traceback
                 traceback.print_exc()
 
-            # Fetch reference curricula for all programs in the pipeline
-            scan_status['phase'] = 'Fetching reference data...'
-            scan_status['progress'] = 75
-            try:
-                programs = get_all_programs()
-                prog_ids = [p['id'] for p in programs]
-                if prog_ids:
-                    fetch_reference_curricula(prog_ids)
-                    scan_status['progress'] = 82
-            except Exception as e:
-                print(f"Reference fetch error: {e}")
-
-            # Fetch regulatory approved curricula (SharePoint workbooks)
-            scan_status['phase'] = 'Fetching regulatory data...'
-            scan_status['progress'] = 85
-            try:
-                from scraper import fetch_regulatory_approved
-                if prog_ids:
-                    fetch_regulatory_approved(prog_ids)
-            except Exception as e:
-                # Regulatory fetch is best-effort — a missing SharePoint tab
-                # or expired session must not block the rest of the scan.
-                print(f"Regulatory fetch error: {e}")
-
-            # Weekly historical sweeps: if >=7 days since the last program/course
-            # sweep, re-walk all IDs so completed items' data stays fresh.
+            # Weekly historical sweeps run FIRST (before reference/regulatory
+            # fetches) so any newly-ingested completed programs/courses are
+            # included in get_all_programs() for the downstream fetches.
+            # Otherwise they'd linger without references until the next scan.
             scan_status['phase'] = 'Checking historical sweep...'
-            scan_status['progress'] = 87
+            scan_status['progress'] = 72
             try:
                 from database import get_db
                 from scraper import sweep_all_program_ids, sweep_all_course_ids
-                # Programs sweep
                 with get_db() as conn:
                     last_p = conn.execute(
                         "SELECT scan_time FROM scans WHERE programs_scanned = -1 "
@@ -471,7 +448,6 @@ def api_scan_trigger():
                     scan_status['phase'] = 'Weekly program sweep...'
                     sweep_all_program_ids(start_id=1, end_id=2100, log=True)
 
-                # Courses sweep — sentinel `changes_detected = -1`
                 with get_db() as conn:
                     last_c = conn.execute(
                         "SELECT scan_time FROM course_scans WHERE changes_detected = -1 "
@@ -487,6 +463,32 @@ def api_scan_trigger():
                 # Sweep is a background refresh — failures shouldn't break the
                 # main scan or the static export that follows.
                 print(f"Historical sweep error: {e}")
+
+            # Fetch reference curricula for every program (active + completed).
+            # Runs AFTER the sweep so newly-ingested historical programs get
+            # their Boston-counterpart references in the same scan.
+            scan_status['phase'] = 'Fetching reference data...'
+            scan_status['progress'] = 78
+            try:
+                programs = get_all_programs()
+                prog_ids = [p['id'] for p in programs]
+                if prog_ids:
+                    fetch_reference_curricula(prog_ids)
+                    scan_status['progress'] = 84
+            except Exception as e:
+                print(f"Reference fetch error: {e}")
+
+            # Fetch regulatory approved curricula (SharePoint workbooks)
+            scan_status['phase'] = 'Fetching regulatory data...'
+            scan_status['progress'] = 86
+            try:
+                from scraper import fetch_regulatory_approved
+                if prog_ids:
+                    fetch_regulatory_approved(prog_ids)
+            except Exception as e:
+                # Regulatory fetch is best-effort — a missing SharePoint tab
+                # or expired session must not block the rest of the scan.
+                print(f"Regulatory fetch error: {e}")
 
             # Auto-export and deploy to GitHub Pages
             scan_status['phase'] = 'Exporting & deploying...'

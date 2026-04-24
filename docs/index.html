@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1776992201">
+    <link rel="stylesheet" href="style.css?v=1777004853">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1776992201;
+  const CACHE_BUST = 1777004853;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -281,6 +281,7 @@
             <button class="proposal-btn" id="btn-proposal-new" onclick="setProposalFilter('Added')">New Programs</button>
             <button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button>
             <button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button>
+            <button class="proposal-btn" id="btn-proposal-complete" onclick="togglePipelineFilter('__complete__')">Complete</button>
         </div>
         <div class="view-divider"></div>
         <div class="view-group">
