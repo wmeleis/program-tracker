@@ -215,59 +215,111 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
 
 
 def scrape_approve_pages_role(role_name):
-    """Select a role on the Approve Pages tab and get pending programs with IDs."""
-    # Select the role in the dropdown and trigger the page's own handler
-    js_select = f'''
+    """Select a role on the Approve Pages tab and get pending programs with IDs.
+
+    Uses async poll-until-stable on the pending-list DOM: CourseLeaf loads the
+    list asynchronously after `showPendingList()` fires, and a hardcoded short
+    wait undercounts roles where the fetch takes longer (leaving programs
+    invisible and their dashboard bucket showing 0). We poll up to 15s,
+    returning as soon as the extracted list is non-empty and stable across
+    two consecutive polls, or after max wait if it's still empty (no programs
+    at that role is a valid state).
+    """
+    poll_tag = f"__approve_{int(time.time() * 1000)}"
+    js = f'''
 (function() {{
+    var existing = document.getElementById("{poll_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{poll_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+
     var select = document.querySelector("select");
-    if (!select) return JSON.stringify({{error: "no select"}});
-    select.value = "{role_name}";
-    // CourseLeaf uses onchange=showPendingList(this.value)
+    if (!select) {{
+        holder.textContent = JSON.stringify({{error: "no select"}});
+        holder.setAttribute("data-status", "done");
+        return "fired";
+    }}
+    select.value = {json.dumps(role_name)};
     if (typeof showPendingList === "function") {{
         showPendingList(select.value);
     }} else {{
         select.dispatchEvent(new Event("change", {{bubbles: true}}));
     }}
-    return "selected";
-}})()
+
+    function extract() {{
+        var text = document.body.innerText;
+        var lines = text.split("\\n");
+        var programs = [];
+        for (var i = 0; i < lines.length; i++) {{
+            var line = lines[i].trim();
+            var m = line.match(/^\\/programadmin\\/(\\d+):\\s*(.+)/);
+            if (m) {{
+                var id = parseInt(m[1]);
+                var rest = m[2];
+                var parts = rest.split("\\t");
+                var nameRaw = parts[0].trim();
+                var user = parts.length > 1 ? parts[1].trim() : "";
+                var name = nameRaw.replace(/^:\\s*/, "").replace(/^[A-Z0-9_-]+:\\s*/, "");
+                if (!name) name = nameRaw.replace(/^:\\s*/, "");
+                programs.push({{id: id, name: name, user: user}});
+            }}
+        }}
+        return programs;
+    }}
+
+    // Poll every 500ms. Return when the list has stabilized (same size across
+    // 3 consecutive polls) and is non-empty, or after a 15s ceiling.
+    var lastSize = -1;
+    var stableCount = 0;
+    var elapsed = 0;
+    var interval = setInterval(function() {{
+        elapsed += 500;
+        var progs = extract();
+        if (progs.length === lastSize) stableCount++;
+        else stableCount = 0;
+        lastSize = progs.length;
+        // Done when we've seen the same non-zero count 3 polls in a row,
+        // or when 15s have passed regardless.
+        if ((progs.length > 0 && stableCount >= 3) || elapsed >= 15000) {{
+            clearInterval(interval);
+            holder.textContent = JSON.stringify(progs);
+            holder.setAttribute("data-status", "done");
+        }}
+    }}, 500);
+    return "fired";
+}})();
 '''
-    result = run_js_in_tab("courseleaf/approve", js_select, match_by='url')
-    if not result or result == 'missing value':
+    fired = run_js_in_tab("courseleaf/approve", js, match_by='url', timeout=20)
+    if not fired or fired == 'missing value':
         return []
 
-    time.sleep(2)  # Wait for the page to update
+    check_js = f'''(function(){{ var el = document.getElementById("{poll_tag}"); if (!el) return "MISSING"; return el.getAttribute("data-status") === "done" ? el.textContent : "RUNNING"; }})();'''
+    payload = None
+    for _ in range(20):  # up to ~20s total
+        time.sleep(1)
+        r = run_js_in_tab("courseleaf/approve", check_js, match_by='url', timeout=10)
+        if r and r != 'missing value' and r != 'RUNNING' and r != 'MISSING':
+            payload = r
+            break
 
-    # Extract programs by scanning page text for /programadmin/NNNN patterns
-    js_extract = '''
-(function() {
-    var text = document.body.innerText;
-    var lines = text.split("\\n");
-    var programs = [];
-    for (var i = 0; i < lines.length; i++) {
-        var line = lines[i].trim();
-        var match = line.match(/^\\/programadmin\\/(\\d+):\\s*(.+)/);
-        if (match) {
-            var id = parseInt(match[1]);
-            var rest = match[2];
-            var parts = rest.split("\\t");
-            var nameRaw = parts[0].trim();
-            var user = parts.length > 1 ? parts[1].trim() : "";
-            var name = nameRaw.replace(/^:\\s*/, "").replace(/^[A-Z0-9_-]+:\\s*/, "");
-            if (!name) name = nameRaw.replace(/^:\\s*/, "");
-            programs.push({ id: id, name: name, user: user });
-        }
-    }
-    return JSON.stringify(programs);
-})()
-'''
-    result = run_js_in_tab("courseleaf/approve", js_extract, match_by='url')
-    if not result or result == 'missing value':
+    run_js_in_tab(
+        "courseleaf/approve",
+        f'var e=document.getElementById("{poll_tag}"); if(e) e.remove();',
+        match_by='url', timeout=5,
+    )
+
+    if not payload:
         return []
-
     try:
-        return json.loads(result)
+        data = json.loads(payload)
     except json.JSONDecodeError:
         return []
+    if isinstance(data, dict) and 'error' in data:
+        return []
+    return data
 
 
 def scrape_program_workflow(program_id):
