@@ -29,9 +29,16 @@ LABELED_SECTIONS_TO_REMOVE = {
 
 # Pattern-based section removal — any h2/h3 whose text matches one of these
 # is a plan-of-study / schedule grid (visual calendar), not curriculum content.
+#
+# Note: we do NOT strip "Concentration in X" headings here, even though some
+# programs' plan-of-study grids use that prefix. Several deployments (e.g.
+# Arlington AI MS—Align) use "Concentration in X" as a legitimate first-class
+# concentration section heading; stripping it wholesale wipes out the real
+# concentration curriculum. If a program really does have a plan-of-study
+# grid under a "Concentration in X" heading, we'd prefer to leave it shown
+# than to erase a real concentration's course table.
 PLAN_OF_STUDY_HEADING_RES = [
     re.compile(r'^\s*year\s+\d+\s*$', re.I),
-    re.compile(r'^\s*concentration\s+in\s+', re.I),
     re.compile(r'^\s*(?:sample\s+)?plan\s+of\s+study\b', re.I),
     re.compile(r'^\s*\*', re.I),  # footnotes that h2-rendered from source
     # Proposal-form metadata that slips into PDF-parsed references
