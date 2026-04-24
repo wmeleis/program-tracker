@@ -1076,6 +1076,163 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
     }
 
 
+def sweep_all_course_ids(start_id=1, end_id=25000, batch_size=25, log=True):
+    """Sweep every CIM course ID in [start_id, end_id] and ingest anything
+    present. Mirror of `sweep_all_program_ids` for the courses side.
+
+    A course is treated as completed/historical when CIM has no workflow
+    div for it (after a course completes, CourseLeaf only shows the workflow
+    while a fresh proposal is in flight). Surrogate "completion date" is
+    the catalog year (`eff_cat`); when a workflow IS present and fully
+    approved, we record the real last-approval timestamp.
+
+    Returns dict {scanned, completed, in_progress, skipped, new_completions}.
+    """
+    from database import upsert_course, upsert_course_workflow_steps, get_db
+
+    ids = [str(i) for i in range(start_id, end_id + 1)]
+    if log:
+        print(f"\nHistorical course sweep: fetching {len(ids)} course IDs "
+              f"({start_id}..{end_id}) in batches of {batch_size}...")
+
+    details = batch_fetch_course_details(ids, batch_size=batch_size)
+
+    with get_db() as conn:
+        existing = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, current_step, completion_date FROM courses"
+        ).fetchall()}
+
+    scanned = 0
+    completed = 0
+    in_progress = 0
+    skipped = 0
+    new_completions = 0
+
+    for cid, detail in details.items():
+        steps = detail.get('steps') or []
+        meta = detail.get('meta') or {}
+        # Empty record (404 or empty body) → skip without touching DB
+        if not steps and not meta.get('course_title') and not meta.get('subject') and not meta.get('course_code'):
+            skipped += 1
+            continue
+
+        total = len(steps)
+        approved_count = sum(1 for s in steps if s.get('status') == 'approved')
+        html_current = next((s for s in steps if s.get('status') == 'current'), None)
+
+        no_workflow = (total == 0)
+        all_approved = (total > 0 and approved_count == total and html_current is None)
+        is_complete = no_workflow or all_approved
+
+        # Course code/title from XML.  CIM exposes a pre-formatted "ARAB 1101"
+        # in <code>; fall back to subject+number if missing.
+        course_code = (meta.get('course_code') or '').strip()
+        if not course_code:
+            subject = (meta.get('subject') or '').strip()
+            number = (meta.get('course_number') or '').strip()
+            course_code = (subject + ' ' + number).strip() if (subject and number) else ''
+        title = meta.get('course_title') or course_code or f"Course {cid}"
+        if not course_code:
+            # Best-effort fallback: use existing DB code
+            course_code = existing.get(cid, {}).get('code') or cid
+
+        college_code = meta.get('college', '')
+        college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
+
+        ptype = meta.get('proposal_type', '')
+        if 'New Course' in ptype:
+            status = 'Added'
+        elif 'Inactivation' in ptype:
+            status = 'Deactivated'
+        else:
+            status = 'Edited'
+
+        if is_complete:
+            if all_approved:
+                completion_date = meta.get('last_approval_date', '')
+            else:
+                # Courses don't expose `eff_cat` like programs; use `eff_term`
+                # (a numeric code like 202630) as the surrogate. Frontend
+                # formatCompletionDate displays "Term ..." verbatim.
+                eff = meta.get('eff_cat') or meta.get('eff_term') or ''
+                if meta.get('eff_cat'):
+                    completion_date = 'Catalog ' + eff
+                elif eff:
+                    completion_date = 'Term ' + eff
+                else:
+                    completion_date = 'Approved'
+            current_step = ''
+            current_emails = ''
+        else:
+            completion_date = ''
+            prev = existing.get(cid, {})
+            current_step = prev.get('current_step') or ''
+            current_emails = ''
+
+        course_data = {
+            'id': cid,
+            'code': course_code,
+            'title': title,
+            'status': status,
+            'current_step': current_step,
+            'total_steps': total,
+            'completed_steps': approved_count,
+            'current_approver_emails': current_emails,
+            'college': college,
+            'date_submitted': meta.get('date_submitted', ''),
+            'credits': meta.get('credits', ''),
+            'description': meta.get('description', ''),
+            'academic_level': meta.get('acad_level', ''),
+            'completion_date': completion_date,
+            'step_entered_date': meta.get('last_approval_date', ''),
+        }
+
+        upsert_course(course_data)
+        if steps:
+            upsert_course_workflow_steps(cid, [
+                {
+                    'order': s.get('order', i),
+                    'name': s.get('name', ''),
+                    'status': s.get('status', 'pending'),
+                    'emails': s.get('emails', ''),
+                }
+                for i, s in enumerate(steps)
+            ])
+
+        scanned += 1
+        if is_complete:
+            completed += 1
+            prev = existing.get(cid)
+            if not prev or not (prev.get('completion_date') or ''):
+                new_completions += 1
+        else:
+            in_progress += 1
+
+    if log:
+        print(f"  Course sweep: scanned={scanned}, completed={completed} "
+              f"({new_completions} newly completed), in_progress={in_progress}, "
+              f"skipped={skipped}")
+
+    # Sentinel row in course_scans so the weekly auto-trigger knows when
+    # we last ran (programs_scanned=-1 used elsewhere; here we use
+    # changes_detected=-1 to distinguish course sweeps from program sweeps).
+    from datetime import datetime as _dt
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO course_scans (scan_time, courses_scanned, courses_with_workflow, changes_detected) "
+            "VALUES (?, ?, ?, -1)",
+            (_dt.now().isoformat(), scanned, scanned - skipped),
+        )
+
+    return {
+        'scanned': scanned,
+        'completed': completed,
+        'in_progress': in_progress,
+        'skipped': skipped,
+        'new_completions': new_completions,
+    }
+
+
 def heal_stale_program_steps(log=False):
     """Reconcile DB program rows against live Approve Pages for each tracked role.
 
@@ -1258,7 +1415,7 @@ def _search_cim_for_boston_ids(banner_codes):
     codes_json = json.dumps(codes_list)
     print(f"  Searching CIM for {len(codes_list)} Boston program IDs by banner code...")
 
-    # Search in chunks of 200 IDs to avoid Chrome JS timeout
+    # Search in chunks of 200 IDs (async fetch + poll, since Chrome 147 blocks sync XHR)
     all_found = {}
     chunk_size = 200
     for start in range(1, 2100, chunk_size):
@@ -1267,48 +1424,86 @@ def _search_cim_for_boston_ids(banner_codes):
         if not remaining:
             break  # Found all
         remaining_json = json.dumps(remaining)
-        js_code = f'''
+        chunk_tag = f"__bostonsearch_{start}_{int(time.time())}"
+        kickoff_js = f'''
 (function() {{
+    var existing = document.getElementById("{chunk_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{chunk_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+
     var codes = {remaining_json};
     var codeSet = {{}};
     for (var c = 0; c < codes.length; c++) codeSet[codes[c].toLowerCase()] = true;
-    var results = {{}};
     var parser = new DOMParser();
 
-    for (var id = {start}; id < {end}; id++) {{
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/programadmin/" + id + "/index.xml", false);
-        xhr.send();
-        if (xhr.status !== 200 || xhr.responseText.length < 100) continue;
-
-        var xml = parser.parseFromString(xhr.responseText, "text/xml");
-        var codeEl = xml.querySelector("code");
-        var campusEl = xml.querySelector("campus");
-        if (!codeEl) continue;
-
-        var code = codeEl.textContent.trim().toLowerCase();
-        var campus = campusEl ? campusEl.textContent.trim().toUpperCase() : "";
-
-        if (codeSet[code] && (campus === "BOS" || campus === "")) {{
-            if (!results[code]) results[code] = id;
-        }}
+    function probe(id) {{
+        return fetch("/programadmin/" + id + "/index.xml")
+            .then(function(r) {{ return r.ok ? r.text() : ""; }})
+            .then(function(txt) {{
+                if (!txt || txt.length < 100) return null;
+                var xml = parser.parseFromString(txt, "text/xml");
+                var codeEl = xml.querySelector("code");
+                if (!codeEl) return null;
+                var campusEl = xml.querySelector("campus");
+                var code = codeEl.textContent.trim().toLowerCase();
+                var campus = campusEl ? campusEl.textContent.trim().toUpperCase() : "";
+                if (codeSet[code] && (campus === "BOS" || campus === "")) {{
+                    return [code, id];
+                }}
+                return null;
+            }})
+            .catch(function() {{ return null; }});
     }}
 
-    return JSON.stringify(results);
+    var ids = [];
+    for (var i = {start}; i < {end}; i++) ids.push(i);
+    Promise.all(ids.map(probe)).then(function(pairs) {{
+        var out = {{}};
+        for (var i = 0; i < pairs.length; i++) {{
+            var p = pairs[i];
+            if (p && !out[p[0]]) out[p[0]] = p[1];
+        }}
+        holder.textContent = JSON.stringify(out);
+        holder.setAttribute("data-status", "done");
+    }}).catch(function(e) {{
+        holder.textContent = "ERROR:" + (e && e.message || e);
+        holder.setAttribute("data-status", "error");
+    }});
+    return "fired";
 }})();
 '''
-        result = run_js_in_tab("programadmin", js_code, match_by='url', timeout=120)
-        if result and result != 'missing value':
-            try:
-                chunk_results = json.loads(result)
-                for code_lower, boston_id in chunk_results.items():
-                    all_found[code_lower] = boston_id
-                if chunk_results:
-                    print(f"    IDs {start}-{end}: found {len(chunk_results)} matches")
-            except json.JSONDecodeError:
-                print(f"    IDs {start}-{end}: JSON parse error")
-        else:
-            print(f"    IDs {start}-{end}: no response")
+        run_js_in_tab("programadmin", kickoff_js, match_by='url', timeout=20)
+
+        check_js = f'''(function(){{ var el = document.getElementById("{chunk_tag}"); if (!el) return "MISSING"; var s = el.getAttribute("data-status"); if (s === "done") return el.textContent; if (s === "error") return el.textContent; return "RUNNING"; }})();'''
+        chunk_text = None
+        for _ in range(60):
+            time.sleep(2)
+            r = run_js_in_tab("programadmin", check_js, match_by='url', timeout=15)
+            if r and r != 'missing value' and r != 'RUNNING' and r != 'MISSING':
+                chunk_text = r
+                break
+
+        run_js_in_tab(
+            "programadmin",
+            f'var e=document.getElementById("{chunk_tag}"); if(e) e.remove();',
+            match_by='url', timeout=10,
+        )
+
+        if not chunk_text or chunk_text.startswith('ERROR:'):
+            print(f"    IDs {start}-{end}: {chunk_text or 'no response'}")
+            continue
+        try:
+            chunk_results = json.loads(chunk_text)
+            for code_lower, boston_id in chunk_results.items():
+                all_found[code_lower] = boston_id
+            if chunk_results:
+                print(f"    IDs {start}-{end}: found {len(chunk_results)} matches")
+        except json.JSONDecodeError:
+            print(f"    IDs {start}-{end}: JSON parse error")
 
     # Normalize keys back to original case
     code_map = {}
@@ -2008,99 +2203,83 @@ def scrape_courses():
 
 
 def batch_fetch_course_details(course_ids, batch_size=25):
-    """Fetch workflow + metadata for multiple courses via XHR.
+    """Fetch workflow + metadata for multiple courses via async fetch().
 
-    Parallel to batch_fetch_program_details but targets /courseadmin/{id}/.
+    Parallel to batch_fetch_program_details. Chrome 147+ silently blocks
+    sync XHR, so we kick off Promise.all in JS and Python polls the result.
     Returns { course_id (str): { steps: [...], meta: {...} } }.
     """
+    if not course_ids:
+        return {}
+
     all_results = {}
     batches = [course_ids[i:i+batch_size] for i in range(0, len(course_ids), batch_size)]
 
     for batch_num, batch in enumerate(batches):
         ids_json = json.dumps(batch)
-        js_code = f'''
+        batch_tag = f"__crsbatch_{batch_num}_{int(time.time())}"
+        kickoff_js = f'''
 (function() {{
+    var existing = document.getElementById("{batch_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{batch_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+
     var ids = {ids_json};
-    var results = {{}};
     var parser = new DOMParser();
 
-    for (var i = 0; i < ids.length; i++) {{
-        var id = ids[i];
+    function processOne(id) {{
         var result = {{steps: [], meta: {{}}}};
-
-        try {{
-            var xhr1 = new XMLHttpRequest();
-            xhr1.open("GET", "/courseadmin/" + id + "/", false);
-            xhr1.send();
-
-            if (xhr1.status === 200) {{
-                var doc = parser.parseFromString(xhr1.responseText, "text/html");
+        var htmlPromise = fetch("/courseadmin/" + id + "/")
+            .then(function(r) {{ return r.ok ? r.text() : ""; }})
+            .then(function(html) {{
+                if (!html) return;
+                var doc = parser.parseFromString(html, "text/html");
                 var wfDiv = doc.getElementById("workflow");
                 if (wfDiv) {{
                     var items = wfDiv.querySelectorAll("li");
-                    items.forEach(function(li, idx) {{
+                    items.forEach(function(li, ord) {{
                         var link = li.querySelector("a");
                         result.steps.push({{
-                            order: idx,
+                            order: ord,
                             name: (li.textContent || "").trim(),
                             status: li.className.trim() || "pending",
                             emails: link ? link.getAttribute("href").replace("mailto:", "") : ""
                         }});
                     }});
-                    if (items.length === 0) {{
-                        result.meta._wf_empty = true;
-                        result.meta._wf_html = wfDiv.outerHTML.substring(0, 600);
-                    }}
-                }} else {{
-                    result.meta._wf_missing = true;
-                    result.meta._html_len = xhr1.responseText.length;
                 }}
-                // Search raw HTML source (parseFromString's textContent loses newlines/whitespace)
-                var html = xhr1.responseText;
                 var stripTags = function(s) {{ return s.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\\s+/g, " ").trim(); }};
-                // Match a GMT-formatted date close to "Date Submitted:"
                 var dsMatch = html.match(/Date Submitted:[\\s\\S]{{0,120}}?([A-Z][a-z]{{2}},\\s*\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}[\\d:\\s]*GMT)/i);
                 if (dsMatch) result.meta.date_submitted = dsMatch[1].replace(/\\s+/g, " ").trim();
-                // Many already-approved courses under revision lack a "Date
-                // Submitted" label entirely; fall back to "Last edit" (when
-                // the revision was last saved, ~= when it entered workflow).
                 var leMatch = html.match(/Last edit[\\s\\S]{{0,300}}?([A-Z][a-z]{{2}},\\s*\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}[\\d:\\s]*GMT)/i);
                 if (leMatch) result.meta.last_edit = leMatch[1].replace(/\\s+/g, " ").trim();
-                // Detect proposal type from raw HTML
-                var proposalKeywords = ["New Course Proposal", "Inactivation Proposal", "Course Inactivation", "Course Revision", "Revise Course"];
-                result.meta._proposal_hits = [];
-                for (var pk = 0; pk < proposalKeywords.length; pk++) {{
-                    if (html.indexOf(proposalKeywords[pk]) !== -1) result.meta._proposal_hits.push(proposalKeywords[pk]);
-                }}
                 if (html.indexOf("New Course Proposal") !== -1) result.meta.proposal_type = "New Course Proposal";
                 else if (html.indexOf("Inactivation") !== -1) result.meta.proposal_type = "Inactivation Proposal";
                 else result.meta.proposal_type = "Course Revision Proposal";
-                // Capture a sample of the raw HTML for diagnostics
-                result.meta._body_sample = html.substring(0, 500);
-                // Extract approval dates from raw HTML - last one is when current step was entered
                 var approvalDates = [];
                 var apMatch;
                 var apPattern = /([A-Z][a-z]{{2}},\\s+\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}\\s+[\\d:]+\\s+GMT)[\\s\\S]{{0,400}}?Approved for ([^<\\n]+)/g;
                 while ((apMatch = apPattern.exec(html)) !== null) {{
                     approvalDates.push({{date: apMatch[1], step: stripTags(apMatch[2])}});
                 }}
-                result.meta._approval_count = approvalDates.length;
                 if (approvalDates.length > 0) {{
                     result.meta.last_approval_date = approvalDates[approvalDates.length - 1].date;
                 }}
-            }}
-        }} catch(e) {{
-            result.html_error = e.message;
-        }}
+                result.meta.approvals = approvalDates;
+            }})
+            .catch(function(e) {{ result.html_error = e.message || String(e); }});
 
-        try {{
-            var xhr2 = new XMLHttpRequest();
-            xhr2.open("GET", "/courseadmin/" + id + "/index.xml", false);
-            xhr2.send();
-
-            result.meta.xml_status = xhr2.status;
-            if (xhr2.status === 200) {{
-                var xmlDoc = parser.parseFromString(xhr2.responseText, "text/xml");
+        var xmlPromise = fetch("/courseadmin/" + id + "/index.xml")
+            .then(function(r) {{
+                result.meta.xml_status = r.status;
+                return r.ok ? r.text() : "";
+            }})
+            .then(function(xml) {{
+                if (!xml) return;
+                var xmlDoc = parser.parseFromString(xml, "text/xml");
                 var getXml = function(tag) {{
                     var el = xmlDoc.querySelector(tag);
                     return el ? el.textContent.trim() : "";
@@ -2108,46 +2287,99 @@ def batch_fetch_course_details(course_ids, batch_size=25):
                 result.meta.college = getXml("college");
                 result.meta.department = getXml("department");
                 result.meta.subject = getXml("subject") || getXml("subjectcode") || getXml("prefix");
-                result.meta.course_number = getXml("number") || getXml("courseNumber") || getXml("coursenumber");
-                result.meta.course_title = getXml("title") || getXml("courseTitle");
+                result.meta.course_number = getXml("course_number") || getXml("number") || getXml("courseNumber") || getXml("coursenumber");
+                result.meta.course_code = getXml("code");  // pre-formatted "ARAB 1101"
+                result.meta.course_title = getXml("long_title") || getXml("short_title") || getXml("title") || getXml("courseTitle");
                 result.meta.credits = getXml("credits") || getXml("credithoursmin") || getXml("credit_hours") || getXml("credithours");
                 result.meta.description = getXml("description") || getXml("coursedescription") || getXml("catalogdescription");
                 result.meta.acad_level = getXml("acad_level") || getXml("level") || getXml("courselevel");
-                // Dump tag names from the first course in the first batch for debugging
-                if (batch_num === 0 && i === 0) {{
-                    var tags = [];
-                    var els = xmlDoc.querySelectorAll("*");
-                    for (var t = 0; t < Math.min(els.length, 80); t++) {{
-                        var tn = els[t].tagName;
-                        if (tags.indexOf(tn) === -1) tags.push(tn);
-                    }}
-                    result.meta._xml_tags = tags.join(",");
-                }}
-            }}
-        }} catch(e) {{
-            result.xml_error = e.message;
-        }}
+                result.meta.eff_term = getXml("eff_term") || getXml("effterm");
+                result.meta.eff_cat = getXml("eff_cat") || getXml("effcat");
+            }})
+            .catch(function(e) {{ result.xml_error = e.message || String(e); }});
 
-        results[id] = result;
+        return Promise.all([htmlPromise, xmlPromise]).then(function() {{
+            return [id, result];
+        }});
     }}
 
-    return JSON.stringify(results);
-}})()
-'''.replace("batch_num === 0", f"{batch_num} === 0")
-        # Reuse the programadmin tab — it's on the same CourseLeaf origin as
-        # /courseadmin/, so same-origin XHRs work and we don't require a
-        # separate Course Inventory Management tab to be open.
-        result = run_js_in_tab("programadmin", js_code, match_by='url', timeout=120)
-        if not result or result == 'missing value':
-            print(f"    Batch {batch_num+1}/{len(batches)}: FAILED (no response)", flush=True)
+    Promise.all(ids.map(processOne)).then(function(pairs) {{
+        var out = {{}};
+        for (var i = 0; i < pairs.length; i++) out[pairs[i][0]] = pairs[i][1];
+        holder.textContent = JSON.stringify(out);
+        holder.setAttribute("data-status", "done");
+    }}).catch(function(e) {{
+        holder.textContent = "ERROR:" + (e && e.message || e);
+        holder.setAttribute("data-status", "error");
+    }});
+    return "fired";
+}})();
+'''
+        # Reuse the programadmin tab — same CourseLeaf origin so same-origin
+        # fetches work and we don't need a separate courseadmin tab.
+        run_js_in_tab("programadmin", kickoff_js, match_by='url', timeout=20)
+
+        check_js = f'''(function() {{
+    var el = document.getElementById("{batch_tag}");
+    if (!el) return "MISSING";
+    var s = el.getAttribute("data-status");
+    if (s === "done") return "DONE";
+    if (s === "error") return "ERR:" + el.textContent.substring(0, 200);
+    return "RUNNING";
+}})();'''
+        batch_results = None
+        for _ in range(60):  # up to 120s per batch
+            time.sleep(2)
+            status = run_js_in_tab("programadmin", check_js, match_by='url', timeout=15)
+            if status == "DONE":
+                len_js = (
+                    f'(function(){{ var el = document.getElementById("{batch_tag}"); '
+                    f'return el ? el.textContent.length : 0; }})();'
+                )
+                total_len = int(run_js_in_tab("programadmin", len_js, match_by='url', timeout=15) or 0)
+                if total_len == 0:
+                    batch_results = {}
+                    break
+                chunk_size = 200000
+                chunks = []
+                for offset in range(0, total_len, chunk_size):
+                    chunk_js = (
+                        f'(function(){{ var el = document.getElementById("{batch_tag}"); '
+                        f'return el ? el.textContent.substring({offset}, {offset + chunk_size}) : ""; }})();'
+                    )
+                    part = run_js_in_tab("programadmin", chunk_js, match_by='url', timeout=30)
+                    if part and part != 'missing value':
+                        chunks.append(part)
+                try:
+                    batch_results = json.loads(''.join(chunks))
+                except json.JSONDecodeError as e:
+                    print(f"    Batch {batch_num+1}/{len(batches)}: JSON parse error ({e})", flush=True)
+                    batch_results = {}
+                run_js_in_tab(
+                    "programadmin",
+                    f'var e=document.getElementById("{batch_tag}"); if(e) e.remove();',
+                    match_by='url', timeout=10,
+                )
+                break
+            if status and status.startswith("ERR"):
+                print(f"    Batch {batch_num+1}/{len(batches)}: JS error: {status}", flush=True)
+                batch_results = {}
+                break
+
+        if batch_results is None:
+            print(f"    Batch {batch_num+1}/{len(batches)}: timed out after 120s", flush=True)
             continue
-        try:
-            batch_results = json.loads(result)
-            for cid_str, data in batch_results.items():
-                all_results[cid_str] = data
-            print(f"    Batch {batch_num+1}/{len(batches)}: fetched {len(batch_results)} courses", flush=True)
-        except json.JSONDecodeError as e:
-            print(f"    Batch {batch_num+1}/{len(batches)}: FAILED (JSON error: {e})", flush=True)
+
+        for cid_str, data in batch_results.items():
+            all_results[cid_str] = data
+        print(f"    Batch {batch_num+1}/{len(batches)}: fetched {len(batch_results)} courses", flush=True)
+
+    # Clean up any leftover holder divs
+    run_js_in_tab(
+        "programadmin",
+        'document.querySelectorAll("[id^=__crsbatch_]").forEach(function(e){e.remove();});',
+        match_by='url', timeout=10,
+    )
 
     return all_results
 
@@ -2240,6 +2472,20 @@ def process_course_scans(courses):
         else:
             status = 'Edited'
 
+        # Completion detection — same convention as programs: the workflow is
+        # done when all steps are approved AND no step is current. Course
+        # ingestion via Approve Pages discovery rarely sees completed courses
+        # (they fall off the queue), but this guards the rare case where a
+        # final-step approval lands between scrape and detail fetch.
+        html_current = next((s for s in steps if s.get('status') == 'current'), None)
+        is_complete = (
+            total_steps > 0
+            and completed_steps == total_steps
+            and html_current is None
+            and not current_step_from_aq
+        )
+        completion_date = meta.get('last_approval_date', '') if is_complete else ''
+
         course_data = {
             'id': cid,
             'code': course_code,
@@ -2254,6 +2500,7 @@ def process_course_scans(courses):
             'credits': meta.get('credits', ''),
             'description': meta.get('description', ''),
             'academic_level': meta.get('acad_level', ''),
+            'completion_date': completion_date,
             'step_entered_date': (
                 meta.get('last_approval_date')
                 or meta.get('date_submitted')

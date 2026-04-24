@@ -154,6 +154,7 @@ def init_db():
                 credits TEXT DEFAULT '',
                 description TEXT DEFAULT '',
                 academic_level TEXT DEFAULT '',
+                completion_date TEXT DEFAULT '',
                 first_seen TIMESTAMP,
                 last_updated TIMESTAMP
             );
@@ -708,8 +709,9 @@ def upsert_course(course_data):
                 INSERT INTO courses (id, code, title, status, current_step,
                     total_steps, completed_steps, current_approver_emails,
                     college, date_submitted, step_entered_date,
-                    credits, description, academic_level, first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    credits, description, academic_level, completion_date,
+                    first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 course_data['id'],
                 course_data.get('code', ''),
@@ -725,6 +727,7 @@ def upsert_course(course_data):
                 course_data.get('credits', ''),
                 course_data.get('description', ''),
                 course_data.get('academic_level', ''),
+                course_data.get('completion_date', ''),
                 now, now
             ))
             changed = True
@@ -760,6 +763,19 @@ def upsert_course(course_data):
                     return existing_val if existing_val not in ('', None) else default
                 return new_val
 
+            # completion_date: same logic as upsert_program — explicit empty
+            # only clears it when the course is now back in an active step,
+            # otherwise preserve existing.
+            new_completion = course_data.get('completion_date', None)
+            if new_completion is None:
+                completion_val = existing['completion_date'] if 'completion_date' in existing.keys() else ''
+            elif new_completion == '' and (course_data.get('current_step') or ''):
+                completion_val = ''
+            elif new_completion == '':
+                completion_val = existing['completion_date'] if 'completion_date' in existing.keys() else ''
+            else:
+                completion_val = new_completion
+
             conn.execute("""
                 UPDATE courses SET
                     code = ?, title = ?, status = ?, current_step = ?,
@@ -767,6 +783,7 @@ def upsert_course(course_data):
                     current_approver_emails = ?, college = ?,
                     date_submitted = ?, step_entered_date = ?,
                     credits = ?, description = ?, academic_level = ?,
+                    completion_date = ?,
                     last_updated = ?
                 WHERE id = ?
             """, (
@@ -783,6 +800,7 @@ def upsert_course(course_data):
                 keep('credits'),
                 keep('description'),
                 keep('academic_level'),
+                completion_val,
                 now,
                 course_data['id']
             ))
@@ -826,11 +844,14 @@ def record_course_scan(scan_time, courses_scanned, courses_with_workflow, change
 
 
 def get_all_courses():
-    """Get all courses with active workflows."""
+    """Get all courses that are either in an active workflow step OR have
+    completed the workflow (completion_date set). Mirrors get_all_programs.
+    """
     with get_db() as conn:
         return [dict(row) for row in conn.execute("""
             SELECT * FROM courses
-            WHERE current_step IS NOT NULL AND current_step != ''
+            WHERE (current_step IS NOT NULL AND current_step != '')
+               OR (completion_date IS NOT NULL AND completion_date != '')
             ORDER BY code
         """).fetchall()]
 
@@ -972,7 +993,13 @@ def migrate_db():
         # Courses table: add credits + description if missing
         cursor = conn.execute("PRAGMA table_info(courses)")
         existing_course_cols = {row['name'] for row in cursor.fetchall()}
-        for col, typedef in {'credits': 'TEXT DEFAULT ""', 'description': 'TEXT DEFAULT ""', 'academic_level': 'TEXT DEFAULT ""'}.items():
+        course_new_cols = {
+            'credits': 'TEXT DEFAULT ""',
+            'description': 'TEXT DEFAULT ""',
+            'academic_level': 'TEXT DEFAULT ""',
+            'completion_date': 'TEXT DEFAULT ""',  # mirrors programs.completion_date
+        }
+        for col, typedef in course_new_cols.items():
             if col not in existing_course_cols:
                 conn.execute(f"ALTER TABLE courses ADD COLUMN {col} {typedef}")
                 print(f"  Added courses column: {col}")
