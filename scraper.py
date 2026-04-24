@@ -1819,7 +1819,36 @@ def fetch_reference_curricula(program_ids, batch_size=10):
     # Clean up any leftover batch holders
     run_js_in_tab("programadmin", 'document.querySelectorAll("[id^=__refbatch_]").forEach(function(e){e.remove();});', match_by='url', timeout=10)
 
-    print(f"Reference curricula: {fetched} fetched, {skipped} skipped")
+    # Fallback: for any program in scope that STILL has no reference row,
+    # synthesize a self-reference using its own current curriculum. This
+    # guarantees every dashboard-visible program has something on the
+    # Reference tab (PlusOne programs, minors, and brand-new programs
+    # with no CIM history otherwise fall through without a ref).
+    synth = 0
+    with get_db() as conn:
+        missing = conn.execute(
+            """
+            SELECT p.id, p.curriculum_html
+            FROM programs p
+            LEFT JOIN reference_curriculum r ON r.program_id = p.id
+            WHERE r.program_id IS NULL
+              AND p.id IN ({placeholders})
+            """.format(placeholders=','.join('?' * len(program_ids))),
+            program_ids,
+        ).fetchall()
+    for row in missing:
+        pid = row['id']
+        html = row['curriculum_html'] or ''
+        upsert_reference_curriculum(
+            pid, -1,
+            'Current curriculum (no prior approved version on file)',
+            html,
+        )
+        synth += 1
+    if synth:
+        print(f"  Synthesized self-reference for {synth} program(s) with no CIM history")
+
+    print(f"Reference curricula: {fetched} fetched, {skipped} skipped, {synth} self-referenced")
     return fetched
 
 
