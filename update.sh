@@ -1,17 +1,23 @@
 #!/bin/bash
 # Scheduled update script for Program Approval Tracker.
-# Triggers a scan via the Flask server (which auto-exports and pushes to GitHub)
-# IFF: (1) current time is inside the 9am-8pm ET window, (2) at least 4 hours
-# have passed since the last successful scan, (3) Chrome is running with a live
-# CourseLeaf session. Launchd fires this on a 9am/1pm/5pm ET cadence; macOS
-# reruns missed firings on wake, and the 4h gap check deduplicates.
+# Triggers the FULL scan via the Flask server (which auto-exports and pushes
+# to GitHub). This is the once-daily deep refresh — it discovers new program
+# and course IDs, refreshes reference + regulatory data, and catches
+# newly-completed items. The "Update Now" button in the dashboard runs a
+# lightweight heal instead (~5 min) and is what users should use during the
+# day for a quick refresh.
+#
+# Runs IFF: (1) current time is Mon-Fri ET, (2) at least 20 hours have
+# passed since the last successful scan (de-duplicates if launchd fires
+# the 9am slot multiple times after wake), (3) Chrome is running with a
+# live CourseLeaf session.
 
 cd /Users/wmeleis/committees/nu-docs/Curriculum/CIM
 LOG="data/update.log"
 LAST_SCAN_FILE="data/last_scan_unix"
 WINDOW_START_HOUR=9
 WINDOW_END_HOUR=20  # exclusive: scans can start up through 7:59 pm ET
-MIN_GAP_SECONDS=$((4 * 3600))
+MIN_GAP_SECONDS=$((20 * 3600))  # once-daily; 20h catches any launchd retries after wake
 
 echo "$(date): Starting update" >> "$LOG"
 

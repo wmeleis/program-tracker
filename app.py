@@ -353,27 +353,84 @@ def api_session_check():
 
 @app.route('/api/heal', methods=['POST'])
 def api_heal():
-    """On-demand lightweight heal: re-query live Approve Pages for each
-    tracked role and clear stale `current_step` values where the DB has a
-    program at a role but live does not. ~30s; no per-program fetches.
+    """Quick-update endpoint: re-fetch every active program's and course's
+    workflow HTML and sync current_step / completion_date from it. Skips
+    the discovery (Approve Pages iteration) and reference/regulatory fetches
+    that a full scan runs — ~4-5 min total for active pipeline vs. ~30-45
+    min for a full scan.
 
-    Mirrors the logic in the post-scan validation pass so staleness that
-    outlasts a scan (CourseLeaf pending-list cache persisting through the
-    scan's double-check window) can be fixed without waiting for the next
-    scheduled scan.
+    Request body (JSON, optional):
+      {"scope": "programs"}    — programs only (~2 min)
+      {"scope": "courses"}     — courses only (~2 min)
+      {"scope": "both"}        — default; both (~4-5 min)
+      {"active_only": false}   — include completed/historical too (~20 min)
+      {"deploy": true}         — default; run export + git push to GitHub Pages when done
+      {"deploy": false}        — skip deploy; DB-only update (for debugging)
     """
-    from scraper import heal_stale_program_steps
+    from scraper import heal_stale_program_steps, heal_stale_course_steps
+
+    if scan_status['running']:
+        return jsonify({'error': 'Scan already in progress'}), 409
+
     session = check_courseleaf_session()
     if not session.get('ok'):
         return jsonify({
             'error': session.get('error', 'session_invalid'),
             'detail': session.get('detail', 'CourseLeaf session invalid'),
         }), 503
-    try:
-        warnings, healed = heal_stale_program_steps(log=True)
-        return jsonify({'warnings': warnings, 'healed': healed})
-    except Exception as e:
-        return jsonify({'error': 'heal_failed', 'detail': str(e)}), 500
+
+    body = request.get_json(silent=True) or {}
+    scope = body.get('scope', 'both')
+    active_only = body.get('active_only', True)
+    deploy = body.get('deploy', True)
+
+    def do_heal():
+        try:
+            scan_status['running'] = True
+            scan_status['error'] = None
+            scan_status['phase'] = 'Syncing active pipeline…'
+            scan_status['progress'] = 5
+
+            result = {'scope': scope, 'active_only': active_only}
+
+            if scope in ('programs', 'both'):
+                scan_status['phase'] = 'Refreshing program workflow states…'
+                scan_status['progress'] = 15
+                pw, pf = heal_stale_program_steps(log=True, active_only=active_only)
+                result['programs'] = {'warnings': pw, 'fixed': pf}
+                scan_status['progress'] = 45
+
+            if scope in ('courses', 'both'):
+                scan_status['phase'] = 'Refreshing course workflow states…'
+                scan_status['progress'] = 55
+                cw, cf = heal_stale_course_steps(log=True, active_only=active_only)
+                result['courses'] = {'warnings': cw, 'fixed': cf}
+                scan_status['progress'] = 85
+
+            if deploy:
+                scan_status['phase'] = 'Exporting & deploying…'
+                scan_status['progress'] = 90
+                import subprocess
+                cwd = os.path.dirname(os.path.abspath(__file__))
+                subprocess.run(['python3', 'export_static.py'], cwd=cwd)
+                subprocess.run(['git', 'add', 'docs/'], cwd=cwd)
+                subprocess.run(['git', 'commit', '-m',
+                                f'Quick update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd)
+                subprocess.run(['git', 'push'], cwd=cwd)
+                scan_status['progress'] = 100
+
+            scan_status['last_result'] = result
+        except Exception as e:
+            scan_status['error'] = str(e)
+            print(f"Quick-update error: {e}")
+        finally:
+            scan_status['running'] = False
+            scan_status['phase'] = ''
+
+    import threading
+    threading.Thread(target=do_heal, daemon=True).start()
+    return jsonify({'ok': True, 'started': True, 'scope': scope,
+                    'active_only': active_only, 'deploy': deploy})
 
 
 @app.route('/api/scan/trigger', methods=['POST'])

@@ -1259,7 +1259,7 @@ def sweep_all_course_ids(start_id=1, end_id=25000, batch_size=25, log=True):
     }
 
 
-def heal_stale_program_steps(log=False):
+def heal_stale_program_steps(log=False, active_only=True):
     """Re-fetch every program's workflow HTML and sync current_step from it.
 
     Workflow HTML (/programadmin/{id}/) is the authoritative source — the
@@ -1289,9 +1289,15 @@ def heal_stale_program_steps(log=False):
     from database import get_all_programs, get_db, upsert_program, upsert_workflow_steps
 
     programs = get_all_programs()
+    if active_only:
+        # Skip completed historical programs — their workflow is frozen, so
+        # re-fetching them every heal just burns time. The weekly historical
+        # sweep refreshes them.
+        programs = [p for p in programs if p.get('current_step')]
     program_ids = [p['id'] for p in programs]
     if log:
-        print(f"\nSyncing {len(program_ids)} programs' current_step from workflow HTML...")
+        scope = 'active-only' if active_only else 'all programs'
+        print(f"\nSyncing {len(program_ids)} programs' current_step from workflow HTML ({scope})...")
 
     details = batch_fetch_program_details(program_ids, batch_size=25)
 
@@ -1389,7 +1395,7 @@ def heal_stale_program_steps(log=False):
     return warnings, fixed
 
 
-def heal_stale_course_steps(log=False):
+def heal_stale_course_steps(log=False, active_only=True):
     """Course-side analog of heal_stale_program_steps. Re-fetches each
     course's workflow HTML and syncs current_step / completion_date from it.
 
@@ -1399,9 +1405,12 @@ def heal_stale_course_steps(log=False):
     from database import get_all_courses, upsert_course, upsert_course_workflow_steps
 
     courses = get_all_courses()
+    if active_only:
+        courses = [c for c in courses if c.get('current_step')]
     course_ids = [c['id'] for c in courses]
     if log:
-        print(f"\nSyncing {len(course_ids)} courses' current_step from workflow HTML...")
+        scope = 'active-only' if active_only else 'all courses'
+        print(f"\nSyncing {len(course_ids)} courses' current_step from workflow HTML ({scope})...")
 
     details = batch_fetch_course_details(course_ids, batch_size=25)
     existing_by_id = {c['id']: c for c in courses}
