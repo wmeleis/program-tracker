@@ -275,7 +275,6 @@ function renderCatalogTable() {
     let html = `
         <table class="program-table">
             <thead><tr>
-                <th>Page Path</th>
                 <th>Title</th>
                 <th>Current Role</th>
                 <th>Approver</th>
@@ -284,9 +283,9 @@ function renderCatalogTable() {
     for (const p of pages) {
         const path = p.id || '';
         const url = `https://nextcatalog.northeastern.edu${path}/`;
+        const title = p.title || path;
         html += `<tr class="program-row">
-            <td class="catalog-path"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(path)}</a></td>
-            <td><strong>${escapeHtml(p.title || '')}</strong></td>
+            <td><strong><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(title)}</a></strong></td>
             <td>${escapeHtml(p.current_step || '')}</td>
             <td>${escapeHtml(p.user || '')}</td>
         </tr>`;
