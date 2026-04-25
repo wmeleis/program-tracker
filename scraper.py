@@ -629,7 +629,18 @@ def batch_fetch_program_details(program_ids, batch_size=25):
             continue
 
         for pid_str, data in batch_results.items():
-            all_results[int(pid_str)] = data
+            pid_int = int(pid_str)
+            all_results[pid_int] = data
+            # Persist the per-step approval history scraped from the workflow
+            # HTML. Done here so every caller (run_full_scan, sweeps, the
+            # smaller "missing IDs" path) gets it for free.
+            try:
+                from database import upsert_program_approvals
+                approvals = (data.get('meta') or {}).get('approvals') or []
+                if approvals:
+                    upsert_program_approvals(pid_int, approvals)
+            except Exception as _e:
+                pass  # never let an approval-log write break a scan
         print(f"    Batch {batch_num+1}/{len(batches)}: fetched {len(batch_results)} programs")
 
     # Clean up any leftover holder divs from this run
@@ -2891,6 +2902,13 @@ def batch_fetch_course_details(course_ids, batch_size=25):
 
         for cid_str, data in batch_results.items():
             all_results[cid_str] = data
+            try:
+                from database import upsert_course_approvals
+                approvals = (data.get('meta') or {}).get('approvals') or []
+                if approvals:
+                    upsert_course_approvals(int(cid_str), approvals)
+            except Exception:
+                pass
         print(f"    Batch {batch_num+1}/{len(batches)}: fetched {len(batch_results)} courses", flush=True)
 
     # Clean up any leftover holder divs
