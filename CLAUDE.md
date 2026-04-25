@@ -376,6 +376,25 @@ Both Programs and Courses views have a **Complete** button at the right end of t
   - Regulatory tab flows through unchanged — completed programs at regulatory campuses still get their approved-courses flagging.
   - Courses view: completed courses show up in the Complete filter but don't get Reference / Compare / Regulatory tabs (those are program-only; courses only have Workflow).
 
+### Catalog Pages View
+A third entity type alongside programs and courses. Catalog pages are individual catalog sections (academic policies, department overviews, shared content blocks, etc.) that flow through the **UCAT** (undergraduate catalog) and **GCAT** (graduate catalog) approval roles in CourseLeaf.
+
+- **Identifier:** unlike programs/courses (numeric IDs), catalog pages are identified by **path** — e.g. `/graduate/mills`, `/shared/course-credit-sharing`. The path is the primary key in the `catalog_pages` table (`id TEXT PRIMARY KEY`).
+- **No per-page admin URL.** CourseLeaf has no `/pageadmin/{id}/`-style endpoint for catalog pages, so we don't fetch a workflow div per page. The Approve Pages pending list IS the entire workflow state we track: path + title + role + approver name. (Probed all the obvious step= variants on `courseleaf.cgi` — they return `Couldn't open step file: /owners`.)
+- **DB tables:** `catalog_pages` (id, title, current_step, current_approver_emails, user, first_seen, last_updated) and `catalog_scans` (sentinel rows for "Updated" label).
+- **Tracked roles (`scraper.CATALOG_TRACKED_ROLES`):** the 30 UCAT* and GCAT* roles in CourseLeaf's dropdown (UCAT BA Editor, UCAT Provost Approval, GCAT CS Editor, …, GCAT Provost Approval, etc.).
+- **Scraper:** `scrape_catalog_pages_from_role(role)` selects a UCAT/GCAT role on the Approve Pages tab and parses pending-list lines like `/graduate/mills: Mills College at Northeastern\tHeather Daly`. Same poll-until-stable async pattern as the program/course scrapers; explicitly excludes `/programadmin/` and `/courseadmin/` lines so it doesn't pick up the wrong entity.
+- **Heal:** `heal_stale_catalog_pages()` mirrors live UCAT/GCAT pending lists into `catalog_pages`. For each role, builds `path → role` map, upserts rows, clears `current_step` for paths no longer in any list. ~3 min for 30 roles.
+- **API:** `GET /api/catalog` (all pages), `GET /api/catalog_pipeline` (per-role counts).
+- **Update Now / scheduled scan:** `/api/heal` accepts `scope: 'catalog' | 'all'` (default `'all'` covers programs + courses + catalog). `do_scan` runs `heal_stale_catalog_pages` after the course scan.
+- **Frontend:**
+  - Header has a third toggle button — **Catalog** — alongside Courses and Programs (`switchView('catalog')` in `static/app.js`).
+  - When active, type / proposal / college / campus / subject filter sections are hidden (none of those concepts apply to catalog pages); only search + pipeline-tile clicks filter.
+  - The pipeline bar shows all 30 UCAT/GCAT roles with counts; click a tile to filter to pages at that role.
+  - Table columns: Page Path (link to the live catalog URL), Title, Current Role, Approver. No expandable rows yet (no Workflow / Curriculum / Reference / Compare tabs — catalog pages don't have those concepts).
+  - The "Complete" button is hidden on catalog view (no completion concept).
+- **Static export:** `data.json` includes `catalog_pages` and `catalog_pipeline`. No separate encrypted file (the data is small).
+
 ### Courses View
 Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggled via the Courses/Programs buttons in the header (Courses is now first).
 

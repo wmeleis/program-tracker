@@ -178,6 +178,19 @@ def export_data():
     course_colleges = get_course_colleges()
     course_approvers = get_course_current_approvers()
 
+    # Catalog pages — third entity type. Pages are identified by path
+    # (no numeric ID, no per-page workflow URL), so the export is a flat
+    # list plus a per-role pipeline summary.
+    from database import get_all_catalog_pages, get_catalog_pipeline_counts
+    from scraper import CATALOG_TRACKED_ROLES, CATALOG_ROLE_SHORT_NAMES
+    catalog_pages = get_all_catalog_pages()
+    catalog_counts = get_catalog_pipeline_counts(CATALOG_TRACKED_ROLES)
+    catalog_pipeline = [{
+        'role': role,
+        'short_name': CATALOG_ROLE_SHORT_NAMES.get(role, role),
+        'count': catalog_counts.get(role, 0),
+    } for role in CATALOG_TRACKED_ROLES]
+
     return {
         'exported_at': datetime.now().isoformat(),
         'programs': programs,
@@ -192,6 +205,8 @@ def export_data():
         'course_workflows': course_workflows,
         'course_colleges': course_colleges,
         'course_approvers': course_approvers,
+        'catalog_pages': catalog_pages,
+        'catalog_pipeline': catalog_pipeline,
     }
 
 

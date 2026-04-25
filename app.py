@@ -390,7 +390,9 @@ def api_heal():
       {"deploy": true}         — default; run export + git push to GitHub Pages when done
       {"deploy": false}        — skip deploy; DB-only update (for debugging)
     """
-    from scraper import heal_stale_program_steps, heal_stale_course_steps
+    from scraper import (
+        heal_stale_program_steps, heal_stale_course_steps, heal_stale_catalog_pages,
+    )
 
     if scan_status['running']:
         return jsonify({'error': 'Scan already in progress'}), 409
@@ -403,7 +405,10 @@ def api_heal():
         }), 503
 
     body = request.get_json(silent=True) or {}
-    scope = body.get('scope', 'both')
+    scope = body.get('scope', 'all')
+    # Backwards-compat: 'both' used to mean programs+courses; 'all' now also covers catalog.
+    if scope == 'both':
+        scope = 'all'
     active_only = body.get('active_only', True)
     deploy = body.get('deploy', True)
 
@@ -416,19 +421,26 @@ def api_heal():
 
             result = {'scope': scope, 'active_only': active_only}
 
-            if scope in ('programs', 'both'):
+            if scope in ('programs', 'all'):
                 scan_status['phase'] = 'Refreshing program workflow states…'
-                scan_status['progress'] = 15
+                scan_status['progress'] = 10
                 pw, pf = heal_stale_program_steps(log=True, active_only=active_only)
                 result['programs'] = {'warnings': pw, 'fixed': pf}
-                scan_status['progress'] = 45
+                scan_status['progress'] = 40
 
-            if scope in ('courses', 'both'):
+            if scope in ('courses', 'all'):
                 scan_status['phase'] = 'Refreshing course workflow states…'
-                scan_status['progress'] = 55
+                scan_status['progress'] = 50
                 cw, cf = heal_stale_course_steps(log=True, active_only=active_only)
                 result['courses'] = {'warnings': cw, 'fixed': cf}
-                scan_status['progress'] = 85
+                scan_status['progress'] = 75
+
+            if scope in ('catalog', 'all'):
+                scan_status['phase'] = 'Refreshing catalog page states…'
+                scan_status['progress'] = 80
+                kw, kf = heal_stale_catalog_pages(log=True)
+                result['catalog'] = {'warnings': kw, 'fixed': kf}
+                scan_status['progress'] = 88
 
             if deploy:
                 scan_status['phase'] = 'Exporting & deploying…'
@@ -506,6 +518,16 @@ def api_scan_trigger():
                 print(f">>> Course scan error: {e}", flush=True)
                 import traceback
                 traceback.print_exc()
+
+            # Catalog page sync — iterates UCAT/GCAT roles and mirrors live
+            # pending lists into catalog_pages. Lightweight; ~30 roles.
+            scan_status['phase'] = 'Syncing catalog pages...'
+            scan_status['progress'] = 68
+            try:
+                from scraper import heal_stale_catalog_pages
+                heal_stale_catalog_pages(log=True)
+            except Exception as e:
+                print(f">>> Catalog sync error: {e}", flush=True)
 
             # Weekly historical sweeps run FIRST (before reference/regulatory
             # fetches) so any newly-ingested completed programs/courses are
@@ -687,6 +709,30 @@ def api_course_changes():
     """Get recent course changes."""
     changes = get_recent_course_changes(limit=100)
     return jsonify({'changes': changes})
+
+
+# ---- Catalog pages (third entity type) ----
+
+@app.route('/api/catalog')
+def api_catalog():
+    """Get all catalog pages currently in any UCAT/GCAT pending list."""
+    from database import get_all_catalog_pages
+    pages = get_all_catalog_pages()
+    return jsonify({'catalog_pages': pages, 'total': len(pages)})
+
+
+@app.route('/api/catalog_pipeline')
+def api_catalog_pipeline():
+    """Get catalog pipeline counts per UCAT/GCAT role."""
+    from database import get_catalog_pipeline_counts
+    from scraper import CATALOG_TRACKED_ROLES, CATALOG_ROLE_SHORT_NAMES
+    counts = get_catalog_pipeline_counts(CATALOG_TRACKED_ROLES)
+    pipeline = [{
+        'role': role,
+        'short_name': CATALOG_ROLE_SHORT_NAMES.get(role, role),
+        'count': counts.get(role, 0),
+    } for role in CATALOG_TRACKED_ROLES]
+    return jsonify({'pipeline': pipeline})
 
 
 @app.route('/api/course_colleges')

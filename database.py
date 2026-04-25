@@ -194,6 +194,32 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_course_workflow_steps_course ON course_workflow_steps(course_id);
             CREATE INDEX IF NOT EXISTS idx_course_scan_history_time ON course_scan_history(scan_time);
             CREATE INDEX IF NOT EXISTS idx_course_scan_history_course ON course_scan_history(course_id);
+
+            -- Catalog pages: third entity type alongside programs and courses.
+            -- Identified by their catalog path (e.g. "/graduate/mills"); workflow
+            -- info comes from the UCAT/GCAT roles in CourseLeaf's Approve Pages.
+            -- Unlike programs/courses, catalog pages have no per-page admin URL,
+            -- so we don't fetch workflow steps individually — the role assignment
+            -- from Approve Pages IS the entire workflow state we track.
+            CREATE TABLE IF NOT EXISTS catalog_pages (
+                id TEXT PRIMARY KEY,           -- the catalog path, e.g. "/graduate/mills"
+                title TEXT NOT NULL,
+                current_step TEXT,             -- UCAT or GCAT role name, or '' if not in any pending list
+                current_approver_emails TEXT,
+                user TEXT,                     -- last-shown approver name from Approve Pages (display only)
+                first_seen TIMESTAMP,
+                last_updated TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS catalog_scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_time TIMESTAMP NOT NULL,
+                pages_scanned INTEGER DEFAULT 0,
+                pages_with_workflow INTEGER DEFAULT 0,
+                changes_detected INTEGER DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_catalog_current_step ON catalog_pages(current_step);
         """)
 
 
@@ -862,6 +888,89 @@ def get_all_courses():
                OR (completion_date IS NOT NULL AND completion_date != '')
             ORDER BY code
         """).fetchall()]
+
+
+# ---- Catalog pages (third entity type alongside programs and courses) ----
+
+def upsert_catalog_page(page_data):
+    """Insert or update a catalog page. Returns True if changed."""
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT * FROM catalog_pages WHERE id = ?", (page_data['id'],)
+        ).fetchone()
+        now = datetime.now().isoformat()
+        if existing is None:
+            conn.execute("""
+                INSERT INTO catalog_pages (id, title, current_step,
+                    current_approver_emails, user, first_seen, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                page_data['id'],
+                page_data.get('title', ''),
+                page_data.get('current_step', ''),
+                page_data.get('current_approver_emails', ''),
+                page_data.get('user', ''),
+                now, now,
+            ))
+            return True
+        # Preserve title when new value is empty (transient empty fetches)
+        title = page_data.get('title') or existing['title']
+        new_step = page_data.get('current_step', '')
+        changed = (existing['current_step'] != new_step
+                   or existing['title'] != title)
+        conn.execute("""
+            UPDATE catalog_pages SET
+                title = ?, current_step = ?, current_approver_emails = ?,
+                user = ?, last_updated = ?
+            WHERE id = ?
+        """, (
+            title, new_step,
+            page_data.get('current_approver_emails', '') or existing['current_approver_emails'] or '',
+            page_data.get('user', '') or existing['user'] or '',
+            now,
+            page_data['id'],
+        ))
+        return changed
+
+
+def get_all_catalog_pages():
+    """All catalog pages currently on a UCAT/GCAT role's pending list."""
+    with get_db() as conn:
+        return [dict(row) for row in conn.execute("""
+            SELECT * FROM catalog_pages
+            WHERE current_step IS NOT NULL AND current_step != ''
+            ORDER BY id
+        """).fetchall()]
+
+
+def get_catalog_pipeline_counts(tracked_roles):
+    """Count of catalog pages per role."""
+    with get_db() as conn:
+        counts = {}
+        for role in tracked_roles:
+            r = conn.execute(
+                "SELECT COUNT(*) as cnt FROM catalog_pages WHERE current_step = ?",
+                (role,),
+            ).fetchone()
+            counts[role] = r['cnt']
+        return counts
+
+
+def record_catalog_scan(scan_time, pages_scanned, pages_with_workflow, changes_detected):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO catalog_scans (scan_time, pages_scanned, pages_with_workflow, changes_detected) "
+            "VALUES (?, ?, ?, ?)",
+            (scan_time, pages_scanned, pages_with_workflow, changes_detected),
+        )
+
+
+def get_last_catalog_scan():
+    with get_db() as conn:
+        r = conn.execute(
+            "SELECT * FROM catalog_scans ORDER BY scan_time DESC LIMIT 1"
+        ).fetchone()
+        return dict(r) if r else None
 
 
 def get_course_workflow(course_id):
