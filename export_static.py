@@ -712,6 +712,7 @@ function __staticInit() {
         const D = await _getData();
         cachedCatalogPipeline = D.catalog_pipeline || [];
         allCatalogPages = D.catalog_pages || [];
+        if (typeof populateCatalogCollegeFilter === 'function') populateCatalogCollegeFilter();
         renderCatalogPipeline();
         renderCatalogTable();
     };
