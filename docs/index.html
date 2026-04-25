@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1777073669">
+    <link rel="stylesheet" href="style.css?v=1777078324">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1777073669;
+  const CACHE_BUST = 1777078324;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -234,6 +234,7 @@
         </div>
         <div class="header-middle">
             <div class="view-toggle">
+                <button class="toggle-btn" onclick="switchView('catalog')" id="btn-catalog">Catalog</button>
                 <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">Courses</button>
                 <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
             </div>

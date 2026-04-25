@@ -167,6 +167,56 @@ ROLE_SHORT_NAMES = {
 }
 
 
+# Catalog pipeline: UCAT (undergraduate catalog) + GCAT (graduate catalog)
+# editor, review, and approval roles. Pages are identified by their catalog
+# path (e.g. "/graduate/mills"), not by a numeric ID.
+CATALOG_TRACKED_ROLES = [
+    # Undergraduate catalog (UCAT*)
+    "UCAT BA Editor",
+    "UCAT Coop",
+    "UCAT CRIM Editor",
+    "UCAT CS Editor",
+    "UCAT CSGS Editor",
+    "UCAT EN Editor",
+    "UCAT ENVR Editor",
+    "UCAT INTL Editor",
+    "UCAT MATH Editor",
+    "UCAT PHIL Editor",
+    "UCAT POLS Editor",
+    "UCAT Provost Approval",
+    "UCAT SC Editor",
+    "UCAT SOCL Editor",
+    "UCAT We Care",
+    "UCAT WLAC Editor",
+    # Graduate catalog (GCAT*)
+    "GCAT CS Editor",
+    "GCAT EN Editor",
+    "GCAT ENGL Editor",
+    "GCAT ENVR Editor",
+    "GCAT Gordon Leadership",
+    "GCAT HIST Editor",
+    "GCAT LW Editor",
+    "GCAT MATH Editor",
+    "GCAT PHYS Editor",
+    "GCAT POLS Editor",
+    "GCAT Provost Approval",
+    "GCAT PSYC Editor",
+    "GCAT SH Review",
+    "GCAT SOCL Editor",
+]
+
+CATALOG_ROLE_SHORT_NAMES = {
+    "UCAT Provost Approval": "UCAT Provost",
+    "GCAT Provost Approval": "GCAT Provost",
+    "GCAT SH Review": "GCAT SH Review",
+    "UCAT We Care": "UCAT We Care",
+    "UCAT Coop": "UCAT Coop",
+    "GCAT Gordon Leadership": "GCAT Gordon",
+    # Editor roles all collapse into "<X>CAT <DEPT> Ed" via display rules
+    # in the frontend; keep their full names here for accuracy.
+}
+
+
 def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     """Execute JavaScript in a Chrome tab via AppleScript using a temp file for complex JS."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
@@ -2316,6 +2366,193 @@ def fetch_regulatory_approved(program_ids):
     print(f"Regulatory approved: {total_matched} matched, "
           f"{total_unmatched} unmatched, {skipped} workbook(s) unavailable")
     return (total_matched, total_unmatched, skipped)
+
+
+def scrape_catalog_pages_from_role(role_name):
+    """Select a UCAT/GCAT role on Approve Pages and extract pending catalog pages.
+
+    Catalog pages are identified by path (e.g. "/graduate/mills"), not a
+    numeric ID. Pending-list lines look like:
+        /graduate/mills: Mills College at Northeastern\\tHeather Daly
+        /shared/course-credit-sharing: Shared Content: ...\\tHeather Daly
+
+    Same poll-until-stable async pattern as the program/course scrapers.
+
+    Returns list of dicts with `id` (the path), `title`, and `user`.
+    """
+    poll_tag = f"__catapp_{int(time.time() * 1000)}"
+    js = f'''
+(function() {{
+    var existing = document.getElementById("{poll_tag}");
+    if (existing) existing.remove();
+    var holder = document.createElement("div");
+    holder.id = "{poll_tag}";
+    holder.style.display = "none";
+    holder.setAttribute("data-status", "running");
+    document.body.appendChild(holder);
+
+    var select = document.querySelector("select");
+    if (!select) {{
+        holder.textContent = JSON.stringify({{error: "no select"}});
+        holder.setAttribute("data-status", "done");
+        return "fired";
+    }}
+    select.value = {json.dumps(role_name)};
+    if (typeof showPendingList === "function") {{
+        showPendingList(select.value);
+    }} else {{
+        select.dispatchEvent(new Event("change", {{bubbles: true}}));
+    }}
+
+    function extract() {{
+        var lines = document.body.innerText.split("\\n");
+        var pages = [];
+        for (var i = 0; i < lines.length; i++) {{
+            var line = lines[i].trim();
+            // Catalog paths: lines starting with "/<word>/<more>:" but NOT
+            // "/programadmin/" or "/courseadmin/" (those have numeric IDs).
+            if (!line.startsWith("/") || line.startsWith("/programadmin/") || line.startsWith("/courseadmin/")) continue;
+            var m = line.match(/^(\\/[^:]+):\\s*(.+)/);
+            if (!m) continue;
+            var path = m[1].trim();
+            var rest = m[2];
+            var parts = rest.split("\\t");
+            var title = parts[0].trim();
+            var user = parts.length > 1 ? parts[1].trim() : "";
+            pages.push({{id: path, title: title, user: user}});
+        }}
+        return pages;
+    }}
+
+    var lastSize = -1;
+    var stableCount = 0;
+    var elapsed = 0;
+    var interval = setInterval(function() {{
+        elapsed += 500;
+        var pages = extract();
+        if (pages.length === lastSize) stableCount++;
+        else stableCount = 0;
+        lastSize = pages.length;
+        if ((pages.length > 0 && stableCount >= 3) || elapsed >= 15000) {{
+            clearInterval(interval);
+            holder.textContent = JSON.stringify(pages);
+            holder.setAttribute("data-status", "done");
+        }}
+    }}, 500);
+    return "fired";
+}})();
+'''
+    fired = run_js_in_tab("courseleaf/approve", js, match_by='url', timeout=20)
+    if not fired or fired == 'missing value':
+        return []
+
+    check_js = f'''(function(){{ var el = document.getElementById("{poll_tag}"); if (!el) return "MISSING"; return el.getAttribute("data-status") === "done" ? el.textContent : "RUNNING"; }})();'''
+    payload = None
+    for _ in range(20):
+        time.sleep(1)
+        r = run_js_in_tab("courseleaf/approve", check_js, match_by='url', timeout=10)
+        if r and r != 'missing value' and r != 'RUNNING' and r != 'MISSING':
+            payload = r
+            break
+
+    run_js_in_tab(
+        "courseleaf/approve",
+        f'var e=document.getElementById("{poll_tag}"); if(e) e.remove();',
+        match_by='url', timeout=5,
+    )
+
+    if not payload:
+        return []
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, dict) and 'error' in data:
+        return []
+    return data
+
+
+def heal_stale_catalog_pages(log=False):
+    """Mirror DB catalog_pages to live UCAT/GCAT pending lists.
+
+    Same approach as heal_stale_program_steps / heal_stale_course_steps but
+    for catalog pages. Iterates each CATALOG_TRACKED_ROLE, builds a
+    `path -> role` map from live pending lists, sets `current_step = role`
+    for each path, clears `current_step` for catalog rows no longer on any
+    list. Catalog pages have no per-page admin URL so there's no equivalent
+    of "fetch full details for new IDs" — the Approve Pages line gives us
+    everything we display (path, title, role, approver name).
+    """
+    from database import (
+        get_all_catalog_pages, get_db, upsert_catalog_page, record_catalog_scan,
+    )
+
+    if log:
+        print(f"\nMirroring catalog DB to live UCAT/GCAT pending lists "
+              f"({len(CATALOG_TRACKED_ROLES)} roles)...")
+
+    live_assignments = {}  # path -> {role, title, user}
+    for role in CATALOG_TRACKED_ROLES:
+        pages = scrape_catalog_pages_from_role(role)
+        for p in pages:
+            path = p['id']
+            if path not in live_assignments:
+                live_assignments[path] = {
+                    'role': role,
+                    'title': p.get('title', ''),
+                    'user': p.get('user', ''),
+                }
+        if log and pages:
+            print(f"  {role}: {len(pages)}")
+
+    if log:
+        print(f"\nLive: {len(live_assignments)} unique catalog pages")
+
+    db_pages = {p['id']: p for p in get_all_catalog_pages()}
+    fixed = 0
+
+    # 1) Pages in live → upsert
+    for path, info in live_assignments.items():
+        existing = db_pages.get(path)
+        if existing and existing.get('current_step') == info['role'] and existing.get('title') == info['title']:
+            continue
+        upsert_catalog_page({
+            'id': path,
+            'title': info['title'],
+            'current_step': info['role'],
+            'current_approver_emails': '',
+            'user': info['user'],
+        })
+        fixed += 1
+        if log and fixed <= 50:
+            old = (existing.get('current_step') or '(empty)') if existing else '(NEW)'
+            print(f"  {path}: {old!r} → {info['role']!r}")
+
+    # 2) Pages in DB at any role but no longer on any list → clear current_step
+    for path, p in db_pages.items():
+        if not p.get('current_step'):
+            continue
+        if path in live_assignments:
+            continue
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE catalog_pages SET current_step = '', current_approver_emails = '', last_updated = ? WHERE id = ?",
+                (datetime.now().isoformat(), path),
+            )
+        fixed += 1
+        if log and fixed <= 50:
+            print(f"  {path}: {p.get('current_step')!r} → '' (gone from all pending lists)")
+
+    record_catalog_scan(
+        datetime.now().isoformat(),
+        pages_scanned=len(live_assignments),
+        pages_with_workflow=len(live_assignments),
+        changes_detected=fixed,
+    )
+
+    if log:
+        print(f"Catalog sync complete: {fixed} catalog page changes")
+    return 0, fixed
 
 
 def scrape_courses_from_role(role_name):

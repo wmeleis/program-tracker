@@ -2,7 +2,9 @@
 
 let allPrograms = [];
 let allCourses = [];
-let currentView = 'programs'; // 'programs' or 'courses'
+let allCatalogPages = [];
+let cachedCatalogPipeline = [];
+let currentView = 'programs'; // 'programs', 'courses', or 'catalog'
 let expandedRows = new Set();
 let detailTabState = {}; // programId/courseId -> 'workflow' | 'curriculum'
 let currentSort = { column: 'name', direction: 'asc' };
@@ -21,6 +23,8 @@ function switchView(view) {
     // Update button states
     document.getElementById('btn-programs').classList.toggle('active', view === 'programs');
     document.getElementById('btn-courses').classList.toggle('active', view === 'courses');
+    const btnCat = document.getElementById('btn-catalog');
+    if (btnCat) btnCat.classList.toggle('active', view === 'catalog');
 
     // Reset filters when switching views
     pipelineFilter = null;
@@ -48,6 +52,14 @@ function switchView(view) {
         proposalSection.style.display = 'flex';
         campusFilter.parentElement.parentElement.style.display = 'none';
         if (subjectGroup) subjectGroup.style.display = 'flex';
+    } else if (view === 'catalog') {
+        // Catalog has no degree types, no proposal types, no college/campus
+        // metadata — hide all those filter groups. Just keep the search box
+        // (filters by path/title) and the pipeline tile clicks.
+        typeSection.style.display = 'none';
+        proposalSection.style.display = 'none';
+        campusFilter.parentElement.parentElement.style.display = 'none';
+        if (subjectGroup) subjectGroup.style.display = 'none';
     } else {
         typeSection.style.display = 'flex';
         proposalSection.style.display = 'flex';
@@ -72,9 +84,93 @@ function switchView(view) {
     // Reload appropriate data
     if (view === 'programs') {
         loadDashboard();
-    } else {
+    } else if (view === 'courses') {
         loadCoursesDashboard();
+    } else if (view === 'catalog') {
+        loadCatalogDashboard();
     }
+}
+
+// ==================== Catalog dashboard ====================
+
+async function loadCatalogDashboard() {
+    try {
+        const [pipelineRes, pagesRes] = await Promise.all([
+            fetch('/api/catalog_pipeline'),
+            fetch('/api/catalog'),
+        ]);
+        cachedCatalogPipeline = (await pipelineRes.json()).pipeline || [];
+        allCatalogPages = (await pagesRes.json()).catalog_pages || [];
+        renderCatalogPipeline();
+        renderCatalogTable();
+    } catch (e) {
+        console.error('catalog load failed', e);
+    }
+}
+
+function renderCatalogPipeline() {
+    const bar = document.getElementById('pipeline-bar');
+    if (!bar) return;
+    // Catalog has no "College" pseudo-tile — every catalog page IS in one of
+    // the UCAT/GCAT roles or it isn't tracked.
+    const html = cachedCatalogPipeline.map(step => {
+        const hasItems = step.count > 0;
+        const activeClass = pipelineFilter === step.role ? ' active' : '';
+        return `
+            <div class="pipeline-step ${hasItems ? 'has-items' : 'empty'}${activeClass}"
+                 onclick="togglePipelineFilter('${step.role}')"
+                 title="${step.role}: ${step.count} pages">
+                <span class="step-count">${step.count}</span>
+                <span class="step-name">${escapeHtml(step.short_name)}</span>
+            </div>
+        `;
+    }).join('');
+    bar.innerHTML = html;
+    // Hide the Complete button on Catalog view (no completion concept yet)
+    const completeBtn = document.getElementById('btn-proposal-complete');
+    if (completeBtn) completeBtn.style.display = 'none';
+}
+
+function renderCatalogTable() {
+    const container = document.getElementById('programs-table-container');
+    if (!container) return;
+    const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
+    let pages = (allCatalogPages || []).slice();
+    if (pipelineFilter) {
+        pages = pages.filter(p => p.current_step === pipelineFilter);
+    }
+    if (search) {
+        pages = pages.filter(p =>
+            (p.id || '').toLowerCase().includes(search) ||
+            (p.title || '').toLowerCase().includes(search)
+        );
+    }
+    document.getElementById('result-count').textContent = `${pages.length} pages`;
+    if (pages.length === 0) {
+        container.innerHTML = '<p class="empty-state">No catalog pages match your filters.</p>';
+        return;
+    }
+    let html = `
+        <table class="program-table">
+            <thead><tr>
+                <th>Page Path</th>
+                <th>Title</th>
+                <th>Current Role</th>
+                <th>Approver</th>
+            </tr></thead>
+            <tbody>`;
+    for (const p of pages) {
+        const path = p.id || '';
+        const url = `https://nextcatalog.northeastern.edu${path}/`;
+        html += `<tr class="program-row">
+            <td class="catalog-path"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(path)}</a></td>
+            <td><strong>${escapeHtml(p.title || '')}</strong></td>
+            <td>${escapeHtml(p.current_step || '')}</td>
+            <td>${escapeHtml(p.user || '')}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 function clearFilter(id) {
@@ -794,6 +890,15 @@ function getBaseFiltered(approverProgramIds, exclude) {
 }
 
 async function applyFilters() {
+    // Catalog view has a fundamentally different schema (paths instead of
+    // numeric IDs, no college/type/proposal/campus dimensions). It has its
+    // own minimal renderer rather than going through the program/course
+    // filter pipeline below.
+    if (currentView === 'catalog') {
+        renderCatalogPipeline();
+        renderCatalogTable();
+        return;
+    }
     const collegeFilter = document.getElementById('filter-college').value;
     const approverFilter = document.getElementById('filter-approver').value;
 
