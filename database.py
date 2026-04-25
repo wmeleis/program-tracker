@@ -220,6 +220,34 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_catalog_current_step ON catalog_pages(current_step);
+
+            -- Per-step approval timestamps scraped from the CourseLeaf workflow
+            -- HTML. CIM exposes the entire approval log as a series of
+            -- "(Day, DD Mon YYYY HH:MM:SS GMT) ... Approved for <step>" lines.
+            -- We capture each so historical questions like "how many programs
+            -- were approved by colleges in CY2025" are answerable without
+            -- needing to retain scan_history that far back.
+            CREATE TABLE IF NOT EXISTS program_approvals (
+                program_id INTEGER NOT NULL,
+                step_name TEXT NOT NULL,
+                approved_at TEXT NOT NULL,         -- raw RFC-822 string, e.g. "Fri, 14 Mar 2025 10:23:45 GMT"
+                approved_at_iso TEXT NOT NULL,     -- ISO 8601 UTC, e.g. "2025-03-14T10:23:45Z"
+                step_order INTEGER,                -- order in the approval log (0-based)
+                PRIMARY KEY (program_id, step_order)
+            );
+            CREATE INDEX IF NOT EXISTS idx_program_approvals_step ON program_approvals(step_name);
+            CREATE INDEX IF NOT EXISTS idx_program_approvals_iso ON program_approvals(approved_at_iso);
+
+            CREATE TABLE IF NOT EXISTS course_approvals (
+                course_id INTEGER NOT NULL,
+                step_name TEXT NOT NULL,
+                approved_at TEXT NOT NULL,
+                approved_at_iso TEXT NOT NULL,
+                step_order INTEGER,
+                PRIMARY KEY (course_id, step_order)
+            );
+            CREATE INDEX IF NOT EXISTS idx_course_approvals_step ON course_approvals(step_name);
+            CREATE INDEX IF NOT EXISTS idx_course_approvals_iso ON course_approvals(approved_at_iso);
         """)
 
 
@@ -353,6 +381,74 @@ def upsert_workflow_steps(program_id, steps):
                 step['name'],
                 step['status'],
                 step.get('emails', '')
+            ))
+
+
+def _parse_rfc822_to_iso(s):
+    """'Fri, 14 Mar 2025 10:23:45 GMT' -> '2025-03-14T10:23:45Z' (UTC).
+    Returns '' if unparseable. Standalone helper so it's import-friendly."""
+    if not s:
+        return ''
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(s)
+        if dt is None:
+            return ''
+        # parsedate_to_datetime returns aware (GMT) when "GMT" is present.
+        return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+    except (TypeError, ValueError):
+        return ''
+
+
+def upsert_program_approvals(program_id, approvals):
+    """Replace the program's approval log with the scraped one.
+
+    `approvals` is a list of {'date': '<RFC-822>', 'step': '<step name>'} as
+    produced by the scraper's regex over CIM's "Approved for X" lines.
+    Ordering in the list IS the chronological approval order; we store
+    step_order for stable indexing. Skips entries whose date can't be
+    parsed (would break date-range queries) but logs nothing — bad rows
+    are uncommon and not worth a per-program message.
+    """
+    with get_db() as conn:
+        conn.execute("DELETE FROM program_approvals WHERE program_id = ?", (program_id,))
+        for idx, ap in enumerate(approvals or []):
+            raw = (ap.get('date') or '').strip()
+            iso = _parse_rfc822_to_iso(raw)
+            if not iso:
+                continue
+            conn.execute("""
+                INSERT INTO program_approvals
+                    (program_id, step_name, approved_at, approved_at_iso, step_order)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                program_id,
+                (ap.get('step') or '').strip(),
+                raw,
+                iso,
+                idx,
+            ))
+
+
+def upsert_course_approvals(course_id, approvals):
+    """Replace the course's approval log. See upsert_program_approvals."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM course_approvals WHERE course_id = ?", (course_id,))
+        for idx, ap in enumerate(approvals or []):
+            raw = (ap.get('date') or '').strip()
+            iso = _parse_rfc822_to_iso(raw)
+            if not iso:
+                continue
+            conn.execute("""
+                INSERT INTO course_approvals
+                    (course_id, step_name, approved_at, approved_at_iso, step_order)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                course_id,
+                (ap.get('step') or '').strip(),
+                raw,
+                iso,
+                idx,
             ))
 
 
