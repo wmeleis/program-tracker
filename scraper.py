@@ -203,6 +203,13 @@ CATALOG_TRACKED_ROLES = [
     "GCAT PSYC Editor",
     "GCAT SH Review",
     "GCAT SOCL Editor",
+    # Post-provost catalog workflow (shared across UCAT and GCAT)
+    "REGISTRAR Records Review",
+    "Deputy Registrar - Operations",
+    "Registrar Approval",
+    "Shared Content - Registrar Review",
+    "Editor",
+    "CAT Final Review",
 ]
 
 CATALOG_ROLE_SHORT_NAMES = {
@@ -212,6 +219,12 @@ CATALOG_ROLE_SHORT_NAMES = {
     "UCAT We Care": "UCAT We Care",
     "UCAT Coop": "UCAT Coop",
     "GCAT Gordon Leadership": "GCAT Gordon",
+    "REGISTRAR Records Review": "Records Review",
+    "Deputy Registrar - Operations": "Deputy Reg",
+    "Registrar Approval": "Reg Approval",
+    "Shared Content - Registrar Review": "Shared Reg",
+    "Editor": "Editor",
+    "CAT Final Review": "Final Review",
     # Editor roles all collapse into "<X>CAT <DEPT> Ed" via display rules
     # in the frontend; keep their full names here for accuracy.
 }

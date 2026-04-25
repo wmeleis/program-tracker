@@ -93,6 +93,39 @@ function switchView(view) {
 
 // ==================== Catalog dashboard ====================
 
+// Catalog pipeline buckets. Everything before GCAT/UCAT Provost Approval is
+// editor-level review and collapses into a single "College" tile, mirroring
+// how Programs and Courses handle their college-level reviewers. Post-Provost
+// roles (registrar steps, Editor, CAT Final Review) each get their own tile.
+//
+// Order = left-to-right pipeline order. Anything that doesn't match a bucket
+// here falls into "College" via isCatalogCollegeStep().
+const CATALOG_BUCKETS = [
+    { role: 'GCAT Provost Approval',         short_name: 'GCAT Provost',  match: s => s === 'GCAT Provost Approval' },
+    { role: 'UCAT Provost Approval',         short_name: 'UCAT Provost',  match: s => s === 'UCAT Provost Approval' },
+    { role: 'REGISTRAR Records Review',      short_name: 'Records Review',match: s => s === 'REGISTRAR Records Review' },
+    { role: 'Deputy Registrar - Operations', short_name: 'Deputy Reg',    match: s => s === 'Deputy Registrar - Operations' },
+    { role: 'Registrar Approval',            short_name: 'Reg Approval',  match: s => s === 'Registrar Approval' },
+    { role: 'Shared Content - Registrar Review', short_name: 'Shared Reg', match: s => s === 'Shared Content - Registrar Review' },
+    { role: 'Editor',                        short_name: 'Editor',        match: s => s === 'Editor' },
+    { role: 'CAT Final Review',              short_name: 'Final Review',  match: s => s === 'CAT Final Review' },
+];
+
+function isCatalogCollegeStep(step) {
+    if (!step) return false;
+    for (const b of CATALOG_BUCKETS) {
+        if (b.match(step)) return false;
+    }
+    return true;
+}
+
+function getCatalogBucket(step) {
+    for (const b of CATALOG_BUCKETS) {
+        if (b.match(step)) return b.role;
+    }
+    return null;
+}
+
 async function loadCatalogDashboard() {
     try {
         const [pipelineRes, pagesRes] = await Promise.all([
@@ -111,15 +144,30 @@ async function loadCatalogDashboard() {
 function renderCatalogPipeline() {
     const bar = document.getElementById('pipeline-bar');
     if (!bar) return;
-    // Catalog has no "College" pseudo-tile — every catalog page IS in one of
-    // the UCAT/GCAT roles or it isn't tracked.
-    const html = cachedCatalogPipeline.map(step => {
+    // Build a single "College" tile aggregating all pre-Provost editor roles,
+    // then one tile per post-Provost workflow stage in CATALOG_BUCKETS order.
+    const collegeCount = (allCatalogPages || [])
+        .filter(p => isCatalogCollegeStep(p.current_step)).length;
+    const tiles = [{
+        role: '__catalog_college__',
+        short_name: 'College',
+        count: collegeCount,
+    }];
+    for (const b of CATALOG_BUCKETS) {
+        const entry = cachedCatalogPipeline.find(s => s.role === b.role);
+        tiles.push({
+            role: b.role,
+            short_name: b.short_name,
+            count: entry ? entry.count : 0,
+        });
+    }
+    const html = tiles.map(step => {
         const hasItems = step.count > 0;
         const activeClass = pipelineFilter === step.role ? ' active' : '';
         return `
             <div class="pipeline-step ${hasItems ? 'has-items' : 'empty'}${activeClass}"
                  onclick="togglePipelineFilter('${step.role}')"
-                 title="${step.role}: ${step.count} pages">
+                 title="${escapeHtml(step.short_name)}: ${step.count} pages">
                 <span class="step-count">${step.count}</span>
                 <span class="step-name">${escapeHtml(step.short_name)}</span>
             </div>
@@ -137,7 +185,11 @@ function renderCatalogTable() {
     const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
     let pages = (allCatalogPages || []).slice();
     if (pipelineFilter) {
-        pages = pages.filter(p => p.current_step === pipelineFilter);
+        if (pipelineFilter === '__catalog_college__') {
+            pages = pages.filter(p => isCatalogCollegeStep(p.current_step));
+        } else {
+            pages = pages.filter(p => p.current_step === pipelineFilter);
+        }
     }
     if (search) {
         pages = pages.filter(p =>
