@@ -126,6 +126,55 @@ function getCatalogBucket(step) {
     return null;
 }
 
+// Map second-level path segment to canonical college name (matches the
+// COLLEGE_NAMES dict used elsewhere). Catalog pages are filed under URL paths
+// like /graduate/social-sciences-humanities/... — the second segment is the
+// college. Anything that's not a college (academic-policies-procedures,
+// university-academics, university-interdisciplinary-programs, shared/...,
+// gordon-institute, etc.) groups into "University-wide".
+const CATALOG_COLLEGE_MAP = {
+    'social-sciences-humanities': 'Coll of Soc Sci & Humanities',
+    'computer-information-science': 'Khoury Coll of Comp Sciences',
+    'law': 'School of Law',
+    'science': 'College of Science',
+    'business': "D'Amore-McKim School Business",
+    'engineering': 'College of Engineering',
+    'arts-media-design': 'Coll of Arts, Media & Design',
+    'mills': 'Mills College at NU',
+    'health-sciences': 'Bouve College of Hlth Sciences',
+    'bouve-college-of-health-sciences': 'Bouve College of Hlth Sciences',
+    'professional-studies': 'Coll of Professional Studies',
+};
+
+function getCatalogCollege(page) {
+    const parts = (page.id || '').split('/').filter(Boolean);
+    // /shared/... pages are intentionally cross-college content.
+    if (parts[0] === 'shared') return 'Shared Content';
+    // /professional-studies/... is itself a CPS page.
+    if (parts[0] === 'professional-studies') return 'Coll of Professional Studies';
+    if (parts.length < 2) return 'University-wide';
+    return CATALOG_COLLEGE_MAP[parts[1]] || 'University-wide';
+}
+
+function populateCatalogCollegeFilter() {
+    const sel = document.getElementById('filter-college');
+    if (!sel) return;
+    const counts = new Map();
+    for (const p of allCatalogPages || []) {
+        const c = getCatalogCollege(p);
+        counts.set(c, (counts.get(c) || 0) + 1);
+    }
+    const prev = sel.value;
+    const opts = Array.from(counts.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, count]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)} (${count})</option>`)
+        .join('');
+    sel.innerHTML = '<option value="">All Colleges</option>' + opts;
+    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
+        sel.value = prev;
+    }
+}
+
 async function loadCatalogDashboard() {
     try {
         const [pipelineRes, pagesRes] = await Promise.all([
@@ -134,6 +183,7 @@ async function loadCatalogDashboard() {
         ]);
         cachedCatalogPipeline = (await pipelineRes.json()).pipeline || [];
         allCatalogPages = (await pagesRes.json()).catalog_pages || [];
+        populateCatalogCollegeFilter();
         renderCatalogPipeline();
         renderCatalogTable();
     } catch (e) {
@@ -141,24 +191,40 @@ async function loadCatalogDashboard() {
     }
 }
 
+// Pages matching every active catalog filter EXCEPT the pipeline tile and
+// the named one. Used to compute cross-filter counts so each filter shows
+// "what would I have if I switched to this option" rather than its own
+// downstream-narrowed view.
+function getCatalogBaseFiltered(excludeFilter) {
+    const collegeFilter = excludeFilter === 'college' ? '' : (document.getElementById('filter-college')?.value || '');
+    const search = excludeFilter === 'search' ? '' : (document.getElementById('filter-search')?.value || '').toLowerCase();
+    let pages = (allCatalogPages || []).slice();
+    if (collegeFilter) pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    if (search) pages = pages.filter(p =>
+        (p.id || '').toLowerCase().includes(search) ||
+        (p.title || '').toLowerCase().includes(search));
+    return pages;
+}
+
 function renderCatalogPipeline() {
     const bar = document.getElementById('pipeline-bar');
     if (!bar) return;
     // Build a single "College" tile aggregating all pre-Provost editor roles,
     // then one tile per post-Provost workflow stage in CATALOG_BUCKETS order.
-    const collegeCount = (allCatalogPages || [])
-        .filter(p => isCatalogCollegeStep(p.current_step)).length;
+    // Counts respect every active filter EXCEPT the pipeline tile itself.
+    const filtered = getCatalogBaseFiltered('pipeline');
+    const collegeCount = filtered.filter(p => isCatalogCollegeStep(p.current_step)).length;
     const tiles = [{
         role: '__catalog_college__',
         short_name: 'College',
         count: collegeCount,
     }];
     for (const b of CATALOG_BUCKETS) {
-        const entry = cachedCatalogPipeline.find(s => s.role === b.role);
+        const count = filtered.filter(p => b.match(p.current_step)).length;
         tiles.push({
             role: b.role,
             short_name: b.short_name,
-            count: entry ? entry.count : 0,
+            count,
         });
     }
     const html = tiles.map(step => {
@@ -183,7 +249,11 @@ function renderCatalogTable() {
     const container = document.getElementById('programs-table-container');
     if (!container) return;
     const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
+    const collegeFilter = document.getElementById('filter-college')?.value || '';
     let pages = (allCatalogPages || []).slice();
+    if (collegeFilter) {
+        pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    }
     if (pipelineFilter) {
         if (pipelineFilter === '__catalog_college__') {
             pages = pages.filter(p => isCatalogCollegeStep(p.current_step));
@@ -2730,6 +2800,7 @@ function __staticInit() {
         const D = await _getData();
         cachedCatalogPipeline = D.catalog_pipeline || [];
         allCatalogPages = D.catalog_pages || [];
+        if (typeof populateCatalogCollegeFilter === 'function') populateCatalogCollegeFilter();
         renderCatalogPipeline();
         renderCatalogTable();
     };
