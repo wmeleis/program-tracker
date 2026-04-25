@@ -707,6 +707,15 @@ function __staticInit() {
         select.innerHTML = '<option value="">All Colleges</option>' + options;
     };
 
+    // Catalog dashboard: read from embedded data instead of /api endpoints.
+    window.loadCatalogDashboard = async function() {
+        const D = await _getData();
+        cachedCatalogPipeline = D.catalog_pipeline || [];
+        allCatalogPages = D.catalog_pages || [];
+        renderCatalogPipeline();
+        renderCatalogTable();
+    };
+
     // Patch workflow detail loading (handles both programs and courses).
     window._origLoadWorkflowDetail = loadWorkflowDetail;
     window.loadWorkflowDetail = async function(programId, isCourseView) {
