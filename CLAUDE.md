@@ -1,7 +1,7 @@
 # Program Approval Tracker
 
 ## What This Is
-A dashboard that tracks academic program approvals through Northeastern University's CourseLeaf CIM (Curriculum Information Management) system. It scrapes data from the CourseLeaf web interface via Chrome/AppleScript, stores it in SQLite, and displays it on a web dashboard deployed to GitHub Pages.
+A dashboard that tracks academic program approvals through Northeastern University's CourseLeaf CIM (Curriculum Information Management) system. It scrapes data from the CourseLeaf web interface via a Chromium-family browser driven by AppleScript (Edge by default in launchd, Chrome supported as a fallback — see "Browser selection" below), stores it in SQLite, and displays it on a web dashboard deployed to GitHub Pages.
 
 **Owner:** Waleed Meleis, Graduate Dean at Northeastern University
 **Live site:** https://wmeleis.github.io/program-tracker
@@ -10,7 +10,7 @@ A dashboard that tracks academic program approvals through Northeastern Universi
 ## Architecture
 
 ```
-Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
+Edge or Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
                                                       |
                                                       v
                                                   database.py (SQLite)
@@ -29,14 +29,14 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 
 | File | Purpose |
 |------|---------|
-| `scraper.py` | Scrapes CourseLeaf via AppleScript executing JS in Chrome tabs. Two data sources: Approve Pages (role dropdown, matched by URL `courseleaf/approve`) for program discovery, and per-program XHR fetches (HTML + XML API) for workflow/metadata. |
+| `scraper.py` | Scrapes CourseLeaf via AppleScript executing JS in browser tabs. The target browser is configurable via `BROWSER_APP` env var (defaults to "Google Chrome" in code, but launchd sets it to "Microsoft Edge"; see "Browser selection"). Two data sources: Approve Pages (role dropdown, matched by URL `courseleaf/approve`) for program discovery, and per-program XHR fetches (HTML + XML API) for workflow/metadata. |
 | `database.py` | SQLite layer. Tables: `programs`, `workflow_steps`, `scan_history`, `scans`. Uses WAL mode. |
 | `app.py` | Flask server on port 5001. REST API. Scans are driven externally by `update.sh` (launched by launchd), not on a Flask-side timer. After each triggered scan, auto-exports static site and pushes to GitHub. |
 | `export_static.py` | Generates `docs/` directory: `data.json`, `index.html`, `app.js`, `style.css`. The static `app.js` overrides API calls to read from `data.json`. |
 | `static/app.js` | Frontend: pipeline bar, filters (type/proposal/smart views/college/campus/approver/step/search), sortable table with expandable workflow detail rows. |
 | `static/style.css` | Dashboard styling. Colored left borders: green=new, blue=change, red=inactivation. |
 | `templates/dashboard.html` | HTML template used by both Flask and static export. |
-| `update.sh` | Launched by launchd. Checks Chrome + session validity, starts Flask if needed, triggers scan, waits for completion. Sends macOS notifications. |
+| `update.sh` | Launched by launchd. Checks the configured browser (`BROWSER_APP`, default Chrome) + session validity, starts Flask if needed, triggers scan, waits for completion. Sends macOS notifications. |
 
 ### Scheduled Execution
 The system runs in two cadences: a once-daily heavy "full scan" via launchd, and a fast on-demand "Update Now" heal (the **Update Now** button in the dashboard or `POST /api/heal`).
@@ -48,7 +48,7 @@ The system runs in two cadences: a once-daily heavy "full scan" via launchd, and
   1. Mon–Fri ET (weekends skipped).
   2. Inside the 9am–8pm ET window.
   3. At least 20 hours since the last successful scan (`data/last_scan_unix`) — once-daily, so the gap dedupe absorbs any launchd retries.
-  4. Chrome running with a live CourseLeaf session.
+  4. The configured browser (`BROWSER_APP`, default Edge under launchd) running with a live CourseLeaf session.
 - **What the full scan does:** discovers brand-new program/course IDs via Approve Pages, re-fetches reference + regulatory data, runs the historical sweep when due (≥7 days), exports + pushes to GitHub Pages. Takes 30–45 min.
 
 **Update Now (quick heal) — on-demand**
@@ -68,10 +68,17 @@ The system runs in two cadences: a once-daily heavy "full scan" via launchd, and
 
 **Validation:** After processing, re-checks the 14 tracked pipeline roles (not college roles) against live Approve Pages to verify counts match. Small deltas are expected if approvals happen during the scan.
 
+### Browser selection
+- **`BROWSER_APP` env var** controls which Chromium-family browser AppleScript drives. Default in code: `"Google Chrome"`. Default in launchd (`com.programtracker.update.plist` `EnvironmentVariables`): `"Microsoft Edge"`. Override per-shell: `BROWSER_APP="Microsoft Edge" python3 app.py` (or `Google Chrome`).
+- **Why Edge:** the user runs Edge as their daily driver and prefers a single browser handling SSO, CourseLeaf session, SharePoint regulatory downloads, and dashboard preview.
+- **Edge requirements:** install Edge (Chromium-based, supports the same AppleScript verbs); enable Edge → View → Developer → Allow JavaScript from Apple Events; log into CourseLeaf in Edge window 1; keep Approve Pages + Program Management tabs open.
+- **Single point of control in code:** every browser interaction in `scraper.py` funnels through `run_js_in_tab()`, which reads `BROWSER_APP` once at module import. `update.sh` reads `BROWSER_APP` for both its `pgrep` liveness check and its session-validity AppleScript probe.
+- **Chrome fallback:** unset `BROWSER_APP` (or set to `"Google Chrome"`) — same code path, just a different `tell application "..."` target. No other code changes needed.
+
 ### Tab Matching
 - **Approve Pages tab:** Matched by URL containing `courseleaf/approve` (NOT by title - the title changes dynamically)
 - **Program Management tab:** Matched by URL containing `programadmin`
-- Both tabs must be open in Chrome window 1
+- Both tabs must be open in window 1 of whichever browser `BROWSER_APP` points at
 
 ### The 14 Pipeline Roles (in order)
 1. PR Graduate Dean's Office
@@ -169,9 +176,9 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 
 ## Known Issues / Gotchas
 
-1. **Chrome session expires** - CourseLeaf sessions time out. `update.sh` checks for this and sends a macOS notification. User must manually re-login.
+1. **CourseLeaf session expires** - CourseLeaf sessions time out in the browser (Edge or Chrome). `update.sh` checks for this and sends a macOS notification. User must manually re-login.
 2. **Tab title changes** - The Approve Pages tab title is dynamic (shows "BULK:URL0:..." etc). Always match by URL, never by title.
-3. **AppleScript requires permission** - Chrome > View > Developer > Allow JavaScript from Apple Events must be enabled.
+3. **AppleScript requires permission** - In whichever browser `BROWSER_APP` points at: View → Developer → Allow JavaScript from Apple Events must be enabled. (For Edge: same menu path; the toggle is per-browser, so enabling it in Chrome doesn't help Edge.)
 4. **Sleep affects scheduling** - Using `StartCalendarInterval` so macOS fires missed scans after wake.
 5. **Server must run with PYTHONUNBUFFERED=1** - Otherwise scan progress logs are buffered and don't appear in real time.
 6. **`update.sh` must be executable** - `chmod +x update.sh` or launchd gets "Operation not permitted".
@@ -184,7 +191,7 @@ After a full scan completes (`do_scan` in `app.py`) AND after every "Update Now"
 ## Dependencies
 - Python 3.9+ (macOS system Python works)
 - Flask, flask-cors, cryptography (`pip install flask flask-cors cryptography`)
-- Google Chrome with CourseLeaf session
+- Microsoft Edge or Google Chrome with CourseLeaf session (selected by `BROWSER_APP`; launchd default Edge)
 - macOS (AppleScript)
 - Git configured with push access to the repo
 
