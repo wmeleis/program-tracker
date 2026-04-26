@@ -7,6 +7,15 @@ import time
 import os
 import tempfile
 from datetime import datetime
+
+# Which browser AppleScript should drive. Defaults to Google Chrome (the
+# longstanding behavior). Override with BROWSER_APP="Microsoft Edge" to use
+# Edge instead — Edge is Chromium-based and supports the same AppleScript
+# verbs (`every tab of window 1`, `execute javascript`, `URL of t`, ...),
+# so no other code path needs to change. Whichever browser is selected
+# must be open with a logged-in CourseLeaf session in window 1.
+BROWSER_APP = os.environ.get("BROWSER_APP", "Google Chrome")
+
 from database import (
     init_db, upsert_program, upsert_workflow_steps,
     record_change, record_scan, get_all_programs,
@@ -243,7 +252,7 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
 
     applescript = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
-    tell application "Google Chrome"
+    tell application "{BROWSER_APP}"
         set tabList to every tab of window 1
         repeat with t in tabList
             {match_clause}
