@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1777243068">
+    <link rel="stylesheet" href="style.css?v=1777243960">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1777243068;
+  const CACHE_BUST = 1777243960;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -294,7 +294,6 @@
 
     <!-- Program-kind filter (programs view only) -->
     <section class="kind-filter-section" id="kind-filter-row">
-        <button class="kind-btn active" data-kind="" onclick="setProgramKindFilter('')">All</button>
         <button class="kind-btn" data-kind="bachelors" onclick="setProgramKindFilter('bachelors')">Bachelor's</button>
         <button class="kind-btn" data-kind="masters" onclick="setProgramKindFilter('masters')">Master's</button>
         <button class="kind-btn" data-kind="doctorate" onclick="setProgramKindFilter('doctorate')">Doctorate</button>

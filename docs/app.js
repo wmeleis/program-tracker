@@ -12,7 +12,9 @@ let pipelineFilter = null;
 let smartView = 'all';
 let typeFilter = '';
 let proposalFilter = '';
-let programKindFilter = '';   // one of '', 'bachelors', 'masters', 'doctorate', 'certificate', 'minor', 'plusone', 'concentration', 'dual'
+// Single-select: at most one kind active at a time. '' = no filter.
+// Click the active button again to deselect (toggle).
+let programKindFilter = '';
 let approverPrograms = null;
 let cachedPipeline = [];
 let cachedCoursePipeline = [];
@@ -1097,6 +1099,9 @@ function getBaseFiltered(approverProgramIds, exclude) {
             if (!searchField.toLowerCase().includes(search) &&
                 !(searchSecond && searchSecond.toLowerCase().includes(search))) return false;
         }
+        // Hide completed (no current step) by default. Counts and table match.
+        // Showing completed requires the dedicated "Complete" pipeline tile.
+        if (pipelineFilter !== '__complete__' && item.completion_date && !item.current_step) return false;
         return true;
     });
 }
@@ -1160,8 +1165,7 @@ async function applyFilters() {
                 if (!bucketDef.match(p.current_step)) return false;
             } else if (p.current_step !== pipelineFilter) return false;
         }
-        // Default: hide completed programs unless the Complete tile is active
-        if (!pipelineFilter && p.completion_date && !p.current_step) return false;
+        // Note: completed programs are hidden by default in getBaseFiltered.
         return true;
     });
 
