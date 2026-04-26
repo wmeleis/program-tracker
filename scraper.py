@@ -8,13 +8,13 @@ import os
 import tempfile
 from datetime import datetime
 
-# Which browser AppleScript should drive. Defaults to Google Chrome (the
-# longstanding behavior). Override with BROWSER_APP="Microsoft Edge" to use
-# Edge instead — Edge is Chromium-based and supports the same AppleScript
-# verbs (`every tab of window 1`, `execute javascript`, `URL of t`, ...),
+# Which browser AppleScript should drive. Defaults to Microsoft Edge (the
+# user's daily driver). Override with BROWSER_APP="Google Chrome" to use
+# Chrome instead — both browsers are Chromium-family and support the same
+# AppleScript verbs (`every tab of window 1`, `execute javascript`, ...),
 # so no other code path needs to change. Whichever browser is selected
 # must be open with a logged-in CourseLeaf session in window 1.
-BROWSER_APP = os.environ.get("BROWSER_APP", "Google Chrome")
+BROWSER_APP = os.environ.get("BROWSER_APP", "Microsoft Edge")
 
 from database import (
     init_db, upsert_program, upsert_workflow_steps,
@@ -250,18 +250,31 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     else:
         match_clause = f'if URL of t contains "{tab_identifier}" then'
 
+    # Two-phase pattern: find the tab INDEX first (cheap, just URL/title
+    # property reads), then issue `tell tab N of window 1 to execute
+    # javascript ...` directly. Avoids holding a tab alias across the
+    # `execute javascript` call — Edge's AppleScript bridge sometimes
+    # times out on `tell currentTab to execute javascript` in the
+    # middle of a repeat-with iteration. Chrome handles either form.
+    if match_by == 'title':
+        match_predicate = f'(title of tab i of window 1) is "{tab_identifier}"'
+    else:
+        match_predicate = f'(URL of tab i of window 1) contains "{tab_identifier}"'
+
     applescript = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
     tell application "{BROWSER_APP}"
-        set tabList to every tab of window 1
-        repeat with t in tabList
-            {match_clause}
-                set currentTab to t
-                tell currentTab to execute javascript jsCode
-                return result
+        set tabIdx to 0
+        set n to count of tabs of window 1
+        repeat with i from 1 to n
+            if {match_predicate} then
+                set tabIdx to i
+                exit repeat
             end if
         end repeat
-        return "TAB_NOT_FOUND"
+        if tabIdx = 0 then return "TAB_NOT_FOUND"
+        tell tab tabIdx of window 1 to execute javascript jsCode
+        return result
     end tell
     '''
 
@@ -528,8 +541,37 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 while ((apMatch = apPattern.exec(text)) !== null) {{
                     approvalDates.push({{date: apMatch[1], step: apMatch[2].trim()}});
                 }}
+                // Filter to the CURRENT proposal cycle. CIM's workflow div for
+                // a revision/inactivation also shows approvals from the
+                // program's prior workflow runs (when it was first created or
+                // last edited). Those stale entries leak into "days at step"
+                // and the program_approvals table unless we drop them.
+                // The current cycle's approvals are those at or after
+                // date_submitted; if none yet (proposal just submitted, no
+                // approvals in this cycle), we keep the array empty so
+                // last_approval_date falls back to date_submitted below.
+                var cycleStart = result.meta.date_submitted ? new Date(result.meta.date_submitted) : null;
+                if (cycleStart && !isNaN(cycleStart)) {{
+                    approvalDates = approvalDates.filter(function(a) {{
+                        var d = new Date(a.date);
+                        return !isNaN(d) && d >= cycleStart;
+                    }});
+                }}
                 if (approvalDates.length > 0) {{
-                    result.meta.last_approval_date = approvalDates[approvalDates.length - 1].date;
+                    // Pick the chronologically latest one (CIM emits in
+                    // workflow-step order, not strict chrono — be safe).
+                    var latest = approvalDates[0];
+                    var latestT = new Date(latest.date).getTime();
+                    for (var ai = 1; ai < approvalDates.length; ai++) {{
+                        var t = new Date(approvalDates[ai].date).getTime();
+                        if (t > latestT) {{ latest = approvalDates[ai]; latestT = t; }}
+                    }}
+                    result.meta.last_approval_date = latest.date;
+                }} else if (result.meta.date_submitted) {{
+                    // No approvals in current cycle yet — proposal sits at
+                    // its first review step. "Days at step" should be measured
+                    // from submission, not from a prior cycle's approval.
+                    result.meta.last_approval_date = result.meta.date_submitted;
                 }}
                 result.meta.approvals = approvalDates;
             }})
@@ -2804,8 +2846,24 @@ def batch_fetch_course_details(course_ids, batch_size=25):
                 while ((apMatch = apPattern.exec(html)) !== null) {{
                     approvalDates.push({{date: apMatch[1], step: stripTags(apMatch[2])}});
                 }}
+                // Filter to current proposal cycle (see program-side comment).
+                var cycleStart = result.meta.date_submitted ? new Date(result.meta.date_submitted) : null;
+                if (cycleStart && !isNaN(cycleStart)) {{
+                    approvalDates = approvalDates.filter(function(a) {{
+                        var d = new Date(a.date);
+                        return !isNaN(d) && d >= cycleStart;
+                    }});
+                }}
                 if (approvalDates.length > 0) {{
-                    result.meta.last_approval_date = approvalDates[approvalDates.length - 1].date;
+                    var latest = approvalDates[0];
+                    var latestT = new Date(latest.date).getTime();
+                    for (var ai = 1; ai < approvalDates.length; ai++) {{
+                        var t = new Date(approvalDates[ai].date).getTime();
+                        if (t > latestT) {{ latest = approvalDates[ai]; latestT = t; }}
+                    }}
+                    result.meta.last_approval_date = latest.date;
+                }} else if (result.meta.date_submitted) {{
+                    result.meta.last_approval_date = result.meta.date_submitted;
                 }}
                 result.meta.approvals = approvalDates;
             }})
