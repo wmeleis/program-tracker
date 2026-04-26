@@ -221,12 +221,15 @@ header h1 {
     border-color: var(--accent);
 }
 
-/* Program-kind row: between smart-views and the filters dropdown row */
+/* Program-kind row: between smart-views and the filters dropdown row.
+   padding/margin match smart-views-section so buttons line up at the same
+   left edge as the rows above (48px from the page edge). */
 .kind-filter-section {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
+    padding: 0 24px;
     margin: 0 24px 12px;
 }
 
