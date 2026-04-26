@@ -221,6 +221,38 @@ header h1 {
     border-color: var(--accent);
 }
 
+/* Program-kind row: between smart-views and the filters dropdown row */
+.kind-filter-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 0 24px 12px;
+}
+
+.kind-btn {
+    padding: 6px 12px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.kind-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.kind-btn.active {
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
 .smart-view-btn {
     padding: 7px 14px;
     border: 2px solid var(--border);

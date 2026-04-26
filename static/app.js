@@ -12,10 +12,65 @@ let pipelineFilter = null;
 let smartView = 'all';
 let typeFilter = '';
 let proposalFilter = '';
+let programKindFilter = '';   // one of '', 'bachelors', 'masters', 'doctorate', 'certificate', 'minor', 'plusone', 'concentration', 'dual'
 let approverPrograms = null;
 let cachedPipeline = [];
 let cachedCoursePipeline = [];
 const STUCK_THRESHOLD_DAYS = 30;
+
+// Program-kind classification. Mutually exclusive — name patterns checked
+// before degree code so a "Concentration" or "Minor" with an incidental
+// degree code still routes to the right bucket.
+const PROGRAM_KINDS = [
+    { id: 'bachelors',    label: "Bachelor's"    },
+    { id: 'masters',      label: "Master's"      },
+    { id: 'doctorate',    label: 'Doctorate'     },
+    { id: 'certificate',  label: 'Certificate'   },
+    { id: 'minor',        label: 'Minor'         },
+    { id: 'plusone',      label: 'PlusOne'       },
+    { id: 'concentration',label: 'Concentration' },
+    { id: 'dual',         label: 'Dual Degree'   },
+];
+
+const DOCTORATE_DEGREES = new Set(['PhD','EdD','EDD','DNP','DPT','DPS','DLP','PharmD','DMSc','JD']);
+
+function isTemplateProgram(p) {
+    // CourseLeaf "TEMPLATE: ..." rows aren't real programs — they're
+    // starting-point templates left in CIM. Hide unconditionally.
+    return /^TEMPLATE\s*:/i.test(p && p.name || '');
+}
+
+function classifyProgramKind(p) {
+    const name = (p && p.name || '').trim();
+    const lname = name.toLowerCase();
+    const degree = (p && p.degree || '').trim();
+
+    // Name patterns first — these win over degree code.
+    if (lname.indexOf('minor') !== -1) return 'minor';
+    if (lname.indexOf('plusone') !== -1) return 'plusone';
+    if (lname.indexOf('concentration') !== -1) return 'concentration';
+    // Dual: " / " joining two distinct degree-bearing program names,
+    // e.g. "Law, JD / Public Health, MPH". Also matches ", JD/MS" style.
+    if (/\s\/\s/.test(name) || /,\s*[A-Z]{2,7}\s*\/\s*[A-Z]{2,7}/.test(name)) return 'dual';
+    if (lname.indexOf('certificate') !== -1) return 'certificate';
+
+    // Degree-code-driven buckets.
+    if (degree === 'CAGS' || degree === 'CERTP') return 'certificate';
+    if (DOCTORATE_DEGREES.has(degree)) return 'doctorate';
+    if (degree === 'LLM' || /,\s*MLS\b/.test(name)) return 'masters';
+    if (/^B/.test(degree)) return 'bachelors';
+    if (/^M/.test(degree)) return 'masters';
+    return null;  // uncategorized — not in any bucket, never matches a kind filter
+}
+
+function setProgramKindFilter(kind) {
+    programKindFilter = kind === programKindFilter ? '' : kind;
+    document.querySelectorAll('.kind-btn').forEach(btn => {
+        const k = btn.dataset.kind || '';
+        btn.classList.toggle('active', k === programKindFilter);
+    });
+    applyFilters();
+}
 
 function switchView(view) {
     currentView = view;
@@ -30,9 +85,11 @@ function switchView(view) {
     pipelineFilter = null;
     typeFilter = '';
     proposalFilter = '';
+    programKindFilter = '';
     document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.proposal-btn').forEach(btn => btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact'));
     document.querySelectorAll('.smart-view-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.kind-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById('filter-college').value = '';
     document.getElementById('filter-campus').value = '';
     document.getElementById('filter-approver').value = '';
@@ -758,6 +815,34 @@ function updateTypeCounts(programs) {
     });
 }
 
+// Counts for the program-kind row, cross-filtered against everything EXCEPT
+// the kind itself (so each button shows "what would I have if I switched
+// to this option" given the rest of the filter state). Also drives the
+// row's visibility — hidden on Courses/Catalog views.
+function updateProgramKindCounts() {
+    const row = document.getElementById('kind-filter-row');
+    if (!row) return;
+    if (currentView !== 'programs') {
+        row.style.display = 'none';
+        return;
+    }
+    row.style.display = '';
+    const baseExclKind = getBaseFiltered(window._staticApproverIds || null, { kind: true });
+    const counts = { '': baseExclKind.length };
+    baseExclKind.forEach(p => {
+        const k = classifyProgramKind(p);
+        if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+    document.querySelectorAll('.kind-btn').forEach(btn => {
+        const k = btn.dataset.kind || '';
+        const def = PROGRAM_KINDS.find(d => d.id === k);
+        const label = def ? def.label : 'All';
+        const count = counts[k] || 0;
+        btn.textContent = `${label} (${count})`;
+        btn.classList.toggle('active', k === programKindFilter);
+    });
+}
+
 async function loadColleges() {
     try {
         const res = await fetch('/api/colleges');
@@ -975,6 +1060,9 @@ function getBaseFiltered(approverProgramIds, exclude) {
     const sourceData = currentView === 'courses' ? allCourses : allPrograms;
 
     return sourceData.filter(item => {
+        // TEMPLATE: ... entries are CIM scaffolding, never real programs.
+        // Hide them from every program-side filter (courses don't have these).
+        if (currentView === 'programs' && isTemplateProgram(item)) return false;
         if (smartView === 'recent') {
             const entered = item.step_entered_date ? new Date(item.step_entered_date) : null;
             if (!entered || (now - entered) >= 14 * 86400000) return false;
@@ -989,6 +1077,9 @@ function getBaseFiltered(approverProgramIds, exclude) {
             if (lvl !== typeFilter) return false;
         }
         if (!ex.proposal && proposalFilter && item.status !== proposalFilter) return false;
+        if (!ex.kind && currentView === 'programs' && programKindFilter) {
+            if (classifyProgramKind(item) !== programKindFilter) return false;
+        }
         if (!ex.college && collegeFilter && item.college !== collegeFilter) return false;
         if (currentView === 'courses') {
             const subjSel = document.getElementById('filter-subject');
@@ -1051,6 +1142,7 @@ async function applyFilters() {
     // Each button group's counts exclude its own filter so you see what's available
     updateTypeCounts(getBaseFiltered(approverProgramIds, {type: true}));
     updateProposalCounts(getBaseFiltered(approverProgramIds, {proposal: true}));
+    updateProgramKindCounts();
 
     // Now apply pipeline filter for the table (college already applied in baseFiltered)
     const collegeDetector = currentView === 'courses' ? isCourseCollegeStep : isCollegeStep;
