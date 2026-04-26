@@ -69,7 +69,7 @@ The system runs in two cadences: a once-daily heavy "full scan" via launchd, and
 **Validation:** After processing, re-checks the 14 tracked pipeline roles (not college roles) against live Approve Pages to verify counts match. Small deltas are expected if approvals happen during the scan.
 
 ### Browser selection
-- **`BROWSER_APP` env var** controls which Chromium-family browser AppleScript drives. Default in code: `"Google Chrome"`. Default in launchd (`com.programtracker.update.plist` `EnvironmentVariables`): `"Microsoft Edge"`. Override per-shell: `BROWSER_APP="Microsoft Edge" python3 app.py` (or `Google Chrome`).
+- **`BROWSER_APP` env var** controls which Chromium-family browser AppleScript drives. **Default everywhere is `"Microsoft Edge"`** (in `scraper.py`, in `update.sh`, and in the launchd plist `EnvironmentVariables`). Override per-shell: `BROWSER_APP="Google Chrome" python3 app.py` to fall back to Chrome.
 - **Why Edge:** the user runs Edge as their daily driver and prefers a single browser handling SSO, CourseLeaf session, SharePoint regulatory downloads, and dashboard preview.
 - **Edge requirements:** install Edge (Chromium-based, supports the same AppleScript verbs); enable Edge → View → Developer → Allow JavaScript from Apple Events; log into CourseLeaf in Edge window 1; keep Approve Pages + Program Management tabs open.
 - **Single point of control in code:** every browser interaction in `scraper.py` funnels through `run_js_in_tab()`, which reads `BROWSER_APP` once at module import. `update.sh` reads `BROWSER_APP` for both its `pgrep` liveness check and its session-validity AppleScript probe.
