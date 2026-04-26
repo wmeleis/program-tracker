@@ -49,24 +49,28 @@ if [ -f "$LAST_SCAN_FILE" ]; then
     fi
 fi
 
-# Check Chrome is running
-if ! pgrep -q "Google Chrome"; then
-    echo "$(date): Chrome not running, skipping" >> "$LOG"
+# Browser to drive (Chrome by default; export BROWSER_APP="Microsoft Edge"
+# to switch). The pgrep token must match the running process name; for
+# Edge it's "Microsoft Edge" on macOS.
+BROWSER_APP="${BROWSER_APP:-Google Chrome}"
+
+if ! pgrep -q "$BROWSER_APP"; then
+    echo "$(date): $BROWSER_APP not running, skipping" >> "$LOG"
     exit 0
 fi
 
 # Check session is still valid (match Approve Pages tab by URL, not title)
-SESSION_CHECK=$(osascript -e '
-tell application "Google Chrome"
+SESSION_CHECK=$(osascript -e "
+tell application \"$BROWSER_APP\"
     set tabList to every tab of window 1
     repeat with t in tabList
-        if URL of t contains "courseleaf/approve" then
-            tell t to execute javascript "document.body.innerText.substring(0, 100)"
+        if URL of t contains \"courseleaf/approve\" then
+            tell t to execute javascript \"document.body.innerText.substring(0, 100)\"
             return result
         end if
     end repeat
-    return "TAB_NOT_FOUND"
-end tell' 2>/dev/null)
+    return \"TAB_NOT_FOUND\"
+end tell" 2>/dev/null)
 
 if [[ "$SESSION_CHECK" == "TAB_NOT_FOUND" ]] || [[ -z "$SESSION_CHECK" ]]; then
     echo "$(date): Approve Pages tab not found, skipping" >> "$LOG"
