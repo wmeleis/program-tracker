@@ -18,7 +18,36 @@ let programKindFilter = '';
 let approverPrograms = null;
 let cachedPipeline = [];
 let cachedCoursePipeline = [];
-const STUCK_THRESHOLD_DAYS = 30;
+const STUCK_THRESHOLD_DAYS = 21;  // legacy default — see STUCK_THRESHOLDS for per-step overrides
+
+// Per-step "possibly stuck" thresholds (in days). null = never marked stuck.
+// Default for any step not listed here is 21 days. The values below override
+// that default for steps that legitimately wait longer (committees that
+// meet on a fixed cadence, batched setup steps, etc.).
+const STUCK_THRESHOLDS = {
+    'Program University Board of Trustees': null, // BoT meets ~quarterly; never flag stuck
+    'Program Faculty Senate': 60,                  // Senate meets monthly
+    'Program Catalog Setup': 30,                   // catalog batches
+    'Program Banner Setup': 30,                    // batched processing
+    'Program Editor': 14,                          // editor queue typically fast
+};
+
+function getStuckThreshold(step) {
+    if (!step) return null;  // completed programs aren't "stuck"
+    if (Object.prototype.hasOwnProperty.call(STUCK_THRESHOLDS, step)) {
+        return STUCK_THRESHOLDS[step];
+    }
+    return STUCK_THRESHOLD_DAYS;
+}
+
+function isStuckProgram(p) {
+    const threshold = getStuckThreshold(p.current_step);
+    if (threshold === null) return false;
+    return getDaysAtStep(p) >= threshold;
+}
+
+const NEW_SUBMISSION_DAYS = 30;
+const RECENT_CHANGE_DAYS = 14;
 
 // Program-kind classification. Mutually exclusive — name patterns checked
 // before degree code so a "Concentration" or "Minor" with an incidental
@@ -700,15 +729,17 @@ function populateCourseStepFilter() {
 
 function updateCourseSmartViewCounts() {
     const now = new Date();
-    const recentCount = allCourses.filter(c => {
-        const entered = c.step_entered_date ? new Date(c.step_entered_date) : null;
-        return entered && (now - entered) < 14 * 86400000;
-    }).length;
-    const stuckCount = allCourses.filter(c => getDaysAtStep(c) >= STUCK_THRESHOLD_DAYS).length;
-    const newCount = allCourses.filter(c => {
+    const newCount = (allCourses || []).filter(c => {
         const submitted = c.date_submitted ? new Date(c.date_submitted) : null;
-        return submitted && (now - submitted) < 30 * 86400000;
+        return submitted && (now - submitted) < NEW_SUBMISSION_DAYS * 86400000;
     }).length;
+    const recentCount = (allCourses || []).filter(c => {
+        const entered = c.step_entered_date ? new Date(c.step_entered_date) : null;
+        if (!entered || (now - entered) >= RECENT_CHANGE_DAYS * 86400000) return false;
+        const submitted = c.date_submitted ? new Date(c.date_submitted) : null;
+        return !submitted || (now - submitted) >= NEW_SUBMISSION_DAYS * 86400000;
+    }).length;
+    const stuckCount = (allCourses || []).filter(isStuckProgram).length;
 
     document.querySelectorAll('.smart-view-btn').forEach(btn => {
         const view = btn.getAttribute('onclick').match(/'(\w+)'/)[1];
@@ -859,15 +890,19 @@ async function loadColleges() {
 
 function updateSmartViewCounts() {
     const now = new Date();
-    const recentCount = allPrograms.filter(p => {
-        const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
-        return entered && (now - entered) < 14 * 86400000; // 14 days
-    }).length;
-    const stuckCount = allPrograms.filter(p => getDaysAtStep(p) >= STUCK_THRESHOLD_DAYS).length;
-    const newCount = allPrograms.filter(p => {
+    const visiblePrograms = (allPrograms || []).filter(p => !isTemplateProgram(p));
+    const newCount = visiblePrograms.filter(p => {
         const submitted = p.date_submitted ? new Date(p.date_submitted) : null;
-        return submitted && (now - submitted) < 30 * 86400000;
+        return submitted && (now - submitted) < NEW_SUBMISSION_DAYS * 86400000;
     }).length;
+    const recentCount = visiblePrograms.filter(p => {
+        const entered = p.step_entered_date ? new Date(p.step_entered_date) : null;
+        if (!entered || (now - entered) >= RECENT_CHANGE_DAYS * 86400000) return false;
+        // Exclude new submissions (they have their own bucket).
+        const submitted = p.date_submitted ? new Date(p.date_submitted) : null;
+        return !submitted || (now - submitted) >= NEW_SUBMISSION_DAYS * 86400000;
+    }).length;
+    const stuckCount = visiblePrograms.filter(isStuckProgram).length;
 
     document.querySelectorAll('.smart-view-btn').forEach(btn => {
         const view = btn.getAttribute('onclick').match(/'(\w+)'/)[1];
@@ -1066,14 +1101,23 @@ function getBaseFiltered(approverProgramIds, exclude) {
         // TEMPLATE: ... entries are CIM scaffolding, never real programs.
         // Hide them from every program-side filter (courses don't have these).
         if (currentView === 'programs' && isTemplateProgram(item)) return false;
+        // Smart-view definitions:
+        //   new    = submitted in the last 30 days (no other qualifier)
+        //   recent = step advanced in the last 14 days BUT NOT a new submission
+        //            (i.e., date_submitted is older than 30 days)
+        //   stuck  = days at current step >= per-step threshold (BoT excluded)
         if (smartView === 'recent') {
             const entered = item.step_entered_date ? new Date(item.step_entered_date) : null;
-            if (!entered || (now - entered) >= 14 * 86400000) return false;
+            if (!entered || (now - entered) >= RECENT_CHANGE_DAYS * 86400000) return false;
+            const submitted = item.date_submitted ? new Date(item.date_submitted) : null;
+            if (submitted && (now - submitted) < NEW_SUBMISSION_DAYS * 86400000) return false;
         } else if (smartView === 'stuck') {
-            if (getDaysAtStep(item) < STUCK_THRESHOLD_DAYS) return false;
+            // Courses use the default 21-day fallback; programs use per-step
+            // overrides from STUCK_THRESHOLDS (BoT = never, Senate = 60, ...).
+            if (!isStuckProgram(item)) return false;
         } else if (smartView === 'new') {
             const submitted = item.date_submitted ? new Date(item.date_submitted) : null;
-            if (!submitted || (now - submitted) >= 30 * 86400000) return false;
+            if (!submitted || (now - submitted) >= NEW_SUBMISSION_DAYS * 86400000) return false;
         }
         if (!ex.type && typeFilter) {
             const lvl = currentView === 'courses' ? classifyCourseLevel(item) : item.program_type;
@@ -1259,7 +1303,14 @@ function renderTable(items) {
              item.status === 'Deactivated' ? 'row-deactivated' : 'row-edited') +
             (isComplete ? ' row-complete' : '');
         const days = getDaysAtStep(item);
-        const daysClass = days < 14 ? 'fresh' : days < STUCK_THRESHOLD_DAYS ? 'aging' : 'stuck';
+        // Days-color uses the step-specific stuck threshold so e.g. a BoT
+        // entry doesn't render red after 30 days (BoT threshold is null).
+        const stepThreshold = getStuckThreshold(item.current_step);
+        let daysClass;
+        if (stepThreshold === null) daysClass = 'fresh';
+        else if (days < Math.min(14, stepThreshold)) daysClass = 'fresh';
+        else if (days < stepThreshold) daysClass = 'aging';
+        else daysClass = 'stuck';
 
         const stepCellText = isComplete
             ? `<em class="muted">Approved</em>`
