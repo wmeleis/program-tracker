@@ -224,7 +224,8 @@ header h1 {
 /* Program-kind row: between smart-views and the filters dropdown row.
    padding/margin match smart-views-section so buttons line up at the same
    left edge as the rows above (48px from the page edge). */
-.kind-filter-section {
+.kind-filter-section,
+.smart-actions-section {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
