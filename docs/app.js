@@ -733,25 +733,25 @@ async function loadApprovers() {
 }
 
 function setTypeFilter(type) {
-    typeFilter = type;
+    // Toggle: click the active button again to clear the filter.
+    typeFilter = (typeFilter === type) ? '' : type;
     document.querySelectorAll('.type-btn').forEach(btn => {
         const btnType = btn.getAttribute('onclick').match(/'([^']*)'/)[1];
-        btn.classList.toggle('active', btnType === type);
+        btn.classList.toggle('active', btnType === typeFilter && typeFilter !== '');
     });
     applyFilters();
 }
 
 function setProposalFilter(status) {
-    proposalFilter = status;
+    // Toggle: click the active button again to clear.
+    proposalFilter = (proposalFilter === status) ? '' : status;
     document.querySelectorAll('.proposal-btn').forEach(btn => {
         const btnStatus = btn.getAttribute('onclick').match(/'([^']*)'/)[1];
-        // Remove all active states
         btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact');
-        if (btnStatus === status) {
-            if (status === '') btn.classList.add('active-all');
-            else if (status === 'Added') btn.classList.add('active-new');
-            else if (status === 'Edited') btn.classList.add('active-edit');
-            else if (status === 'Deactivated') btn.classList.add('active-inact');
+        if (btnStatus === proposalFilter && proposalFilter !== '') {
+            if (proposalFilter === 'Added') btn.classList.add('active-new');
+            else if (proposalFilter === 'Edited') btn.classList.add('active-edit');
+            else if (proposalFilter === 'Deactivated') btn.classList.add('active-inact');
         }
     });
     applyFilters();

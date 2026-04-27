@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1777243960">
+    <link rel="stylesheet" href="style.css?v=1777252077">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1777243960;
+  const CACHE_BUST = 1777252077;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -270,14 +270,12 @@
     <!-- Smart Views + Type Buttons -->
     <section class="smart-views-section">
         <div class="view-group">
-            <button class="type-btn active" onclick="setTypeFilter('')">All</button>
             <button class="type-btn" onclick="setTypeFilter('Undergraduate')">Undergraduate</button>
             <button class="type-btn" onclick="setTypeFilter('Graduate')">Graduate</button>
             <button class="type-btn" id="btn-type-continuing" onclick="setTypeFilter('Continuing')">Continuing</button>
         </div>
         <div class="view-divider"></div>
         <div class="view-group">
-            <button class="proposal-btn active-all" onclick="setProposalFilter('')">All</button>
             <button class="proposal-btn" id="btn-proposal-new" onclick="setProposalFilter('Added')">New Programs</button>
             <button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button>
             <button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button>

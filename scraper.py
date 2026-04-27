@@ -755,9 +755,9 @@ def check_courseleaf_session():
     if not url or url == 'missing value':
         return {
             'ok': False,
-            'error': 'chrome_unreachable',
-            'detail': 'Chrome programadmin tab not found or not responding. '
-                      'Open https://nextcatalog.northeastern.edu/programadmin/ in Chrome window 1.'
+            'error': 'browser_unreachable',
+            'detail': f'{BROWSER_APP} programadmin tab not found or not responding. '
+                      f'Open https://nextcatalog.northeastern.edu/programadmin/ in {BROWSER_APP} window 1.'
         }
 
     # Step 2: Probe the XML API for a known program to verify session.
@@ -800,7 +800,7 @@ def check_courseleaf_session():
         return {
             'ok': False,
             'error': 'probe_failed',
-            'detail': 'Could not start CourseLeaf probe. Check that Chrome is running.'
+            'detail': f'Could not start CourseLeaf probe. Check that {BROWSER_APP} is running.'
         }
     result = None
     for _ in range(15):  # up to ~15s
@@ -823,7 +823,7 @@ def check_courseleaf_session():
         return {
             'ok': False,
             'error': 'probe_failed',
-            'detail': 'Could not probe CourseLeaf. Check that Chrome is running and '
+            'detail': f'Could not probe CourseLeaf. Check that {BROWSER_APP} is running and '
                       'the programadmin tab is open.'
         }
 
@@ -832,7 +832,7 @@ def check_courseleaf_session():
             'ok': False,
             'error': 'session_invalid',
             'detail': f'CourseLeaf session appears invalid or expired (probe: {result}). '
-                      'Please log in to CourseLeaf in Chrome, then retry.'
+                      f'Please log in to CourseLeaf in {BROWSER_APP}, then retry.'
         }
 
     # Step 3: Verify Approve Pages tab has the role selector
@@ -851,7 +851,7 @@ def check_courseleaf_session():
             'ok': False,
             'error': 'approve_pages_missing',
             'detail': 'The CourseLeaf Approve Pages tab is not open. '
-                      'Open https://nextcatalog.northeastern.edu/courseleaf/approve/ in Chrome.'
+                      f'Open https://nextcatalog.northeastern.edu/courseleaf/approve/ in {BROWSER_APP}.'
         }
     if not ap_result.startswith('OK:'):
         return {
