@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1777264899">
+    <link rel="stylesheet" href="style.css?v=1777265743">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1777264899;
+  const CACHE_BUST = 1777265743;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -295,11 +295,11 @@
         <button class="kind-btn" data-kind="dual" onclick="setProgramKindFilter('dual')">Dual Degree</button>
     </section>
 
-    <!-- Smart Views (Recent / Stuck / New Submissions) -->
+    <!-- Smart Views: New Submissions → Recent Changes → Potentially Stuck -->
     <section class="smart-actions-section">
+        <button class="smart-view-btn" onclick="setSmartView('new')">New Submissions</button>
         <button class="smart-view-btn" onclick="setSmartView('recent')">Recent Changes</button>
         <button class="smart-view-btn" onclick="setSmartView('stuck')">Potentially Stuck</button>
-        <button class="smart-view-btn" onclick="setSmartView('new')">New Submissions</button>
     </section>
 
     <!-- Filters -->
