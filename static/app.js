@@ -900,10 +900,11 @@ function formatCompletionDate(s) {
 }
 
 function setSmartView(view) {
-    smartView = view;
+    // Toggle: clicking the active smart view clears it (back to 'all').
+    smartView = (smartView === view) ? 'all' : view;
     document.querySelectorAll('.smart-view-btn').forEach(btn => {
         const btnView = btn.getAttribute('onclick').match(/'(\w+)'/)[1];
-        btn.classList.toggle('active', btnView === view);
+        btn.classList.toggle('active', btnView === smartView && smartView !== 'all');
     });
     applyFilters();
 }
