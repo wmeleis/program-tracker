@@ -92,12 +92,6 @@
             <button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button>
             <button class="proposal-btn" id="btn-proposal-complete" onclick="togglePipelineFilter('__complete__')">Complete</button>
         </div>
-        <div class="view-divider"></div>
-        <div class="view-group">
-            <button class="smart-view-btn" onclick="setSmartView('recent')">Recent Changes</button>
-            <button class="smart-view-btn" onclick="setSmartView('stuck')">Potentially Stuck</button>
-            <button class="smart-view-btn" onclick="setSmartView('new')">New Submissions</button>
-        </div>
     </section>
 
     <!-- Program-kind filter (programs view only) -->
@@ -110,6 +104,13 @@
         <button class="kind-btn" data-kind="plusone" onclick="setProgramKindFilter('plusone')">PlusOne</button>
         <button class="kind-btn" data-kind="concentration" onclick="setProgramKindFilter('concentration')">Concentration</button>
         <button class="kind-btn" data-kind="dual" onclick="setProgramKindFilter('dual')">Dual Degree</button>
+    </section>
+
+    <!-- Smart Views (Recent / Stuck / New Submissions) -->
+    <section class="smart-actions-section">
+        <button class="smart-view-btn" onclick="setSmartView('recent')">Recent Changes</button>
+        <button class="smart-view-btn" onclick="setSmartView('stuck')">Potentially Stuck</button>
+        <button class="smart-view-btn" onclick="setSmartView('new')">New Submissions</button>
     </section>
 
     <!-- Filters -->
