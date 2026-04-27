@@ -704,15 +704,46 @@ def batch_fetch_program_details(program_ids, batch_size=25):
     return all_results
 
 
-def classify_program_type(name, workflow_steps=None):
-    """Classify program as Undergraduate, Graduate, or Other based on name/workflow."""
+_DOCTORATE_CODES = {'PhD', 'EdD', 'EDD', 'DNP', 'DPT', 'DPS', 'DLP', 'PharmD', 'DMSc', 'JD'}
+
+
+def classify_program_type(name, workflow_steps=None, degree=None):
+    """Classify program as Undergraduate, Graduate, or Other.
+
+    The CIM XML degree code is the most reliable signal when present:
+    BS/BA/BFA/BLA/BACS/BSN/BSCE/BSME/BSCmpE/BSEE/BSIE/BSCmpE/BSEnvE/BSET/...
+    are all undergraduate; M*-prefixed codes plus LLM/MARCH/MAT/MST and
+    the doctorate codes above are graduate. We fall back to name and
+    workflow patterns when degree is missing (older completed programs).
+
+    PlusOne / Concentration / Certificate / Minor are kept as their own
+    "kind" via classifyProgramKind on the frontend; here they still
+    project to Graduate vs Undergraduate based on the same degree-code
+    rule when available, else name patterns.
+    """
     name_lower = name.lower()
 
+    # Degree-code-driven (most reliable when present).
+    deg = (degree or '').strip()
+    if deg:
+        if deg in _DOCTORATE_CODES:
+            return 'Graduate'
+        if deg == 'CAGS' or deg == 'CERTP':
+            return 'Graduate'
+        if deg.startswith('B'):
+            return 'Undergraduate'  # BS, BA, BFA, BLA, BACS, BSN, BSCE, BSME, ...
+        if deg.startswith('M') or deg == 'LLM':
+            return 'Graduate'
+
+    # Name-pattern fallback (used for entries with no degree code).
     grad_indicators = [', ms ', ', ms(', ', ms—', ', ma ', ', mfa', ', med', ', mph', ', mpa',
                        ', mps', ', phd', 'graduate certificate', ', mba', ', msf',
-                       'doctoral', 'ms—align', ', msw', ', msis']
+                       'doctoral', 'ms—align', ', msw', ', msis', ', mls', ', llm',
+                       ', dnp', ', dpt', ', dps', ', dlp', ', edd', ', jd', ', pharmd']
     undergrad_indicators = [', bs ', ', bs(', ', ba ', ', ba(', ', bfa', ', bsba',
-                           ', bsib', ', bsche', ', bsbioe', ', bscs', 'minor', ', aa ',
+                           ', bsib', ', bsche', ', bsbioe', ', bscs', ', bsce', ', bsme',
+                           ', bsee', ', bsie', ', bsn', ', bsenve', ', bset', ', bla',
+                           ', bacs', ', bscmpe', 'minor', ', aa ',
                            'business concentration', 'half major']
 
     for ind in grad_indicators:
@@ -986,7 +1017,7 @@ def run_full_scan():
         is_complete = (total > 0 and completed == total and not current_step)
         completion_date = meta.get('last_approval_date', '') if is_complete else ''
 
-        prog_type = classify_program_type(prog_name, steps)
+        prog_type = classify_program_type(prog_name, steps, degree)
 
         program_data = {
             'id': prog_id,
@@ -1182,7 +1213,7 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
             'total_steps': total,
             'completed_steps': approved_count,
             'current_approver_emails': current_emails,
-            'program_type': classify_program_type(prog_name, steps),
+            'program_type': classify_program_type(prog_name, steps, meta.get('degree', '')),
             'college': college,
             'department': meta.get('department', ''),
             'degree': meta.get('degree', ''),
@@ -1515,7 +1546,7 @@ def heal_stale_program_steps(log=False, active_only=True):
                 'total_steps': len(steps),
                 'completed_steps': sum(1 for s in steps if s.get('status') == 'approved'),
                 'current_approver_emails': '',
-                'program_type': classify_program_type(name, steps),
+                'program_type': classify_program_type(name, steps, meta.get('degree', '')),
                 'college': college,
                 'department': meta.get('department', ''),
                 'degree': meta.get('degree', ''),
