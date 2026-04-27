@@ -262,7 +262,7 @@ header h1 {
     border: 2px solid var(--border);
     border-radius: 6px;
     background: var(--surface);
-    color: var(--text-secondary);
+    color: var(--text);
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
@@ -499,7 +499,7 @@ header h1 {
     border: 2px solid var(--border);
     border-radius: 6px;
     background: var(--surface);
-    color: var(--text-secondary);
+    color: var(--text);
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
