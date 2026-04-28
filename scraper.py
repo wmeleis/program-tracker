@@ -8,13 +8,14 @@ import os
 import tempfile
 from datetime import datetime
 
-# Which browser AppleScript should drive. Defaults to Microsoft Edge (the
-# user's daily driver). Override with BROWSER_APP="Google Chrome" to use
-# Chrome instead — both browsers are Chromium-family and support the same
-# AppleScript verbs (`every tab of window 1`, `execute javascript`, ...),
-# so no other code path needs to change. Whichever browser is selected
-# must be open with a logged-in CourseLeaf session in window 1.
-BROWSER_APP = os.environ.get("BROWSER_APP", "Microsoft Edge")
+# Which browser AppleScript should drive. Defaults to Google Chrome:
+# Chrome's AppleScript bridge is reliable for the long-running async JS
+# fetches the scraper does (Edge throttles background-tab JS aggressively
+# and stalls long batch operations). Override with
+# BROWSER_APP="Microsoft Edge" if you want Edge anyway. Whichever browser
+# is selected must be open with a logged-in CourseLeaf session in
+# window 1, with the programadmin and courseleaf/approve tabs open.
+BROWSER_APP = os.environ.get("BROWSER_APP", "Google Chrome")
 
 from database import (
     init_db, upsert_program, upsert_workflow_steps,
