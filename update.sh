@@ -49,10 +49,11 @@ if [ -f "$LAST_SCAN_FILE" ]; then
     fi
 fi
 
-# Browser to drive (Edge by default — matches scraper.py's default and
-# the launchd plist EnvironmentVariables. Override with
-# BROWSER_APP="Google Chrome" to switch.) pgrep matches process name.
-BROWSER_APP="${BROWSER_APP:-Microsoft Edge}"
+# Browser to drive (Chrome by default — Chrome's AppleScript bridge is
+# more reliable than Edge's for long-running scraping. Override with
+# BROWSER_APP="Microsoft Edge" if you want Edge instead.) pgrep matches
+# process name.
+BROWSER_APP="${BROWSER_APP:-Google Chrome}"
 
 if ! pgrep -q "$BROWSER_APP"; then
     echo "$(date): $BROWSER_APP not running, skipping" >> "$LOG"

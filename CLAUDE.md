@@ -1,7 +1,7 @@
 # Program Approval Tracker
 
 ## What This Is
-A dashboard that tracks academic program approvals through Northeastern University's CourseLeaf CIM (Curriculum Information Management) system. It scrapes data from the CourseLeaf web interface via a Chromium-family browser driven by AppleScript (Edge by default in launchd, Chrome supported as a fallback — see "Browser selection" below), stores it in SQLite, and displays it on a web dashboard deployed to GitHub Pages.
+A dashboard that tracks academic program approvals through Northeastern University's CourseLeaf CIM (Curriculum Information Management) system. It scrapes data from the CourseLeaf web interface via a Chromium-family browser driven by AppleScript (Chrome by default; Edge supported via `BROWSER_APP` env var — see "Browser selection" below), stores it in SQLite, and displays it on a web dashboard deployed to GitHub Pages.
 
 **Owner:** Waleed Meleis, Graduate Dean at Northeastern University
 **Live site:** https://wmeleis.github.io/program-tracker
@@ -10,7 +10,7 @@ A dashboard that tracks academic program approvals through Northeastern Universi
 ## Architecture
 
 ```
-Edge or Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
+Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
                                                       |
                                                       v
                                                   database.py (SQLite)
@@ -69,7 +69,8 @@ The system runs in two cadences: a once-daily heavy "full scan" via launchd, and
 **Validation:** After processing, re-checks the 14 tracked pipeline roles (not college roles) against live Approve Pages to verify counts match. Small deltas are expected if approvals happen during the scan.
 
 ### Browser selection
-- **`BROWSER_APP` env var** controls which Chromium-family browser AppleScript drives. **Default everywhere is `"Microsoft Edge"`** (in `scraper.py`, in `update.sh`, and in the launchd plist `EnvironmentVariables`). Override per-shell: `BROWSER_APP="Google Chrome" python3 app.py` to fall back to Chrome.
+- **`BROWSER_APP` env var** controls which Chromium-family browser AppleScript drives. **Default everywhere is `"Google Chrome"`** (in `scraper.py`, in `update.sh`, and the launchd plist has no override). Override per-shell: `BROWSER_APP="Microsoft Edge" python3 app.py` to use Edge.
+- **Why Chrome and not Edge:** we tried Edge as the default; Edge throttles JS execution on backgrounded tabs aggressively, which causes the long-running batch fetches inside `batch_fetch_program_details` / `batch_fetch_course_details` to stall and time out. Chrome's AppleScript bridge is reliable for these multi-minute scrapes; Edge's is not (as of 2026-04). If you do want Edge as the daily browser, no problem — keep Chrome installed and open in a back-of-screen window with the CourseLeaf tabs; Edge can be your foreground app independently.
 - **Why Edge:** the user runs Edge as their daily driver and prefers a single browser handling SSO, CourseLeaf session, SharePoint regulatory downloads, and dashboard preview.
 - **Edge requirements:** install Edge (Chromium-based, supports the same AppleScript verbs); enable Edge → View → Developer → Allow JavaScript from Apple Events; log into CourseLeaf in Edge window 1; keep Approve Pages + Program Management tabs open.
 - **Single point of control in code:** every browser interaction in `scraper.py` funnels through `run_js_in_tab()`, which reads `BROWSER_APP` once at module import. `update.sh` reads `BROWSER_APP` for both its `pgrep` liveness check and its session-validity AppleScript probe.
