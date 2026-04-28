@@ -1520,6 +1520,18 @@ def heal_stale_program_steps(log=False, active_only=True):
 
     # Step 2: snapshot current DB state
     db_programs = {p['id']: p for p in get_all_programs()}
+    db_active = sum(1 for p in db_programs.values() if p.get('current_step'))
+
+    # Safety net (see heal_stale_course_steps for rationale): if the live
+    # scrape is implausibly sparse compared to known-active DB count, bail
+    # rather than wipe.
+    if db_active >= 200 and len(live_assignments) < max(50, int(db_active * 0.25)):
+        msg = (f"ABORT heal_stale_program_steps: scraped only "
+               f"{len(live_assignments)} programs across {len(ALL_ROLES)} "
+               f"roles, but DB has {db_active} marked active. Refusing to "
+               f"wipe — likely a transient AppleScript/tab-throttle issue.")
+        if log: print(msg)
+        return [msg], 0
 
     fixed = 0
     new_program_ids = []
@@ -1665,6 +1677,26 @@ def heal_stale_course_steps(log=False, active_only=True):
         print(f"\nLive: {len(live_assignments)} unique courses")
 
     db_courses = {c['id']: c for c in get_all_courses()}
+    db_active = sum(1 for c in db_courses.values() if c.get('current_step'))
+
+    # Safety: if the live scrape came up implausibly sparse compared to the
+    # DB's known-active count, the role iteration probably had widespread
+    # AppleScript timeouts (e.g. Edge backgrounded, tabs throttled). Bail
+    # out rather than wipe every course's current_step. We only abort when
+    # the DB had real prior data — first-run on an empty DB still works.
+    SCRAPE_SANITY_FRACTION = 0.25  # require >=25% of prior active count
+    SCRAPE_SANITY_MIN = 50         # ...or at least 50 courses outright
+    if db_active >= 200 and len(live_assignments) < max(
+        SCRAPE_SANITY_MIN, int(db_active * SCRAPE_SANITY_FRACTION)
+    ):
+        msg = (f"ABORT heal_stale_course_steps: scraped only "
+               f"{len(live_assignments)} courses across {len(all_roles)} "
+               f"roles, but DB has {db_active} marked active. Refusing to "
+               f"wipe — likely a transient AppleScript/tab-throttle issue. "
+               f"Re-run after Edge has been activated and tabs are warm.")
+        if log: print(msg)
+        return [msg], 0
+
     fixed = 0
     new_course_ids = []
 
@@ -2661,6 +2693,18 @@ def heal_stale_catalog_pages(log=False):
         print(f"\nLive: {len(live_assignments)} unique catalog pages")
 
     db_pages = {p['id']: p for p in get_all_catalog_pages()}
+    db_active = sum(1 for p in db_pages.values() if p.get('current_step'))
+
+    # Safety net (see heal_stale_course_steps for rationale).
+    if db_active >= 50 and len(live_assignments) < max(20, int(db_active * 0.25)):
+        msg = (f"ABORT heal_stale_catalog_pages: scraped only "
+               f"{len(live_assignments)} pages across "
+               f"{len(CATALOG_TRACKED_ROLES)} roles, but DB has {db_active} "
+               f"marked active. Refusing to wipe — likely a transient "
+               f"AppleScript/tab-throttle issue.")
+        if log: print(msg)
+        return [msg], 0
+
     fixed = 0
 
     # 1) Pages in live → upsert
