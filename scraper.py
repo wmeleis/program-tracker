@@ -261,17 +261,31 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     else:
         match_predicate = f'(URL of tab i of window 1) contains "{tab_identifier}"'
 
-    # Edge (and recent Chrome) throttle background tabs heavily — JS
-    # execution via AppleScript stalls on tabs that aren't currently
-    # active AND when the browser app isn't frontmost. Workaround:
-    # 1. activate the browser (bring to foreground)
-    # 2. switch to the target tab
-    # 3. run the JS
-    # 4. restore the previously-active tab
-    # We don't try to restore a different frontmost app — the user is
-    # almost always already in a browser tab when triggering scans, and
-    # for launchd-driven 9am scans the user isn't at the computer.
-    applescript = f'''
+    # Edge (and recent Chrome) throttle background tabs — JS execution
+    # via AppleScript stalls on tabs that aren't active and/or when the
+    # browser isn't frontmost. We try the cheap path first (no
+    # activation, no flicker) and only fall back to activating + tab
+    # switching when the cheap path times out. This means: when Edge
+    # is the user's active app, scans run silently without stealing
+    # focus or strobing tabs; when Edge has been backgrounded for a
+    # while, the first call wakes the tab up.
+    applescript_fast = f'''
+    set jsCode to (read POSIX file "{js_file}" as text)
+    tell application "{BROWSER_APP}"
+        set tabIdx to 0
+        set n to count of tabs of window 1
+        repeat with i from 1 to n
+            if {match_predicate} then
+                set tabIdx to i
+                exit repeat
+            end if
+        end repeat
+        if tabIdx = 0 then return "TAB_NOT_FOUND"
+        tell tab tabIdx of window 1 to execute javascript jsCode
+        return result
+    end tell
+    '''
+    applescript_wakeup = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
     tell application "{BROWSER_APP}"
         activate
@@ -297,12 +311,24 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
         return jsResult
     end tell
     '''
+    def _run(script, tmo):
+        return subprocess.run(
+            ['osascript', '-e', script],
+            capture_output=True, text=True, timeout=tmo
+        )
 
     try:
-        result = subprocess.run(
-            ['osascript', '-e', applescript],
-            capture_output=True, text=True, timeout=timeout
-        )
+        # Cheap path: no activation, no tab switching. Works when Edge
+        # is already the user's active app and the target tab is
+        # currently active (or recently was).
+        result = _run(applescript_fast, timeout)
+        # Common Edge-throttle symptom: AppleEvent timed out (-1712)
+        # caused by stuck JS engine on a backgrounded tab. Retry with
+        # the wakeup path, which activates the browser and switches to
+        # the tab. One retry is enough — if that fails, something else
+        # is wrong (session expired, tab really missing, etc.).
+        if result.returncode != 0 and 'AppleEvent timed out' in (result.stderr or ''):
+            result = _run(applescript_wakeup, timeout)
         os.unlink(js_file)
         if result.returncode != 0:
             return None
