@@ -261,9 +261,20 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     else:
         match_predicate = f'(URL of tab i of window 1) contains "{tab_identifier}"'
 
+    # Edge (and recent Chrome) throttle background tabs heavily — JS
+    # execution via AppleScript stalls on tabs that aren't currently
+    # active AND when the browser app isn't frontmost. Workaround:
+    # 1. activate the browser (bring to foreground)
+    # 2. switch to the target tab
+    # 3. run the JS
+    # 4. restore the previously-active tab
+    # We don't try to restore a different frontmost app — the user is
+    # almost always already in a browser tab when triggering scans, and
+    # for launchd-driven 9am scans the user isn't at the computer.
     applescript = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
     tell application "{BROWSER_APP}"
+        activate
         set tabIdx to 0
         set n to count of tabs of window 1
         repeat with i from 1 to n
@@ -273,8 +284,17 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
             end if
         end repeat
         if tabIdx = 0 then return "TAB_NOT_FOUND"
+        set prevIdx to active tab index of window 1
+        if prevIdx is not tabIdx then
+            set active tab index of window 1 to tabIdx
+            delay 0.2
+        end if
         tell tab tabIdx of window 1 to execute javascript jsCode
-        return result
+        set jsResult to result
+        if prevIdx is not tabIdx then
+            set active tab index of window 1 to prevIdx
+        end if
+        return jsResult
     end tell
     '''
 
