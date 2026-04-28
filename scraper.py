@@ -414,8 +414,11 @@ def scrape_approve_pages_role(role_name):
         else stableCount = 0;
         lastSize = progs.length;
         // Done when we've seen the same non-zero count 3 polls in a row,
-        // or when 15s have passed regardless.
-        if ((progs.length > 0 && stableCount >= 3) || elapsed >= 15000) {{
+        // or 5 consecutive empty polls after >=3s (most program roles
+        // legitimately have nothing — don't waste 15s on each), or 15s
+        // hard ceiling.
+        var stableEmptyDone = (progs.length === 0 && stableCount >= 5 && elapsed >= 3000);
+        if ((progs.length > 0 && stableCount >= 3) || stableEmptyDone || elapsed >= 15000) {{
             clearInterval(interval);
             holder.textContent = JSON.stringify(progs);
             holder.setAttribute("data-status", "done");
@@ -2618,7 +2621,10 @@ def scrape_catalog_pages_from_role(role_name):
         if (pages.length === lastSize) stableCount++;
         else stableCount = 0;
         lastSize = pages.length;
-        if ((pages.length > 0 && stableCount >= 3) || elapsed >= 15000) {{
+        // See scrape_courses_from_role / scrape_approve_pages_role
+        // for rationale. Empty roles exit early after 3s + 5 stable polls.
+        var stableEmptyDone = (pages.length === 0 && stableCount >= 5 && elapsed >= 3000);
+        if ((pages.length > 0 && stableCount >= 3) || stableEmptyDone || elapsed >= 15000) {{
             clearInterval(interval);
             holder.textContent = JSON.stringify(pages);
             holder.setAttribute("data-status", "done");
@@ -2811,7 +2817,12 @@ def scrape_courses_from_role(role_name):
         if (courses.length === lastSize) stableCount++;
         else stableCount = 0;
         lastSize = courses.length;
-        if ((courses.length > 0 && stableCount >= 3) || elapsed >= 15000) {{
+        // Exit when stable for >=3 polls (1.5s) — works for both empty
+        // and populated lists. Also break out if the role's pending list
+        // is genuinely empty after 3s, since most "Program ..." roles
+        // never have courses. Hard ceiling at 15s.
+        var stableEmptyDone = (courses.length === 0 && stableCount >= 5 && elapsed >= 3000);
+        if ((courses.length > 0 && stableCount >= 3) || stableEmptyDone || elapsed >= 15000) {{
             clearInterval(interval);
             holder.textContent = JSON.stringify(courses);
             holder.setAttribute("data-status", "done");
