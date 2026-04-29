@@ -713,6 +713,7 @@ function __staticInit() {
         cachedCatalogPipeline = D.catalog_pipeline || [];
         allCatalogPages = D.catalog_pages || [];
         if (typeof populateCatalogCollegeFilter === 'function') populateCatalogCollegeFilter();
+        if (typeof populateCatalogApproverFilter === 'function') populateCatalogApproverFilter();
         renderCatalogPipeline();
         renderCatalogTable();
     };
