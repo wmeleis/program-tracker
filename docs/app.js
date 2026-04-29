@@ -143,12 +143,17 @@ function switchView(view) {
     } else if (view === 'catalog') {
         // Catalog has no degree types, no proposal types, no college/campus
         // metadata — hide all those filter groups. Just keep the search box
-        // (filters by path/title) and the pipeline tile clicks.
+        // (filters by path/title), College, and Approver. Step is redundant
+        // with the pipeline tile row, so hide it too.
         typeSection.style.display = 'none';
         proposalSection.style.display = 'none';
         campusFilter.parentElement.parentElement.style.display = 'none';
         if (subjectGroup) subjectGroup.style.display = 'none';
+        const stepFilterGroup = document.getElementById('filter-step')?.parentElement?.parentElement;
+        if (stepFilterGroup) stepFilterGroup.style.display = 'none';
     } else {
+        const stepFilterGroup = document.getElementById('filter-step')?.parentElement?.parentElement;
+        if (stepFilterGroup) stepFilterGroup.style.display = 'flex';
         typeSection.style.display = 'flex';
         proposalSection.style.display = 'flex';
         campusFilter.parentElement.parentElement.style.display = 'flex';
@@ -263,6 +268,26 @@ function populateCatalogCollegeFilter() {
     }
 }
 
+function populateCatalogApproverFilter() {
+    const sel = document.getElementById('filter-approver');
+    if (!sel) return;
+    const counts = new Map();
+    for (const p of allCatalogPages || []) {
+        const u = (p.user || '').trim();
+        if (!u) continue;
+        counts.set(u, (counts.get(u) || 0) + 1);
+    }
+    const prev = sel.value;
+    const opts = Array.from(counts.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, count]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)} (${count})</option>`)
+        .join('');
+    sel.innerHTML = '<option value="">All Approvers</option>' + opts;
+    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
+        sel.value = prev;
+    }
+}
+
 async function loadCatalogDashboard() {
     try {
         const [pipelineRes, pagesRes] = await Promise.all([
@@ -272,6 +297,7 @@ async function loadCatalogDashboard() {
         cachedCatalogPipeline = (await pipelineRes.json()).pipeline || [];
         allCatalogPages = (await pagesRes.json()).catalog_pages || [];
         populateCatalogCollegeFilter();
+        populateCatalogApproverFilter();
         renderCatalogPipeline();
         renderCatalogTable();
     } catch (e) {
@@ -285,9 +311,11 @@ async function loadCatalogDashboard() {
 // downstream-narrowed view.
 function getCatalogBaseFiltered(excludeFilter) {
     const collegeFilter = excludeFilter === 'college' ? '' : (document.getElementById('filter-college')?.value || '');
+    const approverFilter = excludeFilter === 'approver' ? '' : (document.getElementById('filter-approver')?.value || '');
     const search = excludeFilter === 'search' ? '' : (document.getElementById('filter-search')?.value || '').toLowerCase();
     let pages = (allCatalogPages || []).slice();
     if (collegeFilter) pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    if (approverFilter) pages = pages.filter(p => (p.user || '').trim() === approverFilter);
     if (search) pages = pages.filter(p =>
         (p.id || '').toLowerCase().includes(search) ||
         (p.title || '').toLowerCase().includes(search));
@@ -338,9 +366,13 @@ function renderCatalogTable() {
     if (!container) return;
     const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
     const collegeFilter = document.getElementById('filter-college')?.value || '';
+    const approverFilter = document.getElementById('filter-approver')?.value || '';
     let pages = (allCatalogPages || []).slice();
     if (collegeFilter) {
         pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    }
+    if (approverFilter) {
+        pages = pages.filter(p => (p.user || '').trim() === approverFilter);
     }
     if (pipelineFilter) {
         if (pipelineFilter === '__catalog_college__') {
@@ -2948,6 +2980,7 @@ function __staticInit() {
         cachedCatalogPipeline = D.catalog_pipeline || [];
         allCatalogPages = D.catalog_pages || [];
         if (typeof populateCatalogCollegeFilter === 'function') populateCatalogCollegeFilter();
+        if (typeof populateCatalogApproverFilter === 'function') populateCatalogApproverFilter();
         renderCatalogPipeline();
         renderCatalogTable();
     };
