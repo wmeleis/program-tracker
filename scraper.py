@@ -1500,13 +1500,19 @@ def heal_stale_program_steps(log=False, active_only=True):
         get_all_programs, get_db, upsert_program, upsert_workflow_steps, record_scan,
     )
 
+    # The hardcoded ALL_ROLES (~46 entries) misses many one-off
+    # college-specific roles like "Program MI Graduate Curriculum
+    # Committee Chair". Iterate the live dropdown (currently ~215
+    # roles) — same pattern as heal_stale_course_steps. Empty roles
+    # exit early via the JS poll's stable-empty short-circuit.
+    all_roles = get_all_approve_roles() or ALL_ROLES
     if log:
         print(f"\nMirroring DB to live Approve Pages pending lists "
-              f"({len(ALL_ROLES)} roles)...")
+              f"({len(all_roles)} roles)...")
 
     # Step 1: build pid -> role map from live pending lists
     live_assignments = {}  # pid -> {role, name, user}
-    for role in ALL_ROLES:
+    for role in all_roles:
         progs = scrape_approve_pages_role(role)
         for p in progs:
             pid = p['id']
@@ -1531,7 +1537,7 @@ def heal_stale_program_steps(log=False, active_only=True):
     # rather than wipe.
     if db_active >= 200 and len(live_assignments) < max(50, int(db_active * 0.25)):
         msg = (f"ABORT heal_stale_program_steps: scraped only "
-               f"{len(live_assignments)} programs across {len(ALL_ROLES)} "
+               f"{len(live_assignments)} programs across {len(all_roles)} "
                f"roles, but DB has {db_active} marked active. Refusing to "
                f"wipe — likely a transient AppleScript/tab-throttle issue.")
         if log: print(msg)
