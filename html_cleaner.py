@@ -191,41 +191,67 @@ _CODECOL_RE = re.compile(
 )
 
 
+_ORCLASS_RE = re.compile(r'<tr\b[^>]*\bclass\s*=\s*"[^"]*\borclass\b', re.I)
+
+
 def _sort_rows_within_sections(html):
     """Within each <tbody> of a course list, sort consecutive non-areaheader
     course rows alphabetically by their first codecol code. Areaheader rows act
-    as group boundaries; sort runs reset on each header."""
+    as group boundaries; sort runs reset on each header.
+
+    OR-alternative rows (`<tr class="orclass …">`) are sticky to their
+    preceding parent row: each parent + any following orclass alternatives
+    sort together as one group, keyed by the parent's code. Without this,
+    e.g. "BIOT 5840" and "or BIOT 7244" can get separated, and "or NNMD 5580"
+    would float upward away from its parent "PMST 6254" because N < P in
+    alphabetical order.
+    """
     def sort_tbody(match):
         body = match.group(2)
         rows = _TR_RE.findall(body)
         if len(rows) < 2:
             return match.group(0)
 
-        def sort_key(tr):
-            # No key → treat as boundary (shouldn't happen because we filter first)
-            m = _CODECOL_RE.search(tr)
+        # Build groups: each group is [parent_row, ...trailing_orclass_rows]
+        groups = []  # list of list of tr strings
+        for tr in rows:
+            is_areaheader = bool(re.search(r'\bareas?u?b?header\b', tr, re.I))
+            has_code = bool(_CODECOL_RE.search(tr))
+            is_orclass = bool(_ORCLASS_RE.search(tr))
+            if is_orclass and groups and groups[-1] and not is_areaheader:
+                # Attach to the previous group (whether parent was a course or
+                # another orclass — chains like "or A / or B" are valid).
+                groups[-1].append(tr)
+            else:
+                groups.append([tr])
+
+        def group_sort_key(group):
+            parent = group[0]
+            m = _CODECOL_RE.search(parent)
             if not m:
                 return ''
             code = re.sub(r'\s+', ' ', m.group(1).replace('\xa0', ' ')).strip().upper()
             return code
 
         out = []
-        buffer = []
+        buffer = []  # buffered groups awaiting flush
 
         def flush():
             if buffer:
-                buffer.sort(key=sort_key)
-                out.extend(buffer)
+                buffer.sort(key=group_sort_key)
+                for g in buffer:
+                    out.extend(g)
                 buffer.clear()
 
-        for tr in rows:
-            is_areaheader = bool(re.search(r'\bareas?u?b?header\b', tr, re.I))
-            has_code = bool(_CODECOL_RE.search(tr))
+        for g in groups:
+            parent = g[0]
+            is_areaheader = bool(re.search(r'\bareas?u?b?header\b', parent, re.I))
+            has_code = bool(_CODECOL_RE.search(parent))
             if is_areaheader or not has_code:
                 flush()
-                out.append(tr)
+                out.extend(g)
             else:
-                buffer.append(tr)
+                buffer.append(g)
         flush()
         return f'{match.group(1)}{"".join(out)}{match.group(3)}'
 
