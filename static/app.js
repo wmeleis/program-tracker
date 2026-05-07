@@ -2519,7 +2519,11 @@ async function loadCompareDetail(programId) {
                     continue;
                 }
 
-                const {identical, diff} = compareCurricula(depHtml, currHtml);
+                // Boston curriculum on the left (labeled "Proposed Curriculum"),
+                // deployment on the right (labeled "Reference Curriculum").
+                // compareCurricula(left, right) — first arg ends up on the
+                // left of the rendered side-by-side table.
+                const {identical, diff} = compareCurricula(currHtml, depHtml);
                 if (!identical) allIdentical = false;
                 deploymentResults.push({name: depName, id: depId, identical, diff});
             }

@@ -1014,7 +1014,8 @@ function __staticInit() {
                 const depHtml = (_curriculumCache || {})[String(depId)] || '';
                 const depName = getProgramName(depId);
                 if (!currHtml || !depHtml) { results.push({name: depName, noData: true}); continue; }
-                const {identical, diff} = compareCurricula(depHtml, currHtml);
+                // Boston on the left (Proposed), deployment on the right (Reference).
+                const {identical, diff} = compareCurricula(currHtml, depHtml);
                 if (!identical) allIdentical = false;
                 results.push({name: depName, identical, diff});
             }
