@@ -2064,11 +2064,29 @@ def fetch_reference_curricula(program_ids, batch_size=10):
     # reference rather than its last-approved history version. This lets
     # non-Boston deployments compare against the up-to-date proposed
     # Boston curriculum when one exists.
-    scanning_set = set(program_ids)
+    #
+    # "In workflow" means the Boston row has a non-empty `current_step`
+    # (the program is actively at some review/setup step) AND no
+    # `completion_date`. Using "is Boston present in the program_ids
+    # being scanned" — as the previous version did — incorrectly
+    # matches every non-Boston with a Boston counterpart in the DB,
+    # even when Boston has long since completed. That left ~390 stale
+    # `version_id=0` sentinels in `reference_curriculum`, freezing the
+    # deployments' references at whatever Boston curriculum was current
+    # when the sentinel was first set.
+    with get_db() as conn:
+        boston_active = {
+            row['id']
+            for row in conn.execute(
+                "SELECT id FROM programs "
+                "WHERE current_step IS NOT NULL AND current_step != '' "
+                "  AND (completion_date IS NULL OR completion_date = '')"
+            ).fetchall()
+        }
     boston_in_workflow = {
         non_boston_id: boston_id
         for non_boston_id, boston_id in counterpart_map.items()
-        if boston_id in scanning_set
+        if boston_id in boston_active
     }
     if boston_in_workflow:
         print(f"  {len(boston_in_workflow)} non-Boston programs will use the Boston workflow-revised curriculum as reference")
