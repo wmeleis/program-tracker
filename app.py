@@ -584,12 +584,15 @@ def api_scan_trigger():
             # Fetch regulatory approved curricula (SharePoint workbooks).
             # C4: rate-limit to once per 24h. The 7 SharePoint workbooks
             # rarely change; downloading them on every scan was ~30-60s
-            # of waste. The timestamp file is touched after a successful
-            # run, so a failed fetch retries on the next scan.
+            # of waste. The timestamp ticks only when at least one
+            # workbook was successfully downloaded — a fetch where every
+            # workbook was unavailable (SharePoint tab closed / session
+            # expired) is treated as "didn't actually run" so the next
+            # scan retries.
             scan_status['phase'] = 'Fetching regulatory data...'
             scan_status['progress'] = 86
             try:
-                from scraper import fetch_regulatory_approved
+                from scraper import fetch_regulatory_approved, REGULATORY_CAMPUS_FILES
                 cwd = os.path.dirname(os.path.abspath(__file__))
                 reg_stamp = os.path.join(cwd, 'data', 'last_regulatory_fetch')
                 reg_due = True
@@ -599,10 +602,15 @@ def api_scan_trigger():
                         reg_due = False
                         print(f"Regulatory fetch: skipping (last run {age_h:.1f}h ago, < 24h)")
                 if prog_ids and reg_due:
-                    fetch_regulatory_approved(prog_ids)
-                    # Touch stamp file on success.
-                    with open(reg_stamp, 'w') as f:
-                        f.write(str(int(time.time())))
+                    matched, unmatched, skipped = fetch_regulatory_approved(prog_ids)
+                    if skipped < len(REGULATORY_CAMPUS_FILES):
+                        # At least one workbook came through — count this
+                        # as a real run.
+                        with open(reg_stamp, 'w') as f:
+                            f.write(str(int(time.time())))
+                    else:
+                        print("Regulatory fetch: all workbooks unavailable; "
+                              "not advancing timestamp (will retry next scan)")
             except Exception as e:
                 # Regulatory fetch is best-effort — a missing SharePoint tab
                 # or expired session must not block the rest of the scan.
