@@ -1526,7 +1526,39 @@ def heal_stale_program_steps(log=False, active_only=True):
             print(f"  {role}: {len(progs)}")
 
     if log:
-        print(f"\nLive: {len(live_assignments)} unique programs")
+        print(f"\nLive: {len(live_assignments)} unique programs (pre-validation)")
+
+    # Validate live_assignments against each program's per-program workflow
+    # div. Approve Pages' pending list can show stale entries for programs
+    # that have already completed: when CIM's `showPendingList(role)` is
+    # called for an EMPTY role, it does not clear the previous role's
+    # content from the page DOM, so our body.innerText polling can lock
+    # onto the prior role's program list and report it as the new role's.
+    # Concurrent scrapes (heal vs full-scan) compound this. The
+    # per-program workflow div is the authoritative source: if it shows
+    # no `current` step, the program is complete regardless of what any
+    # role's pending list says.
+    if live_assignments:
+        candidate_ids = list(live_assignments.keys())
+        if log:
+            print(f"  Validating {len(candidate_ids)} candidates against "
+                  f"per-program workflow divs...")
+        details = batch_fetch_program_details(candidate_ids, batch_size=25)
+        invalid_ids = []
+        for pid, d in details.items():
+            steps = d.get('steps') or []
+            if not any(s.get('status') == 'current' for s in steps):
+                invalid_ids.append(pid)
+        if invalid_ids:
+            if log:
+                sample = invalid_ids[:5]
+                print(f"  Dropped {len(invalid_ids)} programs with no live "
+                      f"current step (Approve Pages pending list was stale). "
+                      f"Examples: {sample}")
+            for pid in invalid_ids:
+                live_assignments.pop(pid, None)
+        if log:
+            print(f"  After validation: {len(live_assignments)} live programs")
 
     # Step 2: snapshot current DB state
     db_programs = {p['id']: p for p in get_all_programs()}
@@ -1684,7 +1716,33 @@ def heal_stale_course_steps(log=False, active_only=True):
             print(f"  {role}: {len(rows)}")
 
     if log:
-        print(f"\nLive: {len(live_assignments)} unique courses")
+        print(f"\nLive: {len(live_assignments)} unique courses (pre-validation)")
+
+    # Validate against per-course workflow div (see heal_stale_program_steps
+    # for rationale — Approve Pages can show stale entries when CIM's
+    # showPendingList is called for an empty role).
+    if live_assignments:
+        candidate_ids = list(live_assignments.keys())
+        if log:
+            print(f"  Validating {len(candidate_ids)} candidates against "
+                  f"per-course workflow divs...")
+        details = batch_fetch_course_details(candidate_ids, batch_size=25)
+        invalid_ids = []
+        for cid, d in details.items():
+            cid_int = int(cid) if isinstance(cid, str) else cid
+            steps = d.get('steps') or []
+            if not any(s.get('status') == 'current' for s in steps):
+                invalid_ids.append(cid_int)
+        if invalid_ids:
+            if log:
+                sample = invalid_ids[:5]
+                print(f"  Dropped {len(invalid_ids)} courses with no live "
+                      f"current step (Approve Pages pending list was stale). "
+                      f"Examples: {sample}")
+            for cid in invalid_ids:
+                live_assignments.pop(cid, None)
+        if log:
+            print(f"  After validation: {len(live_assignments)} live courses")
 
     db_courses = {c['id']: c for c in get_all_courses()}
     db_active = sum(1 for c in db_courses.values() if c.get('current_step'))
