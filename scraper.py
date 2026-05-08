@@ -960,9 +960,9 @@ def run_full_scan():
     - The Boston-in-workflow → non-Boston reference refresh is handled
       in `fetch_reference_curricula`, not here.
     - Stale-cache from Approve Pages that happens to match a stale DB
-      current_step is silently missed by this scan. The trailing
-      `heal_stale_program_steps` call and the weekly `sweep_all_program_ids`
-      are the safety nets.
+      current_step is silently missed by this scan. The weekly
+      `sweep_all_program_ids` is the safety net (iterates every program
+      ID 1-2100 directly via the XML API, no Approve Pages dependency).
 
     First run on an empty DB → everyone is 'new', so it behaves like a
     full scan. Subsequent scans typically have 0–10 active programs.
@@ -1232,18 +1232,16 @@ def run_full_scan():
     # changes when the whole pipeline is actually done, not when this
     # first phase completes.
 
-    # Validation + auto-heal: reconcile DB against live Approve Pages.
-    # In incremental mode this is now a redundant safety net (the main
-    # path already used Approve Pages as the discovery source); kept for
-    # one cycle so we can see whether it ever finds anything to heal.
-    # Drop it once we have confidence.
-    phase_start = time.time()
-    warnings, healed = heal_stale_program_steps(log=True)
-    if warnings == 0:
-        print("  All role counts match live data.")
-    else:
-        print(f"  {warnings} role(s) had count differences; auto-healed {healed} stale program row(s)")
-    phase_times['6_heal_validation'] = time.time() - phase_start
+    # NOTE: The trailing `heal_stale_program_steps` call was removed
+    # after the first incremental cycle confirmed it was redundant.
+    # Empirically (8 May 2026 scan) it spent 73 min cross-fetching all
+    # 806 live programs, made 49 in-memory role corrections, and ended
+    # with `warnings=0` — i.e., it didn't change a single DB row,
+    # because the main scan's workflow-div reconciliation had already
+    # handled every "moved" case. The weekly `sweep_all_program_ids`
+    # remains as the deep safety net for any drift the incremental
+    # diff misses (it iterates every program ID 1-2100, more thorough
+    # than heal).
 
     total_time = time.time() - overall_start
     print(f"\n{'='*60}")
@@ -3427,14 +3425,51 @@ def batch_fetch_course_details(course_ids, batch_size=25):
 
 
 def process_course_scans(courses):
-    """Store scraped courses in the database, including workflow + college."""
+    """Store scraped courses in the database, including workflow + college.
+
+    Incremental: same Phase A+B gating as `run_full_scan`. Each scraped
+    course is classified vs the DB by current_step; only new+moved
+    courses get re-fetched. Unchanged courses' DB rows are preserved
+    as-is. See `run_full_scan` docstring and CLAUDE.md for the rationale
+    and known limitations.
+    """
     print("\nProcessing course scans...", flush=True)
     now = datetime.now().isoformat()
+    overall_start = time.time()
+    phase_times = {}
     existing = {c['id']: c for c in get_all_courses()}
     changes = 0
 
-    course_ids = [c['id'] for c in courses]
+    # ---- Diff: classify scraped courses vs DB
+    phase_start = time.time()
+    new_ids, moved_ids, unchanged_ids = [], [], []
+    for c in courses:
+        cid = c['id']
+        live_step = c.get('current_step', '') or ''
+        db = existing.get(cid)
+        if db is None:
+            new_ids.append(cid)
+        elif (db.get('current_step') or '') != live_step:
+            moved_ids.append(cid)
+        else:
+            unchanged_ids.append(cid)
+    active_ids = set(new_ids) | set(moved_ids)
+    phase_times['1_diff'] = time.time() - phase_start
+    print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
+          f"{len(moved_ids)} moved, {len(new_ids)} new "
+          f"(skipping {len(unchanged_ids)})", flush=True)
+
+    # ---- Phase B: Batch-fetch details only for new+moved courses
+    phase_start = time.time()
+    course_ids = [cid for cid in (c['id'] for c in courses) if cid in active_ids]
     details = batch_fetch_course_details(course_ids) if course_ids else {}
+    phase_times['2_detail_fetch'] = time.time() - phase_start
+    if details:
+        per = phase_times['2_detail_fetch'] / max(len(details), 1) * 1000
+        print(f"  Fetched {len(details)} courses in "
+              f"{phase_times['2_detail_fetch']:.1f}s ({per:.0f}ms each)", flush=True)
+    else:
+        print(f"  No courses needed re-fetch.", flush=True)
 
     # Debug: dump info for first few courses missing workflow
     missing_dumped = 0
@@ -3468,9 +3503,14 @@ def process_course_scans(courses):
             print(f"  [debug] sample course XML tags: {tags}", flush=True)
             break
 
+    # ---- Step 3: Process fetched results. Only iterates active courses;
+    # unchanged courses' DB rows are intentionally left untouched.
+    phase_start = time.time()
     with_workflow = 0
     for c in courses:
         cid = c['id']
+        if cid not in active_ids:
+            continue
         name = c['name']
         course_code = cid
         title = name
@@ -3568,8 +3608,18 @@ def process_course_scans(courses):
             ])
             with_workflow += 1
 
+    phase_times['3_processing'] = time.time() - phase_start
+
     record_course_scan(now, len(courses), with_workflow, changes)
-    print(f"  Courses processed: {len(courses)}, with workflow: {with_workflow}, changes: {changes}", flush=True)
+    total_time = time.time() - overall_start
+    print(f"  Courses processed: {len(courses)} discovered, "
+          f"{len(active_ids)} re-fetched, {len(unchanged_ids)} skipped, "
+          f"with workflow: {with_workflow}, changes: {changes}", flush=True)
+    print(f"  Course phase timings:", flush=True)
+    for name in sorted(phase_times.keys()):
+        secs = phase_times[name]
+        print(f"    {name:.<24s} {secs:6.1f}s ({secs/max(total_time,1)*100:4.1f}%)", flush=True)
+    print(f"  Course phase total: {total_time:.0f}s ({total_time/60:.1f} min)", flush=True)
     return len(courses), with_workflow, changes
 
 

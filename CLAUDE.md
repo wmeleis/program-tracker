@@ -73,13 +73,15 @@ Step 2 then fetches details only for `active_ids = new_ids ∪ moved_ids`. Uncha
 
 **Step 3 - Database Update:** Processes results for `active_ids` only, maps college codes to full names, detects changes (step transitions), preserves `step_entered_date` when step hasn't changed (to not reset the "days at step" timer). Then runs an exit-verification pass over `existing_in_pipeline` (in DB at a step but not discovered) using the positive-evidence policy — workflow div must confirm before any `current_step` is cleared.
 
-**Validation:** After processing, re-checks the 14 tracked pipeline roles (not college roles) against live Approve Pages to verify counts match. Small deltas are expected if approvals happen during the scan.
+**Per-phase timing logs:** `run_full_scan()` returns a `phase_times` dict (`1_discovery`, `2_diff`, `3_detail_fetch`, `4_processing`, `5_exit_verification`) and prints a percentage breakdown at scan end so we can see where time is actually spent.
 
-**Per-phase timing logs:** `run_full_scan()` returns a `phase_times` dict (`1_discovery`, `2_diff`, `3_detail_fetch`, `4_processing`, `5_exit_verification`, `6_heal_validation`) and prints a percentage breakdown at scan end so we can see where time is actually spent.
+**Course scan parity:** `process_course_scans()` uses the same Phase A+B gating — diffs scraped courses against the DB by `current_step`, fetches details only for new+moved, and skips unchanged courses entirely. Same `1_diff` / `2_detail_fetch` / `3_processing` timing logs, printed indented under the course-scan output.
+
+**Removed: trailing `heal_stale_program_steps` validation call.** Empirically (8 May 2026 first incremental cycle) it spent 73 minutes cross-fetching all 806 live programs, made 49 in-memory role corrections, and ended with `warnings=0` — i.e., it didn't change a single DB row, because the main scan's workflow-div reconciliation had already handled every "moved" case. Dropping it cut the program scan from ~78 min to ~5 min on no-change days. The function is still exposed via `POST /api/heal` (the "Update Now" dashboard button) for on-demand reconciliation.
 
 **Known limitations of incremental gating (accepted, see "Reconciliation: which source wins"):**
 - A program at the same step but with edited `curriculum_html` won't be re-fetched. Mid-workflow proposer edits stale silently between scans.
-- Approve Pages stale-cache that happens to match a stale DB `current_step` is silently missed by this scan. The trailing `heal_stale_program_steps` call and the weekly `sweep_all_program_ids` are the safety nets.
+- Approve Pages stale-cache that happens to match a stale DB `current_step` is silently missed by this scan. The weekly `sweep_all_program_ids` (and `sweep_all_course_ids`) is the safety net — it iterates every CIM ID directly via the XML API, no Approve Pages dependency.
 - Reference curricula for non-Boston deployments whose Boston counterpart is in workflow track Boston's live edits via the `version_id=0` sentinel; refreshing those is `fetch_reference_curricula`'s responsibility (and currently runs unconditionally each scan — Phase C territory).
 
 ### Browser selection
