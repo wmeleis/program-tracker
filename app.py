@@ -1,6 +1,7 @@
 """Flask server for Program Approval Status Tracker."""
 
 import os
+import time
 import json as _json
 import threading
 from datetime import datetime
@@ -580,30 +581,67 @@ def api_scan_trigger():
             except Exception as e:
                 print(f"Reference fetch error: {e}")
 
-            # Fetch regulatory approved curricula (SharePoint workbooks)
+            # Fetch regulatory approved curricula (SharePoint workbooks).
+            # C4: rate-limit to once per 24h. The 7 SharePoint workbooks
+            # rarely change; downloading them on every scan was ~30-60s
+            # of waste. The timestamp file is touched after a successful
+            # run, so a failed fetch retries on the next scan.
             scan_status['phase'] = 'Fetching regulatory data...'
             scan_status['progress'] = 86
             try:
                 from scraper import fetch_regulatory_approved
-                if prog_ids:
+                cwd = os.path.dirname(os.path.abspath(__file__))
+                reg_stamp = os.path.join(cwd, 'data', 'last_regulatory_fetch')
+                reg_due = True
+                if os.path.exists(reg_stamp):
+                    age_h = (time.time() - os.path.getmtime(reg_stamp)) / 3600.0
+                    if age_h < 24:
+                        reg_due = False
+                        print(f"Regulatory fetch: skipping (last run {age_h:.1f}h ago, < 24h)")
+                if prog_ids and reg_due:
                     fetch_regulatory_approved(prog_ids)
+                    # Touch stamp file on success.
+                    with open(reg_stamp, 'w') as f:
+                        f.write(str(int(time.time())))
             except Exception as e:
                 # Regulatory fetch is best-effort — a missing SharePoint tab
                 # or expired session must not block the rest of the scan.
                 print(f"Regulatory fetch error: {e}")
 
-            # Auto-export and deploy to GitHub Pages
+            # C1: Auto-export + git push only when DB content actually
+            # changed since last successful export. The fingerprint hashes
+            # only the user-visible fields of the source tables — not
+            # `fetched_at` etc. — so an idempotent re-fetch (same content,
+            # new timestamp) doesn't false-trigger an export. On no-change
+            # days this saves ~30-60s of CPU/IO + git push bandwidth.
             scan_status['phase'] = 'Exporting & deploying...'
             scan_status['progress'] = 90
             try:
                 import subprocess
-                subprocess.run(['python3', 'export_static.py'], cwd=os.path.dirname(os.path.abspath(__file__)))
-                subprocess.run(['git', 'add', 'docs/'], cwd=os.path.dirname(os.path.abspath(__file__)))
-                subprocess.run(['git', 'commit', '-m', f'Auto-update {datetime.now().strftime("%Y-%m-%d %H:%M")}'],
-                              cwd=os.path.dirname(os.path.abspath(__file__)))
-                subprocess.run(['git', 'push'], cwd=os.path.dirname(os.path.abspath(__file__)))
-                print("Exported and pushed to GitHub Pages")
-                scan_status['progress'] = 100
+                from scraper import compute_db_fingerprint
+                cwd = os.path.dirname(os.path.abspath(__file__))
+                fp_path = os.path.join(cwd, 'data', 'last_export_fingerprint')
+                current_fp = compute_db_fingerprint()
+                prev_fp = ''
+                if os.path.exists(fp_path):
+                    try:
+                        with open(fp_path) as f:
+                            prev_fp = f.read().strip()
+                    except Exception:
+                        prev_fp = ''
+                if current_fp == prev_fp:
+                    print(f"Export: skipping (fingerprint unchanged: {current_fp[:12]}...)")
+                    scan_status['progress'] = 100
+                else:
+                    subprocess.run(['python3', 'export_static.py'], cwd=cwd)
+                    subprocess.run(['git', 'add', 'docs/'], cwd=cwd)
+                    subprocess.run(['git', 'commit', '-m', f'Auto-update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd)
+                    subprocess.run(['git', 'push'], cwd=cwd)
+                    print(f"Exported and pushed (fingerprint {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)")
+                    # Persist new fingerprint after successful export+push.
+                    with open(fp_path, 'w') as f:
+                        f.write(current_fp)
+                    scan_status['progress'] = 100
             except Exception as e:
                 print(f"Deploy error: {e}")
 

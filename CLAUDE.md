@@ -205,6 +205,10 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 ### Auto-Deploy After Scan
 After a full scan completes (`do_scan` in `app.py`) AND after every "Update Now" heal (`api_heal` background thread), the system automatically runs `export_static.py` then `git add docs/ && git commit && git push`. The heal commits with message `"Quick update YYYY-MM-DD HH:MM"`; the full scan commits with `"Auto-update YYYY-MM-DD HH:MM"`. Both rely on `os.path.abspath(__file__)` to resolve cwd.
 
+**Skip when nothing changed (full scan only):** `do_scan` calls `compute_db_fingerprint()` from `scraper.py` — a SHA-256 over the user-visible fields of the source tables (programs, workflow_steps, courses, course_workflow_steps, reference_curriculum, regulatory_approved_courses, custom_references, catalog_pages), explicitly excluding metadata like `fetched_at` so an idempotent re-fetch (same content, new timestamp) doesn't trigger a false-positive change signal. The fingerprint is compared to `data/last_export_fingerprint`; on match, the export + commit + push are skipped entirely. On mismatch, the new fingerprint is written only after a successful export. The heal endpoint (`/api/heal`) does NOT use this gate — its purpose is to force a refresh, so it always exports.
+
+**Regulatory fetch cadence:** SharePoint workbooks rarely change, so `fetch_regulatory_approved` is rate-limited to once per 24h per scan. `data/last_regulatory_fetch` is touched on each successful run; subsequent scans within 24h skip the fetch with a log line. A failed fetch leaves the timestamp unchanged so the next scan retries. To force a refresh sooner, delete the timestamp file.
+
 ## Dependencies
 - Python 3.9+ (macOS system Python works)
 - Flask, flask-cors, cryptography (`pip install flask flask-cors cryptography`)

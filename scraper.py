@@ -2306,6 +2306,64 @@ def _build_boston_counterpart_map(program_ids):
     return counterpart_map, non_boston_ids
 
 
+def compute_db_fingerprint():
+    """Hash the user-visible content of the dashboard's source tables.
+
+    Used by app.py:do_scan to skip the static export + git push when the
+    DB hasn't actually changed since the last successful export. Hashes
+    only the SEMANTIC fields — explicitly excludes per-scan metadata
+    like `fetched_at` so an idempotent re-fetch (same content, new
+    timestamp) doesn't trigger a false-positive change signal.
+
+    Returns a 64-char SHA-256 hex digest.
+    """
+    import hashlib
+    from database import get_db
+
+    h = hashlib.sha256()
+    # Each query lists only fields that affect what the dashboard renders.
+    # ORDER BY makes the hash stable across SQLite's row ordering.
+    queries = [
+        "SELECT id, current_step, status, total_steps, completed_steps, "
+        "current_approver_emails, completion_date, name, college, "
+        "banner_code, campus, step_entered_date, curriculum_html, "
+        "program_type, department, degree, date_submitted, "
+        "custom_reference_id "
+        "FROM programs ORDER BY id",
+        "SELECT program_id, step_order, step_name, step_status, approver_emails "
+        "FROM workflow_steps ORDER BY program_id, step_order",
+        "SELECT id, current_step, status, total_steps, completed_steps, "
+        "current_approver_emails, completion_date, code, title, college, "
+        "credits, description, academic_level, step_entered_date, "
+        "date_submitted "
+        "FROM courses ORDER BY id",
+        "SELECT course_id, step_order, step_name, step_status, approver_emails "
+        "FROM course_workflow_steps ORDER BY course_id, step_order",
+        "SELECT program_id, version_id, version_date, curriculum_html "
+        "FROM reference_curriculum ORDER BY program_id",
+        "SELECT program_id, campus, source_file, sheet_name, sheet_title, "
+        "edited_by, unit_header, confidence, match_reason, courses_json, "
+        "sections_json "
+        "FROM regulatory_approved_courses ORDER BY program_id",
+        "SELECT id, name, source_type, source_filename, title, "
+        "curriculum_html, sections_json, notes "
+        "FROM custom_references ORDER BY id",
+        "SELECT id, title, current_step, current_approver_emails "
+        "FROM catalog_pages ORDER BY id",
+    ]
+    with get_db() as conn:
+        for q in queries:
+            try:
+                for row in conn.execute(q):
+                    h.update(repr(tuple(row)).encode('utf-8'))
+            except Exception as e:
+                # Schema drift → table missing or column missing. Fold the
+                # error message into the hash so a schema change forces a
+                # re-export, but don't crash the scan.
+                h.update(f"ERR:{q[:40]}:{e}".encode('utf-8'))
+    return h.hexdigest()
+
+
 def fetch_reference_curricula(program_ids, batch_size=10):
     """Fetch the most recent historical version (reference curriculum) for each program.
 
