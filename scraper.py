@@ -1044,27 +1044,41 @@ def run_full_scan():
         # Calculate progress
         total = len(steps)
         completed = sum(1 for s in steps if s.get('status') == 'approved')
-        # current_step comes from Phase 1 Approve Pages discovery — that's
-        # the role's pending list, which is what the user sees at
-        # /courseleaf/approve/. The dashboard mirrors that view exactly.
-        # Per-program workflow HTML can disagree (we observed cases where
-        # the workflow div lagged the pending list); we DO NOT use it to
-        # override the Approve Pages assignment. Workflow HTML's `current`
-        # marker only fills in `current_emails` and acts as a fallback if
-        # Phase 1 produced nothing for this program.
-        html_current = next((s for s in steps if s.get('status') == 'current'), None)
-        current_step = info.get('current_step', '')
-        current_emails = ''
-        matched = next((s for s in steps if s.get('name') == current_step), None)
-        if matched:
-            current_emails = matched.get('emails', '')
-        elif not current_step and html_current:
-            current_step = html_current.get('name', '')
-            current_emails = html_current.get('emails', '')
 
-        # completion_date is set only when Approve Pages had no assignment AND
-        # workflow HTML shows the program is fully approved.
-        is_complete = (total > 0 and completed == total and not current_step)
+        # ---- Reconciliation policy (see CLAUDE.md "Reconciliation: which
+        # source wins"): the per-program workflow div is authoritative
+        # for current_step. Approve Pages' role pending list is a hint
+        # used for discovery; it can have stale-cache entries that
+        # disagree with the workflow div, so we never let Approve Pages
+        # override the workflow div when both have data.
+        #
+        # Cases:
+        #   1. workflow div fetched OK + has a 'current' step → use it
+        #   2. workflow div fetched OK + steps present + no 'current' →
+        #      program is complete; clear current_step
+        #   3. workflow div empty / fetch failed → unverifiable; fall
+        #      back to whatever Approve Pages discovered (avoids losing
+        #      data on transient fetch errors)
+        html_current = next((s for s in steps if s.get('status') == 'current'), None)
+        html_error = detail.get('html_error')
+        approve_pages_step = info.get('current_step', '')
+        verified_via_workflow_div = bool(steps) and not html_error
+
+        if verified_via_workflow_div:
+            # Case 1 or 2: workflow div is authoritative.
+            current_step = html_current.get('name', '') if html_current else ''
+            current_emails = html_current.get('emails', '') if html_current else ''
+        else:
+            # Case 3: unverifiable. Fall back to Approve Pages.
+            current_step = approve_pages_step
+            current_emails = ''
+
+        # completion_date is set when the workflow div was successfully
+        # fetched AND shows no current step AND has at least one approved
+        # step. If the fetch failed (unverifiable), we DO NOT mark the
+        # program complete.
+        is_complete = (verified_via_workflow_div and total > 0
+                       and completed == total and not current_step)
         completion_date = meta.get('last_approval_date', '') if is_complete else ''
 
         prog_type = classify_program_type(prog_name, steps, degree)
@@ -1106,12 +1120,10 @@ def run_full_scan():
             record_change(scan_time, prog_id, '', current_step, 'new_program')
             changes += 1
 
-    # Clear current_step for programs no longer on any Approve Pages role.
-    # When a program advances past the last tracked step (or is archived),
-    # Approve Pages drops it, but the per-program workflow HTML's `<li
-    # class="current">` marker can stay stale. If we leave the old
-    # current_step in place, the pipeline bucket for that role keeps
-    # counting it forever.
+    # Programs that were in DB at some step but did NOT show up at any
+    # Approve Pages role this scan. Don't clear unconditionally — verify
+    # against each program's workflow div first (positive-evidence
+    # policy, see CLAUDE.md "Reconciliation: which source wins").
     from database import get_db
     discovered_ids = set(all_discovered.keys())
     existing_in_pipeline = [
@@ -1119,14 +1131,44 @@ def run_full_scan():
         if p.get('current_step') and pid not in discovered_ids
     ]
     if existing_in_pipeline:
-        with get_db() as conn:
-            placeholders = ','.join('?' * len(existing_in_pipeline))
-            conn.execute(
-                f"UPDATE programs SET current_step = '', current_approver_emails = '' "
-                f"WHERE id IN ({placeholders})",
-                existing_in_pipeline
-            )
-        print(f"  Cleared current_step for {len(existing_in_pipeline)} program(s) no longer on Approve Pages")
+        print(f"  {len(existing_in_pipeline)} candidate(s) for current_step "
+              f"clear (in DB but not on Approve Pages). Verifying via "
+              f"workflow div...")
+        verify_details = batch_fetch_program_details(
+            existing_in_pipeline, batch_size=25)
+        confirmed_complete = []
+        moved_to_step = {}  # pid -> step_name (workflow div had a current)
+        unverifiable = 0
+        for pid, d in verify_details.items():
+            steps = d.get('steps') or []
+            html_err = d.get('html_error')
+            if html_err or not steps:
+                unverifiable += 1
+                continue
+            current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if current is None:
+                confirmed_complete.append(pid)
+            else:
+                moved_to_step[pid] = current
+        if confirmed_complete:
+            with get_db() as conn:
+                placeholders = ','.join('?' * len(confirmed_complete))
+                conn.execute(
+                    f"UPDATE programs SET current_step = '', current_approver_emails = '' "
+                    f"WHERE id IN ({placeholders})",
+                    confirmed_complete,
+                )
+            print(f"    Cleared {len(confirmed_complete)} (workflow div confirms complete)")
+        if moved_to_step:
+            with get_db() as conn:
+                for pid, step in moved_to_step.items():
+                    conn.execute(
+                        "UPDATE programs SET current_step = ? WHERE id = ?",
+                        (step, pid))
+            print(f"    Updated {len(moved_to_step)} to live workflow-div step "
+                  f"(Approve Pages missed them)")
+        if unverifiable:
+            print(f"    Left {unverifiable} unchanged (workflow div fetch failed)")
 
     # NB: we intentionally do NOT record the scan here. The caller
     # (app.py do_scan) records it with a fresh timestamp after the
@@ -1624,24 +1666,60 @@ def heal_stale_program_steps(log=False, active_only=True):
         if log and fixed <= 50:
             print(f"  {pid}: {(existing.get('current_step') or '(empty)')!r} → {info['role']!r}")
 
-    # Step 3b: programs in DB at any step but no longer in live → clear
-    for pid, p in db_programs.items():
-        if not p.get('current_step'):
-            continue
-        if pid in live_assignments:
-            continue  # already handled
-        # No longer in any live pending list. Either the program completed
-        # or moved into an untracked role — either way, it's no longer in
-        # any approver's queue, so the dashboard pipeline shouldn't show it.
+    # Step 3b: programs in DB at any step but no longer in live →
+    # CANDIDATES for clearing. Don't clear unconditionally — verify via
+    # the workflow div first (positive-evidence policy, see CLAUDE.md
+    # "Reconciliation: which source wins"). Approve Pages can drop
+    # programs from a role's pending list due to its stale-cache bug,
+    # which would cause us to wipe `current_step` for programs that
+    # are still in workflow.
+    candidate_ids = [
+        pid for pid, p in db_programs.items()
+        if p.get('current_step') and pid not in live_assignments
+    ]
+    if candidate_ids:
+        if log:
+            print(f"  {len(candidate_ids)} candidate(s) for current_step "
+                  f"clear (in DB but not in live). Verifying...")
+        verify_details = batch_fetch_program_details(candidate_ids, batch_size=25)
+        confirmed_complete = []
+        rebound = {}  # pid -> live current step from workflow div
+        unverifiable = 0
+        for pid, d in verify_details.items():
+            steps = d.get('steps') or []
+            html_err = d.get('html_error')
+            if html_err or not steps:
+                unverifiable += 1
+                continue
+            current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if current is None:
+                confirmed_complete.append(pid)
+            else:
+                rebound[pid] = current
         with get_db() as conn:
-            conn.execute(
-                "UPDATE programs SET current_step = '', current_approver_emails = '', "
-                "last_updated = ? WHERE id = ?",
-                (datetime.now().isoformat(), pid),
-            )
-        fixed += 1
-        if log and fixed <= 50:
-            print(f"  {pid}: {p.get('current_step')!r} → '' (gone from all pending lists)")
+            for pid in confirmed_complete:
+                conn.execute(
+                    "UPDATE programs SET current_step = '', "
+                    "current_approver_emails = '', last_updated = ? "
+                    "WHERE id = ?",
+                    (datetime.now().isoformat(), pid),
+                )
+                fixed += 1
+            for pid, step in rebound.items():
+                conn.execute(
+                    "UPDATE programs SET current_step = ?, last_updated = ? "
+                    "WHERE id = ?",
+                    (step, datetime.now().isoformat(), pid),
+                )
+                fixed += 1
+        if log:
+            if confirmed_complete:
+                print(f"    Cleared {len(confirmed_complete)} confirmed-complete programs")
+            if rebound:
+                print(f"    Reassigned {len(rebound)} programs to their actual workflow step "
+                      f"(Approve Pages had dropped them, but workflow div shows they're still active)")
+            if unverifiable:
+                print(f"    Left {unverifiable} unchanged (workflow div fetch failed)")
 
     # Step 3c: brand-new programs — batch-fetch details for full metadata
     if new_program_ids:
@@ -1825,21 +1903,57 @@ def heal_stale_course_steps(log=False, active_only=True):
         if log and fixed <= 50:
             print(f"  {cid}: {(existing.get('current_step') or '(empty)')!r} → {info['role']!r}")
 
-    # 3b: courses in DB at any step but no longer in live → clear
-    for cid, c in db_courses.items():
-        if not c.get('current_step'):
-            continue
-        if cid in live_assignments:
-            continue
+    # 3b: courses in DB at any step but no longer in live → CANDIDATES.
+    # Same positive-evidence policy as heal_stale_program_steps —
+    # verify via workflow div before clearing, never wipe current_step
+    # on absence-of-evidence alone.
+    candidate_cids = [
+        cid for cid, c in db_courses.items()
+        if c.get('current_step') and cid not in live_assignments
+    ]
+    if candidate_cids:
+        if log:
+            print(f"  {len(candidate_cids)} candidate(s) for current_step "
+                  f"clear (in DB but not in live). Verifying...")
+        verify_details = batch_fetch_course_details(candidate_cids, batch_size=25)
+        confirmed_complete = []
+        rebound = {}
+        unverifiable = 0
+        for cid, d in verify_details.items():
+            cid_int = int(cid) if isinstance(cid, str) else cid
+            steps = d.get('steps') or []
+            html_err = d.get('html_error')
+            if html_err or not steps:
+                unverifiable += 1
+                continue
+            current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if current is None:
+                confirmed_complete.append(cid_int)
+            else:
+                rebound[cid_int] = current
         with get_db() as conn:
-            conn.execute(
-                "UPDATE courses SET current_step = '', current_approver_emails = '', "
-                "last_updated = ? WHERE id = ?",
-                (datetime.now().isoformat(), cid),
-            )
-        fixed += 1
-        if log and fixed <= 50:
-            print(f"  {cid}: {c.get('current_step')!r} → '' (gone from all pending lists)")
+            for cid in confirmed_complete:
+                conn.execute(
+                    "UPDATE courses SET current_step = '', "
+                    "current_approver_emails = '', last_updated = ? "
+                    "WHERE id = ?",
+                    (datetime.now().isoformat(), cid),
+                )
+                fixed += 1
+            for cid, step in rebound.items():
+                conn.execute(
+                    "UPDATE courses SET current_step = ?, last_updated = ? "
+                    "WHERE id = ?",
+                    (step, datetime.now().isoformat(), cid),
+                )
+                fixed += 1
+        if log:
+            if confirmed_complete:
+                print(f"    Cleared {len(confirmed_complete)} confirmed-complete courses")
+            if rebound:
+                print(f"    Reassigned {len(rebound)} courses to their actual workflow step")
+            if unverifiable:
+                print(f"    Left {unverifiable} unchanged (workflow div fetch failed)")
 
     # 3c: brand-new courses — batch-fetch full details
     if new_course_ids:

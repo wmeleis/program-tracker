@@ -360,7 +360,35 @@ Both Programs and Courses views have a **Complete** button at the right end of t
 
 - **DB:** `programs.completion_date` and `courses.completion_date` (both TEXT, nullable). `programs.campus` captures the XML `<campus>` code so we don't have to re-parse the name. `get_all_programs()` and `get_all_courses()` both return rows that have either a non-empty `current_step` OR a non-empty `completion_date` — the frontend hides completed items by default and shows them only when the Complete button is active.
 - **Scraper completion detection:** in `run_full_scan` (programs) and `process_course_scans` (courses), an item is flagged complete when `total_steps > 0` AND `completed_steps == total_steps` AND the workflow HTML has no `current` step. The regular discovery path rarely catches completions (completed items drop off the Approve Pages queue), so the **historical sweep** is the authoritative ingester of completed items.
-- **Source of truth for `current_step`:** the **live Approve Pages pending list at `/courseleaf/approve/`** — the screen the user uses to approve programs. The dashboard mirrors that view exactly. (We tried per-program workflow HTML earlier; CIM's two pages can disagree because the per-program `<li class="current">` marker can lag the pending list, and operationally the user trusts the pending list — that's where the work gets done.)
+- **Reconciliation: which source wins.** CIM has two views of a program's workflow state. Both can be wrong; both can disagree. We've burned hours flip-flopping which to trust, so this section is now the single decision record. **Don't re-derive this from scratch — read it, then update it if you need to change the policy.**
+
+  **Sources:**
+  1. **Per-program workflow div** — at `/programadmin/{id}/`, look for `<div id="workflow">`. Its `<li class="current">` marker is what reviewers actually see when they open the program. Reliable when present; can be missing entirely for completed programs (CIM tears it down post-completion).
+  2. **Approve Pages pending list per role** — at `/courseleaf/approve/?role=X`, the page shows the programs whose current step is X. Used for discovery (find all programs in active workflow). Has known bugs:
+     - **Stale-cache bug**: when the dropdown is set to an EMPTY role, `showPendingList(role)` does NOT clear the previous role's content from the DOM. Our scrape's `body.innerText` polling locks onto the prior role's program list and reports it as the new role's. Concurrent scrapes (heal vs full-scan) compound this.
+     - Programs sometimes appear in a role's pending list AFTER they've moved on to the next step (lag).
+
+  **Policy: workflow div is authoritative; Approve Pages is a hint.** Specifically:
+
+  | Signal | Action |
+  |---|---|
+  | Workflow div fetched OK + has `<li class="current">` | Authoritative. Set `current_step` from the workflow div. (Override any conflicting Approve Pages hint.) |
+  | Workflow div fetched OK + has steps + no `current` | Authoritative. Program is complete. Clear `current_step`. |
+  | Workflow div empty / fetch failed (`html_error` set or `steps` is `[]`) | Unverifiable. **Do NOT** mark as complete. **Do NOT** clear `current_step`. Fall back to Approve Pages assignment (if any) or preserve existing DB value. |
+  | Approve Pages lists program at role Y, no workflow div data yet | Tentative. Use Y for `current_step`, but next scan should verify via workflow div. |
+  | Approve Pages doesn't list program | Hint that program is complete — but NOT proof. Verify via workflow div before clearing `current_step`. |
+
+  **Destructive actions require positive evidence.** Never clear `current_step` based solely on a program being absent from Approve Pages — fetch the workflow div first and confirm "has steps but no current". An empty / failed workflow-div fetch is "unknown", not "complete".
+
+  **Why this is the right policy** (we tried the inverse): trusting Approve Pages over the workflow div led to repeated incidents where the stale-cache bug caused programs to be reassigned to wrong roles or have their `current_step` wiped despite still being in workflow. The workflow div has its own bugs (lag, missing on completion), but it's never WRONG when present — it's the data each reviewer actually sees and acts on.
+
+  **Code locations:** the policy is implemented in:
+  - `run_full_scan()` Step 3 (per-program reconciliation when discovered by Approve Pages)
+  - `run_full_scan()` end-of-scan clear-stale block (verifies via batch_fetch before clearing)
+  - `heal_stale_program_steps()` / `heal_stale_course_steps()` Step 2 (cross-check live_assignments) and Step 3b (verify before clearing)
+  - All four call `batch_fetch_program_details` / `batch_fetch_course_details` in batches of 25 to verify; the per-program workflow fetch adds 2-4 minutes to a heal/full-scan but is essential for correctness.
+
+- **Source of truth for `current_step`** (TL;DR of above): per-program workflow div. Approve Pages is for discovery only.
 - **Heal: mirror DB to live Approve Pages — `heal_stale_program_steps()` / `heal_stale_course_steps()`:** both iterate the **live** dropdown via `get_all_approve_roles()` (~215 entries; falls back to `ALL_ROLES` / `COURSE_TRACKED_ROLES` if the live fetch fails), query each role's pending list via `scrape_approve_pages_role()` / `scrape_courses_from_role()`, build a `pid → role` map, then:
   1. For each `(pid, role)` in the live map: ensure the DB row's `current_step = role`. Brand-new programs (in live, not in DB) are batch-fetched once for full metadata.
   2. For DB rows with a non-empty `current_step` whose ID is NOT in the live map: clear `current_step` (the program has moved off every queue — gone from CIM's reviewer view).
