@@ -59,14 +59,28 @@ The system runs in two cadences: a once-daily heavy "full scan" via launchd, and
 
 **Step 1 - Program Discovery (~6 min):** Iterates the live Approve Pages role dropdown (`get_all_approve_roles()` — currently ~215 entries: the 14 tracked pipeline + 32 college roles + many narrow committee / degree-audit / workflow-setup roles). For each role, `scrape_approve_pages_role()` selects it in the dropdown via `showPendingList()`, then runs an async poll-until-stable loop (extracts every 500ms, returns when count is non-zero AND stable across 3 polls; empty roles short-circuit after 5 stable empty polls + ≥3s elapsed; 15s hard ceiling). The early-empty exit is critical because most of those 215 roles legitimately have no programs at any given time — without it, an iteration spent ~30 minutes waiting on the timeout for each empty role. Extracts program IDs and names from page text matching `/programadmin/(\d+):\s*(.+)/`. The same pattern is in `scrape_courses_from_role()` for `/courseadmin/`.
 
-**Step 2 - Batch Detail Fetch (~2-7 min):** Uses synchronous XHR (batches of 25) executed via AppleScript in the `programadmin` tab:
+**Step 1.5 - Diff vs DB (incremental gating, Phase A+B):** Step 1's role membership is the cheap change-detector. Each discovered program is classified into one of three buckets by comparing its live Approve Pages role to the DB's stored `current_step`:
+- `new_ids`: not in DB
+- `moved_ids`: in DB, but DB's `current_step` ≠ live role
+- `unchanged_ids`: in DB, DB's `current_step` == live role
+
+Step 2 then fetches details only for `active_ids = new_ids ∪ moved_ids`. Unchanged programs are *not* re-fetched and their DB rows stay as-is. On a typical day this drops Step 2 from ~7 min to a few seconds.
+
+**Step 2 - Batch Detail Fetch (active programs only):** Uses synchronous XHR (batches of 25) executed via AppleScript in the `programadmin` tab:
 - Fetches each program's HTML page (`/programadmin/{id}/`) and parses the `#workflow` div for steps (name, status, approver emails)
 - Fetches each program's XML API (`/programadmin/{id}/index.xml`) for metadata (college, department, degree, banner code, campus, proposal type)
-- ~200ms per program vs ~5s with the old page-navigation approach
+- ~200ms per program
 
-**Step 3 - Database Update:** Processes results, maps college codes to full names, detects changes (step transitions), preserves `step_entered_date` when step hasn't changed (to not reset the "days at step" timer), records scan.
+**Step 3 - Database Update:** Processes results for `active_ids` only, maps college codes to full names, detects changes (step transitions), preserves `step_entered_date` when step hasn't changed (to not reset the "days at step" timer). Then runs an exit-verification pass over `existing_in_pipeline` (in DB at a step but not discovered) using the positive-evidence policy — workflow div must confirm before any `current_step` is cleared.
 
 **Validation:** After processing, re-checks the 14 tracked pipeline roles (not college roles) against live Approve Pages to verify counts match. Small deltas are expected if approvals happen during the scan.
+
+**Per-phase timing logs:** `run_full_scan()` returns a `phase_times` dict (`1_discovery`, `2_diff`, `3_detail_fetch`, `4_processing`, `5_exit_verification`, `6_heal_validation`) and prints a percentage breakdown at scan end so we can see where time is actually spent.
+
+**Known limitations of incremental gating (accepted, see "Reconciliation: which source wins"):**
+- A program at the same step but with edited `curriculum_html` won't be re-fetched. Mid-workflow proposer edits stale silently between scans.
+- Approve Pages stale-cache that happens to match a stale DB `current_step` is silently missed by this scan. The trailing `heal_stale_program_steps` call and the weekly `sweep_all_program_ids` are the safety nets.
+- Reference curricula for non-Boston deployments whose Boston counterpart is in workflow track Boston's live edits via the `version_id=0` sentinel; refreshing those is `fetch_reference_curricula`'s responsibility (and currently runs unconditionally each scan — Phase C territory).
 
 ### Browser selection
 - **`BROWSER_APP` env var** controls which Chromium-family browser AppleScript drives. **Default everywhere is `"Google Chrome"`** (in `scraper.py`, in `update.sh`, and the launchd plist has no override). Override per-shell: `BROWSER_APP="Microsoft Edge" python3 app.py` to use Edge.

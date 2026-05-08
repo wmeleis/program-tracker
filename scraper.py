@@ -946,10 +946,26 @@ def check_courseleaf_session():
 
 
 def run_full_scan():
-    """Run a complete scan: discover programs via Approve Pages, then batch-fetch details.
+    """Run a program scan: incremental by default.
 
-    Uses XHR-based batch fetching (~200ms/program) instead of page navigation (~5s/program).
-    Total scan time: ~5 minutes instead of ~45 minutes.
+    Architecture: Phase A discovery (Approve Pages role iteration) is the
+    cheap change-detector. It tells us each program's *live* role. We diff
+    that against the DB's stored current_step and only do the expensive
+    per-program detail fetch (Phase B) for programs that actually moved
+    or are brand new. Unchanged programs are not re-fetched and their DB
+    rows stay as-is.
+
+    Limitations of incremental mode (accepted, see CLAUDE.md):
+    - Curriculum HTML edits at unchanged steps are not detected here.
+    - The Boston-in-workflow → non-Boston reference refresh is handled
+      in `fetch_reference_curricula`, not here.
+    - Stale-cache from Approve Pages that happens to match a stale DB
+      current_step is silently missed by this scan. The trailing
+      `heal_stale_program_steps` call and the weekly `sweep_all_program_ids`
+      are the safety nets.
+
+    First run on an empty DB → everyone is 'new', so it behaves like a
+    full scan. Subsequent scans typically have 0–10 active programs.
     """
     print(f"\n{'='*60}")
     print(f"Starting full scan at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -957,14 +973,17 @@ def run_full_scan():
 
     init_db()
     scan_time = datetime.now().isoformat()
+    overall_start = time.time()
+    phase_times = {}  # name -> elapsed seconds
 
     # Get existing programs to detect changes
     existing_programs = {p['id']: p for p in get_all_programs()}
 
-    # Step 1: Discover all programs at tracked roles via Approve Pages
+    # ---- Phase A: Discover all programs at tracked roles via Approve Pages
     all_discovered = {}  # id -> {name, role, user}
 
     print("\nStep 1: Scanning Approve Pages for all roles...")
+    phase_start = time.time()
     for role in ALL_ROLES:
         print(f"  Scanning role: {role}...")
         programs = scrape_approve_pages_role(role)
@@ -979,16 +998,45 @@ def run_full_scan():
                     'current_step': role,
                 }
             all_discovered[pid]['current_step'] = role
+    phase_times['1_discovery'] = time.time() - phase_start
+    print(f"\n  Total unique programs discovered: {len(all_discovered)} "
+          f"(discovery took {phase_times['1_discovery']:.0f}s)")
 
-    print(f"\n  Total unique programs discovered: {len(all_discovered)}")
+    # ---- Diff: classify discovered programs vs DB (cheap change detector)
+    phase_start = time.time()
+    new_ids = []
+    moved_ids = []
+    unchanged_ids = []
+    for pid, info in all_discovered.items():
+        live_step = info['current_step']
+        db = existing_programs.get(pid)
+        if db is None:
+            new_ids.append(pid)
+        elif (db.get('current_step') or '') != live_step:
+            moved_ids.append(pid)
+        else:
+            unchanged_ids.append(pid)
+    active_ids = new_ids + moved_ids
+    phase_times['2_diff'] = time.time() - phase_start
+    print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
+          f"{len(moved_ids)} moved, {len(new_ids)} new")
+    print(f"  Phase B will fetch details for {len(active_ids)} programs "
+          f"({len(unchanged_ids)} skipped)")
 
-    # Step 2: Batch-fetch workflow + metadata via XHR (no page navigation)
-    program_ids = list(all_discovered.keys())
-    print(f"\nStep 2: Batch-fetching details for {len(program_ids)} programs via XHR...")
-    start_time = time.time()
-    details = batch_fetch_program_details(program_ids, batch_size=25)
-    elapsed = time.time() - start_time
-    print(f"  Fetched {len(details)} programs in {elapsed:.1f}s ({elapsed/max(len(details),1)*1000:.0f}ms each)")
+    # ---- Phase B: Batch-fetch workflow + metadata via XHR for moved/new only
+    print(f"\nStep 2: Batch-fetching details for {len(active_ids)} programs via XHR...")
+    phase_start = time.time()
+    if active_ids:
+        details = batch_fetch_program_details(active_ids, batch_size=25)
+    else:
+        details = {}
+    phase_times['3_detail_fetch'] = time.time() - phase_start
+    if details:
+        per = phase_times['3_detail_fetch'] / max(len(details), 1) * 1000
+        print(f"  Fetched {len(details)} programs in "
+              f"{phase_times['3_detail_fetch']:.1f}s ({per:.0f}ms each)")
+    else:
+        print(f"  No programs needed re-fetch.")
 
     # Debug: log XML metadata from first program
     import sys
@@ -1006,11 +1054,14 @@ def run_full_scan():
         if meta.get('xml_error'):
             print(f"    xml_error: {meta.get('xml_error', '')}", flush=True)
 
-    # Step 3: Process results and update database
+    # ---- Step 3: Process fetched results and update database
+    # Only iterates active_ids — unchanged programs are intentionally not
+    # touched, so their DB rows are preserved exactly as-is.
     print(f"\nStep 3: Processing results...")
+    phase_start = time.time()
     changes = 0
 
-    for prog_id in program_ids:
+    for prog_id in active_ids:
         info = all_discovered[prog_id]
         prog_name = info['name']
         detail = details.get(prog_id, {'steps': [], 'meta': {}})
@@ -1120,10 +1171,13 @@ def run_full_scan():
             record_change(scan_time, prog_id, '', current_step, 'new_program')
             changes += 1
 
-    # Programs that were in DB at some step but did NOT show up at any
-    # Approve Pages role this scan. Don't clear unconditionally — verify
-    # against each program's workflow div first (positive-evidence
+    phase_times['4_processing'] = time.time() - phase_start
+
+    # ---- Exit verification: programs in DB at some step but not discovered
+    # at any Approve Pages role this scan. Don't clear unconditionally —
+    # verify against each program's workflow div first (positive-evidence
     # policy, see CLAUDE.md "Reconciliation: which source wins").
+    phase_start = time.time()
     from database import get_db
     discovered_ids = set(all_discovered.keys())
     existing_in_pipeline = [
@@ -1169,6 +1223,7 @@ def run_full_scan():
                   f"(Approve Pages missed them)")
         if unverifiable:
             print(f"    Left {unverifiable} unchanged (workflow div fetch failed)")
+    phase_times['5_exit_verification'] = time.time() - phase_start
 
     # NB: we intentionally do NOT record the scan here. The caller
     # (app.py do_scan) records it with a fresh timestamp after the
@@ -1178,15 +1233,27 @@ def run_full_scan():
     # first phase completes.
 
     # Validation + auto-heal: reconcile DB against live Approve Pages.
+    # In incremental mode this is now a redundant safety net (the main
+    # path already used Approve Pages as the discovery source); kept for
+    # one cycle so we can see whether it ever finds anything to heal.
+    # Drop it once we have confidence.
+    phase_start = time.time()
     warnings, healed = heal_stale_program_steps(log=True)
     if warnings == 0:
         print("  All role counts match live data.")
     else:
         print(f"  {warnings} role(s) had count differences; auto-healed {healed} stale program row(s)")
+    phase_times['6_heal_validation'] = time.time() - phase_start
 
-    total_time = time.time() - (time.mktime(datetime.fromisoformat(scan_time).timetuple()))
+    total_time = time.time() - overall_start
     print(f"\n{'='*60}")
-    print(f"Scan complete: {len(all_discovered)} programs, {changes} changes detected")
+    print(f"Scan complete: {len(all_discovered)} programs discovered, "
+          f"{len(active_ids)} re-fetched, {len(unchanged_ids)} skipped, "
+          f"{changes} changes detected")
+    print(f"Phase timings:")
+    for name in sorted(phase_times.keys()):
+        secs = phase_times[name]
+        print(f"  {name:.<25s} {secs:6.1f}s ({secs/max(total_time,1)*100:4.1f}%)")
     print(f"Total time: {total_time:.0f}s ({total_time/60:.1f} min)")
     print(f"{'='*60}")
 
@@ -1194,7 +1261,10 @@ def run_full_scan():
         'scan_time': scan_time,
         'programs_scanned': len(all_discovered),
         'programs_with_workflow': len(details),
-        'changes': changes
+        'programs_skipped': len(unchanged_ids),
+        'programs_active': len(active_ids),
+        'changes': changes,
+        'phase_times': phase_times,
     }
 
 
