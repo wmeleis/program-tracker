@@ -1528,36 +1528,62 @@ def heal_stale_program_steps(log=False, active_only=True):
     if log:
         print(f"\nLive: {len(live_assignments)} unique programs (pre-validation)")
 
-    # Validate live_assignments against each program's per-program workflow
-    # div. Approve Pages' pending list can show stale entries for programs
-    # that have already completed: when CIM's `showPendingList(role)` is
-    # called for an EMPTY role, it does not clear the previous role's
-    # content from the page DOM, so our body.innerText polling can lock
-    # onto the prior role's program list and report it as the new role's.
-    # Concurrent scrapes (heal vs full-scan) compound this. The
-    # per-program workflow div is the authoritative source: if it shows
-    # no `current` step, the program is complete regardless of what any
-    # role's pending list says.
+    # Cross-check live_assignments against each program's per-program
+    # workflow div. Approve Pages' pending list can have stale entries
+    # caused by a CIM bug — `showPendingList(role)` for an EMPTY role
+    # doesn't clear the previous role's content, and our body.innerText
+    # polling can lock onto the prior role's list and report it as the
+    # new role's pending list.
+    #
+    # SAFETY: We only DROP a program from live_assignments when we have
+    # POSITIVE proof of its actual state — that is, when we successfully
+    # fetched its workflow div, got back ≥1 step (i.e., the workflow
+    # exists), and none of those steps is marked 'current'. An empty
+    # steps array means the fetch failed (session expired, transient
+    # error, etc.) — we DO NOT treat that as "program is complete"
+    # because we'd be guessing.
+    #
+    # We also override the role mapping when the workflow div tells us
+    # the program is actually at a different step than Approve Pages
+    # claims: in that case, set live_assignments[pid] to the live current
+    # step from the workflow div.
     if live_assignments:
         candidate_ids = list(live_assignments.keys())
         if log:
-            print(f"  Validating {len(candidate_ids)} candidates against "
+            print(f"  Cross-checking {len(candidate_ids)} candidates against "
                   f"per-program workflow divs...")
         details = batch_fetch_program_details(candidate_ids, batch_size=25)
-        invalid_ids = []
+        confirmed_complete = []
+        corrected = 0
+        unverifiable = 0
         for pid, d in details.items():
             steps = d.get('steps') or []
-            if not any(s.get('status') == 'current' for s in steps):
-                invalid_ids.append(pid)
-        if invalid_ids:
+            html_err = d.get('html_error')
+            if html_err or not steps:
+                # Fetch failed or workflow div missing — UNKNOWN, leave alone.
+                unverifiable += 1
+                continue
+            current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if current is None:
+                # Workflow div has steps but none current → program is complete.
+                confirmed_complete.append(pid)
+            elif pid in live_assignments and current != live_assignments[pid].get('role'):
+                # Workflow div says the program is at a different step than
+                # the Approve Pages pending list said. Trust the workflow div.
+                live_assignments[pid] = dict(live_assignments[pid], role=current)
+                corrected += 1
+        if confirmed_complete:
             if log:
-                sample = invalid_ids[:5]
-                print(f"  Dropped {len(invalid_ids)} programs with no live "
-                      f"current step (Approve Pages pending list was stale). "
-                      f"Examples: {sample}")
-            for pid in invalid_ids:
+                print(f"  Confirmed complete (workflow div has no current step): "
+                      f"{len(confirmed_complete)} programs. Examples: "
+                      f"{confirmed_complete[:5]}")
+            for pid in confirmed_complete:
                 live_assignments.pop(pid, None)
         if log:
+            print(f"  Corrected role for {corrected} programs (workflow div "
+                  f"disagreed with Approve Pages)")
+            if unverifiable:
+                print(f"  {unverifiable} programs unverifiable (fetch failed) — left as-is")
             print(f"  After validation: {len(live_assignments)} live programs")
 
     # Step 2: snapshot current DB state
@@ -1718,30 +1744,43 @@ def heal_stale_course_steps(log=False, active_only=True):
     if log:
         print(f"\nLive: {len(live_assignments)} unique courses (pre-validation)")
 
-    # Validate against per-course workflow div (see heal_stale_program_steps
-    # for rationale — Approve Pages can show stale entries when CIM's
-    # showPendingList is called for an empty role).
+    # Cross-check live_assignments against each course's per-course workflow
+    # div. See heal_stale_program_steps for the bug story. SAFETY: only
+    # drop when we have POSITIVE proof — workflow div has steps but no
+    # 'current'. Empty steps means fetch failed → leave alone.
     if live_assignments:
         candidate_ids = list(live_assignments.keys())
         if log:
-            print(f"  Validating {len(candidate_ids)} candidates against "
+            print(f"  Cross-checking {len(candidate_ids)} candidates against "
                   f"per-course workflow divs...")
         details = batch_fetch_course_details(candidate_ids, batch_size=25)
-        invalid_ids = []
+        confirmed_complete = []
+        corrected = 0
+        unverifiable = 0
         for cid, d in details.items():
             cid_int = int(cid) if isinstance(cid, str) else cid
             steps = d.get('steps') or []
-            if not any(s.get('status') == 'current' for s in steps):
-                invalid_ids.append(cid_int)
-        if invalid_ids:
+            html_err = d.get('html_error')
+            if html_err or not steps:
+                unverifiable += 1
+                continue
+            current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if current is None:
+                confirmed_complete.append(cid_int)
+            elif cid_int in live_assignments and current != live_assignments[cid_int].get('role'):
+                live_assignments[cid_int] = dict(live_assignments[cid_int], role=current)
+                corrected += 1
+        if confirmed_complete:
             if log:
-                sample = invalid_ids[:5]
-                print(f"  Dropped {len(invalid_ids)} courses with no live "
-                      f"current step (Approve Pages pending list was stale). "
-                      f"Examples: {sample}")
-            for cid in invalid_ids:
+                print(f"  Confirmed complete: {len(confirmed_complete)} courses. "
+                      f"Examples: {confirmed_complete[:5]}")
+            for cid in confirmed_complete:
                 live_assignments.pop(cid, None)
         if log:
+            print(f"  Corrected role for {corrected} courses (workflow div "
+                  f"disagreed with Approve Pages)")
+            if unverifiable:
+                print(f"  {unverifiable} courses unverifiable (fetch failed) — left as-is")
             print(f"  After validation: {len(live_assignments)} live courses")
 
     db_courses = {c['id']: c for c in get_all_courses()}
