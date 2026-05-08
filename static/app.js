@@ -892,7 +892,15 @@ function updateProgramKindCounts() {
         return;
     }
     row.style.display = '';
-    const baseExclKind = getBaseFiltered(window._staticApproverIds || null, { kind: true });
+    let baseExclKind = getBaseFiltered(window._staticApproverIds || null, { kind: true });
+    // Apply the active pipeline-tile filter so kind counts match what's shown.
+    if (pipelineFilter) {
+        baseExclKind = baseExclKind.filter(p => {
+            if (pipelineFilter === '__college__') return isCollegeStep(p.current_step);
+            if (pipelineFilter === '__complete__') return !!p.completion_date;
+            return p.current_step === pipelineFilter;
+        });
+    }
     const counts = { '': baseExclKind.length };
     baseExclKind.forEach(p => {
         const k = classifyProgramKind(p);
@@ -1218,12 +1226,38 @@ async function applyFilters() {
     // Update pipeline counts from base filtered set
     updatePipelineCounts(baseFiltered);
 
-    // Update college dropdown excluding the college filter itself (so you see what's available)
-    updateCollegeOptions(getBaseFiltered(approverProgramIds, {college: true}));
+    // Update college dropdown excluding the college filter itself (so you see what's available).
+    // ALSO apply the active pipeline tile filter — without this, when the user clicks e.g.
+    // the College tile, the dropdown counts include programs at non-college steps and
+    // disagree with the rendered table.
+    const collegeBase = getBaseFiltered(approverProgramIds, {college: true});
+    const collegeDetectorForCounts = currentView === 'courses' ? isCourseCollegeStep : isCollegeStep;
+    const collegeBaseAfterPipeline = pipelineFilter ? collegeBase.filter(p => {
+        if (pipelineFilter === '__college__') return collegeDetectorForCounts(p.current_step);
+        if (pipelineFilter === '__complete__') return !!p.completion_date;
+        if (currentView === 'courses') {
+            const bd = COURSE_BUCKETS.find(b => b.role === pipelineFilter);
+            if (bd) return bd.match(p.current_step);
+        }
+        return p.current_step === pipelineFilter;
+    }) : collegeBase;
+    updateCollegeOptions(collegeBaseAfterPipeline);
 
-    // Each button group's counts exclude its own filter so you see what's available
-    updateTypeCounts(getBaseFiltered(approverProgramIds, {type: true}));
-    updateProposalCounts(getBaseFiltered(approverProgramIds, {proposal: true}));
+    // Type / Proposal / Kind counts also need pipeline-tile awareness for the same reason.
+    function applyPipelineTo(set) {
+        if (!pipelineFilter) return set;
+        return set.filter(p => {
+            if (pipelineFilter === '__college__') return collegeDetectorForCounts(p.current_step);
+            if (pipelineFilter === '__complete__') return !!p.completion_date;
+            if (currentView === 'courses') {
+                const bd = COURSE_BUCKETS.find(b => b.role === pipelineFilter);
+                if (bd) return bd.match(p.current_step);
+            }
+            return p.current_step === pipelineFilter;
+        });
+    }
+    updateTypeCounts(applyPipelineTo(getBaseFiltered(approverProgramIds, {type: true})));
+    updateProposalCounts(applyPipelineTo(getBaseFiltered(approverProgramIds, {proposal: true})));
     updateProgramKindCounts();
 
     // Now apply pipeline filter for the table (college already applied in baseFiltered)
