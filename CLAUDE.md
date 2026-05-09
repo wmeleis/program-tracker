@@ -36,22 +36,22 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 | `static/app.js` | Frontend: pipeline bar, filters (type/proposal/smart views/college/campus/approver/step/search), sortable table with expandable workflow detail rows. |
 | `static/style.css` | Dashboard styling. Colored left borders: green=new, blue=change, red=inactivation. |
 | `templates/dashboard.html` | HTML template used by both Flask and static export. |
-| `update.sh` | Launched by launchd weekday-mornings. Checks the configured browser (`BROWSER_APP`, default Chrome) + session validity, starts Flask if needed, triggers `/api/scan/trigger` (Options C+F fast scan, ~22 min), waits for completion. Sends macOS notifications. |
-| `weekly_heal.sh` | Launched by launchd Sunday 8am. Same Chrome+session checks as `update.sh` but triggers `/api/heal` instead — the deep ~70 min cross-check. Gates on `data/last_heal_unix` (5-day cooldown) so missed Sunday firings don't double-fire. |
+| `update.sh` | Launched by launchd every 30 min on weekdays 6am–9pm PT. Checks browser + session, starts Flask if needed, triggers `/api/scan/trigger` (Options C+F fast scan, ~22 min), waits for completion. Sends macOS notifications. |
+| `weekend_update.sh` | Launched by launchd every 4 hours on Sat/Sun (6am, 10am, 2pm, 6pm PT). Same logic as `update.sh` but with weekend-only gating and a 3h45m gap check matching the slower cadence. |
+| `weekly_heal.sh` | Launched by launchd Sunday 8am. Same Chrome+session checks but triggers `/api/heal` instead — the deep ~70 min cross-check. Gates on `data/last_heal_unix` (5-day cooldown) so missed Sunday firings don't double-fire. |
 
 ### Scheduled Execution
 The system runs in three cadences: a daily fast "scan" on weekdays, an on-demand "Update Now" button (also fast), and a weekly deep "heal" on Sunday morning.
 
-**Frequent fast scan — launchd, every 30 min on weekdays 6am–9pm PT**
-- **Agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
-- **Schedule:** `StartCalendarInterval` array of 30 entries — fires at 6:00, 6:30, 7:00, ..., 20:30 local (PT). macOS reruns missed firings on wake.
-- **Runs:** `update.sh`, which gates on:
-  1. Mon–Fri PT (weekends skipped).
-  2. Inside the 6am–9pm PT window (exclusive on 9pm — last allowed start is 8:59 pm).
-  3. At least 25 minutes since the last successful scan (`data/last_scan_unix`) — under the 30-min cadence so successive scheduled firings work, but close-together wake-up retries dedupe.
-  4. The configured browser (`BROWSER_APP`, default Chrome) running with a live CourseLeaf session.
-- **What it does:** triggers `/api/scan/trigger` (Options C+F: hybrid discovery + incremental fetch + targeted reference + 24h-cached regulatory + fingerprint-gated export). ~22 min on a typical day. Most firings will skip the export entirely (C1 fingerprint check) when nothing actually changed since last scan.
-- **Why every 30 min:** the scan path doesn't consume Claude API usage (it's all local AppleScript→Chrome→CourseLeaf), and Options C+F's fingerprint-gated export keeps the pure cost low when there's no real change. Frequent firings give near-real-time dashboard freshness during the workday with negligible overhead.
+**Frequent fast scan — launchd, weekdays every 30 min, weekends every 4 hours**
+- **Weekday agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
+  - **Schedule:** 30-entry `StartCalendarInterval` array — fires at 6:00, 6:30, 7:00, ..., 20:30 local (PT) every day; `update.sh` filters out weekends.
+  - **Runs:** `update.sh`. Gates on Mon–Fri PT, 6am–9pm PT window (exclusive on 9pm), 25-min minimum gap since last scan, browser+session live.
+- **Weekend agent:** `~/Library/LaunchAgents/com.programtracker.weekendupdate.plist`
+  - **Schedule:** 8-entry `StartCalendarInterval` array — Sat 6/10/14/18 + Sun 6/10/14/18 (every 4 hours during the day).
+  - **Runs:** `weekend_update.sh`. Gates on Sat/Sun PT, 6am–7pm PT window (last firing at 6pm), 3h45m minimum gap, browser+session live. Same `/api/scan/trigger` endpoint as weekday.
+- **What both do:** trigger `/api/scan/trigger` (Options C+F: hybrid discovery + incremental fetch + targeted reference + 24h-cached regulatory + fingerprint-gated export). ~22 min on a typical day. Most firings will skip the export entirely (C1 fingerprint check) when nothing actually changed since last scan. macOS reruns missed firings on wake.
+- **Why this cadence:** the scan path doesn't consume Claude API usage (it's all local AppleScript→Chrome→CourseLeaf), and Options C+F's fingerprint-gated export keeps the pure cost low when there's no real change. Workday gets near-real-time freshness; weekends still see updates 4×/day so step-changes don't sit invisible until Monday.
 
 **Update Now button — on-demand, fast**
 - The dashboard's "Update Now" button calls `/api/scan/trigger` (the same fast path as the daily scheduled scan). ~22 min.
@@ -276,13 +276,17 @@ rm data/tracker.db && python3 -c "from database import init_db; init_db()"
 # Reload launchd agents
 launchctl unload ~/Library/LaunchAgents/com.programtracker.update.plist
 launchctl load ~/Library/LaunchAgents/com.programtracker.update.plist
+launchctl unload ~/Library/LaunchAgents/com.programtracker.weekendupdate.plist
+launchctl load ~/Library/LaunchAgents/com.programtracker.weekendupdate.plist
 launchctl unload ~/Library/LaunchAgents/com.programtracker.weeklyheal.plist
 launchctl load ~/Library/LaunchAgents/com.programtracker.weeklyheal.plist
 
 # Check launchd logs
-cat data/launchd.log         # daily scan
-cat data/launchd_heal.log    # weekly Sunday heal
-cat data/heal.log            # what weekly_heal.sh did each firing
+cat data/launchd.log              # weekday scan (30-min cadence)
+cat data/launchd_weekend.log      # weekend scan (4-hour cadence)
+cat data/launchd_heal.log         # weekly Sunday deep heal
+cat data/update.log               # what update.sh + weekend_update.sh did each firing
+cat data/heal.log                 # what weekly_heal.sh did each firing
 ```
 
 ## Recent Features (added after initial build)
