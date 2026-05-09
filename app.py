@@ -377,17 +377,25 @@ def api_session_check():
 
 @app.route('/api/heal', methods=['POST'])
 def api_heal():
-    """Quick-update endpoint: re-fetch every active program's and course's
-    workflow HTML and sync current_step / completion_date from it. Skips
-    the discovery (Approve Pages iteration) and reference/regulatory fetches
-    that a full scan runs — ~4-5 min total for active pipeline vs. ~30-45
-    min for a full scan.
+    """Deep-refresh endpoint: iterate the live ~215-role Approve Pages
+    dropdown, then cross-check every observed program/course/catalog
+    entry against its workflow div. Use when scan-trigger's lighter-
+    weight discovery seems to be missing things, or after a CIM
+    schema change.
+
+    NOTE: As of Options C+F, `/api/scan/trigger` is the faster path
+    for everyday updates (~22 min, with Phase A+B incremental fetch
+    and targeted reference/regulatory). `/api/heal` is now the
+    *deeper* (and slower) reconciliation — it cross-fetches every
+    live program's workflow div, costing ~70+ min on a busy
+    pipeline. Prefer scan-trigger; reach for heal when you suspect
+    the incremental path missed something.
 
     Request body (JSON, optional):
-      {"scope": "programs"}    — programs only (~2 min)
-      {"scope": "courses"}     — courses only (~2 min)
-      {"scope": "both"}        — default; both (~4-5 min)
-      {"active_only": false}   — include completed/historical too (~20 min)
+      {"scope": "programs"}    — programs only (~30-40 min)
+      {"scope": "courses"}     — courses only (~30-40 min)
+      {"scope": "both"}        — default; both (~70+ min)
+      {"active_only": false}   — include completed/historical too (slower still)
       {"deploy": true}         — default; run export + git push to GitHub Pages when done
       {"deploy": false}        — skip deploy; DB-only update (for debugging)
     """

@@ -52,7 +52,7 @@ The system runs in two cadences: a once-daily heavy "full scan" via launchd, and
 - **What the full scan does:** discovers brand-new program/course IDs via Approve Pages, re-fetches reference + regulatory data, runs the historical sweep when due (≥7 days), exports + pushes to GitHub Pages. Takes 30–45 min.
 
 **Update Now (quick heal) — on-demand**
-- The dashboard's "Update Now" button (and `POST /api/heal`) runs the lightweight Approve-Pages-mirror sync, then auto-runs `export_static.py` + `git push`. Takes ~6 min for programs (no course step yet from the button).
+- The dashboard's "Update Now" button (and `POST /api/heal`) runs the deep-refresh path: iterate the live ~215 roles, then cross-check every observed program/course's workflow div. Slow (~70+ min for "both" scope). The everyday automated scan-trigger path is faster (~22 min) and more comprehensive — Update Now is the manual "force a deep refresh now" hook.
 - See "Heal: mirror DB to live Approve Pages" below for the precise semantics.
 
 ### How the Scraper Works

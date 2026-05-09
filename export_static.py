@@ -1057,9 +1057,12 @@ function __staticInit() {
         }
     };
 
-    // Update button: reach local Flask to trigger the quick heal (~4-5 min)
-    // which refreshes active program + course current_step values from
-    // workflow HTML and auto-pushes to GitHub Pages when done.
+    // Update button: reach local Flask to trigger the deep heal
+    // (cross-check workflow div for every active program/course;
+    // ~70+ min for "both" scope). For everyday updates the
+    // automated launchd-driven scan-trigger is faster (~22 min)
+    // and more comprehensive — but this button is the manual
+    // "force a deep refresh now" hook.
     window.triggerScan = async function() {
         const btn = document.getElementById('scan-btn');
         const statusEl = document.getElementById('scan-status');
@@ -1074,7 +1077,7 @@ function __staticInit() {
                 body: JSON.stringify({scope: 'both', active_only: true, deploy: true}),
             });
             if (res.ok) {
-                statusEl.innerHTML = '<span class="spinner"></span> Updating (this takes ~5 min)...';
+                statusEl.innerHTML = '<span class="spinner"></span> Updating (deep refresh; this takes 30-70 min)...';
                 const poll = setInterval(async () => {
                     try {
                         const s = await fetch('http://localhost:5001/api/scan/status');
