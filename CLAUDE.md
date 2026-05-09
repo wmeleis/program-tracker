@@ -79,10 +79,21 @@ Step 2 then fetches details only for `active_ids = new_ids ∪ moved_ids`. Uncha
 
 **Removed: trailing `heal_stale_program_steps` validation call.** Empirically (8 May 2026 first incremental cycle) it spent 73 minutes cross-fetching all 806 live programs, made 49 in-memory role corrections, and ended with `warnings=0` — i.e., it didn't change a single DB row, because the main scan's workflow-div reconciliation had already handled every "moved" case. Dropping it cut the program scan from ~78 min to ~5 min on no-change days. The function is still exposed via `POST /api/heal` (the "Update Now" dashboard button) for on-demand reconciliation.
 
+**C2 — Boston-in-workflow HTML refresh.** Boston programs in workflow whose Approve Pages role didn't change are still re-fetched every scan, just to keep `programs.curriculum_html` current. The reference-curriculum sentinel block (in `fetch_reference_curricula`) reads that field to update non-Boston deployments' references in `version_id=0` mode — if the field is stale, the sentinel propagates stale data to every dependent deployment until Boston's step changes. ~50 Boston programs per scan, ~10s extra; cheap insurance. Detection: a program is Boston when its `campus` field is empty, "Boston", or its name has no campus parenthetical (the convention for the canonical program).
+
+**C3 — Targeted reference fetch.** `fetch_reference_curricula(program_ids, targeted_ids=None)` now takes an optional set of program IDs to actually round-trip via the JS-history fetch loop. Pre-C3 the function did one HTML round-trip per program every scan to compare version_ids — costing ~16 min on a no-change scan ("0 fetched, 1669 skipped"). Now `do_scan` computes `targeted_ids` from positive change signals:
+- programs with no existing `reference_curriculum` row (initial fetch)
+- programs that just transitioned from in-workflow to complete in this scan (`run_full_scan` returns `completed_in_scan`; the exit-verification block contributes too)
+- programs newly completed by the weekly `sweep_all_program_ids` (sweep returns `new_completion_ids`)
+- non-Boston deployments whose Boston counterpart is in `completed_in_scan` (their ref now points at Boston's NEW last-approved version, not the `version_id=0` sentinel)
+
+Boston-in-workflow non-Boston refs (sentinel mode) are propagated by the function's sentinel block, which always runs over the full set — those don't need to be in `targeted_ids`. Same for the self-reference synth fallback.
+
+On a typical no-change scan this drops the JS-history loop from 1669 fetches to 0, cutting reference phase from ~16 min to ~30 sec.
+
 **Known limitations of incremental gating (accepted, see "Reconciliation: which source wins"):**
-- A program at the same step but with edited `curriculum_html` won't be re-fetched. Mid-workflow proposer edits stale silently between scans.
+- Course curriculum_html edits at unchanged steps are not detected by Phase A+B. (Programs are covered by C2; courses don't have curriculum HTML the way programs do, so this is moot.)
 - Approve Pages stale-cache that happens to match a stale DB `current_step` is silently missed by this scan. The weekly `sweep_all_program_ids` (and `sweep_all_course_ids`) is the safety net — it iterates every CIM ID directly via the XML API, no Approve Pages dependency.
-- Reference curricula for non-Boston deployments whose Boston counterpart is in workflow track Boston's live edits via the `version_id=0` sentinel; refreshing those is `fetch_reference_curricula`'s responsibility (and currently runs unconditionally each scan — Phase C territory).
 
 ### Browser selection
 - **`BROWSER_APP` env var** controls which Chromium-family browser AppleScript drives. **Default everywhere is `"Google Chrome"`** (in `scraper.py`, in `update.sh`, and the launchd plist has no override). Override per-shell: `BROWSER_APP="Microsoft Edge" python3 app.py` to use Edge.

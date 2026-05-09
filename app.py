@@ -534,6 +534,7 @@ def api_scan_trigger():
             # fetches) so any newly-ingested completed programs/courses are
             # included in get_all_programs() for the downstream fetches.
             # Otherwise they'd linger without references until the next scan.
+            sweep_program_completions = []  # C3: programs newly completed via sweep
             scan_status['phase'] = 'Checking historical sweep...'
             scan_status['progress'] = 72
             try:
@@ -549,7 +550,8 @@ def api_scan_trigger():
                     p_due = (datetime.now() - datetime.fromisoformat(last_p['scan_time'])).days >= 7
                 if p_due:
                     scan_status['phase'] = 'Weekly program sweep...'
-                    sweep_all_program_ids(start_id=1, end_id=2100, log=True)
+                    sweep_result = sweep_all_program_ids(start_id=1, end_id=2100, log=True)
+                    sweep_program_completions = sweep_result.get('new_completion_ids', []) if sweep_result else []
 
                 with get_db() as conn:
                     last_c = conn.execute(
@@ -567,19 +569,59 @@ def api_scan_trigger():
                 # main scan or the static export that follows.
                 print(f"Historical sweep error: {e}")
 
-            # Fetch reference curricula for every program (active + completed).
-            # Runs AFTER the sweep so newly-ingested historical programs get
-            # their Boston-counterpart references in the same scan.
+            # Fetch reference curricula. Runs AFTER the sweep so newly-ingested
+            # historical programs get their Boston-counterpart references in
+            # the same scan.
+            #
+            # C3: targeted fetch — round-trip CIM history only for programs
+            # that need it. Pre-C3 this loop did 1669 HTML fetches every scan
+            # to compare version_ids; "0 fetched, 1669 skipped" still cost
+            # ~16 min. Now we only fetch when there's positive reason to
+            # believe the reference might be stale:
+            #   - no existing reference row (initial fetch)
+            #   - program just completed workflow (own history advanced)
+            #   - non-Boston whose Boston counterpart just completed
+            #     (its ref now points at Boston's new last-approved version,
+            #      not the version_id=0 sentinel)
+            # Boston-in-workflow non-Boston refs (sentinel mode) are
+            # propagated by fetch_reference_curricula's sentinel block,
+            # which always runs over the full set.
             scan_status['phase'] = 'Fetching reference data...'
             scan_status['progress'] = 78
             try:
                 programs = get_all_programs()
                 prog_ids = [p['id'] for p in programs]
                 if prog_ids:
-                    fetch_reference_curricula(prog_ids)
+                    completed_in_scan = set(result.get('completed_in_scan', [])) if result else set()
+                    completed_in_scan |= set(sweep_program_completions)
+
+                    from database import get_db
+                    from scraper import _build_boston_counterpart_map
+                    with get_db() as conn:
+                        existing_ref_ids = {
+                            r['program_id'] for r in conn.execute(
+                                "SELECT program_id FROM reference_curriculum"
+                            ).fetchall()
+                        }
+                    targeted_ids = set(prog_ids) - existing_ref_ids
+                    targeted_ids |= completed_in_scan
+                    # Non-Boston deployments whose Boston counterpart just
+                    # completed need their ref recomputed against Boston's
+                    # new last-approved version.
+                    if completed_in_scan:
+                        counterpart_map, _ = _build_boston_counterpart_map(prog_ids)
+                        for nb_id, b_id in counterpart_map.items():
+                            if b_id in completed_in_scan:
+                                targeted_ids.add(nb_id)
+                    print(f"Reference fetch (C3): targeting "
+                          f"{len(targeted_ids)} of {len(prog_ids)} programs "
+                          f"(missing-ref + completed-in-scan + boston-just-completed deps)")
+                    fetch_reference_curricula(prog_ids, targeted_ids=targeted_ids)
                     scan_status['progress'] = 84
             except Exception as e:
                 print(f"Reference fetch error: {e}")
+                import traceback
+                traceback.print_exc()
 
             # Fetch regulatory approved curricula (SharePoint workbooks).
             # C4: rate-limit to once per 24h. The 7 SharePoint workbooks

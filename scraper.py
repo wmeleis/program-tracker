@@ -1016,12 +1016,34 @@ def run_full_scan():
             moved_ids.append(pid)
         else:
             unchanged_ids.append(pid)
-    active_ids = new_ids + moved_ids
+
+    # C2: Boston-in-workflow programs whose step didn't change still get
+    # their HTML refreshed every scan, so `programs.curriculum_html`
+    # stays current. The reference-curriculum sentinel block (in
+    # `fetch_reference_curricula`) reads that field to update non-Boston
+    # deployments' references in `version_id=0` mode — if the field is
+    # stale, the sentinel propagates stale data to every dependent
+    # deployment until Boston's step changes. ~50 Boston programs, ~10s
+    # extra per scan; cheap insurance.
+    boston_workflow_refresh_ids = []
+    for pid in unchanged_ids:
+        db = existing_programs[pid]
+        if not (db.get('current_step') or ''):
+            continue  # not in workflow → ref is stable
+        # "Boston" = explicit "Boston" campus, OR no campus parenthetical
+        # in the name (the convention for the canonical Boston program).
+        db_campus = (db.get('campus') or '').lower()
+        _, name_campus = _parse_campus_from_name(db.get('name') or '')
+        if db_campus == 'boston' or (not db_campus and not name_campus):
+            boston_workflow_refresh_ids.append(pid)
+
+    active_ids = new_ids + moved_ids + boston_workflow_refresh_ids
     phase_times['2_diff'] = time.time() - phase_start
     print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
-          f"{len(moved_ids)} moved, {len(new_ids)} new")
+          f"{len(moved_ids)} moved, {len(new_ids)} new, "
+          f"{len(boston_workflow_refresh_ids)} boston-in-workflow refresh (C2)")
     print(f"  Phase B will fetch details for {len(active_ids)} programs "
-          f"({len(unchanged_ids)} skipped)")
+          f"({len(unchanged_ids) - len(boston_workflow_refresh_ids)} skipped)")
 
     # ---- Phase B: Batch-fetch workflow + metadata via XHR for moved/new only
     print(f"\nStep 2: Batch-fetching details for {len(active_ids)} programs via XHR...")
@@ -1060,6 +1082,12 @@ def run_full_scan():
     print(f"\nStep 3: Processing results...")
     phase_start = time.time()
     changes = 0
+    # C3 signals consumed by `do_scan`'s targeted reference fetch.
+    completed_in_scan = []      # programs that just transitioned to complete
+    boston_curriculum_changed = []  # Boston-in-workflow programs whose
+                                    # curriculum_html differed from the DB
+                                    # (sentinel-mode deps may need refresh)
+    boston_refresh_set = set(boston_workflow_refresh_ids)
 
     for prog_id in active_ids:
         info = all_discovered[prog_id]
@@ -1167,11 +1195,34 @@ def run_full_scan():
                 record_change(scan_time, prog_id, old_step, current_step, 'step_change')
                 print(f"  CHANGE: {prog_name}: {old_step} -> {current_step}")
                 changes += 1
+            # C3: this program just transitioned from in-workflow to
+            # complete. Its own reference (last-approved history) gained
+            # a new version; flag for ref refresh.
+            if old_step and is_complete:
+                completed_in_scan.append(prog_id)
         elif changed and not old:
             record_change(scan_time, prog_id, '', current_step, 'new_program')
             changes += 1
 
+        # C2/C3: for Boston-in-workflow programs we re-fetched purely to
+        # keep curriculum_html current, detect whether the curriculum
+        # actually changed since last scan. If it did, the sentinel-mode
+        # reference for any non-Boston deployment pointing at this
+        # program now needs to be re-written from the fresh
+        # curriculum_html (handled by fetch_reference_curricula's
+        # sentinel block on every scan, so this is informational here —
+        # but we still log it for diagnostic visibility).
+        if prog_id in boston_refresh_set and old:
+            old_curr = (old.get('curriculum_html') or '')
+            new_curr = program_data.get('curriculum_html') or ''
+            if old_curr != new_curr:
+                boston_curriculum_changed.append(prog_id)
+
     phase_times['4_processing'] = time.time() - phase_start
+    if boston_curriculum_changed:
+        print(f"  C2: {len(boston_curriculum_changed)} Boston-in-workflow "
+              f"program(s) had curriculum_html change "
+              f"({len(boston_workflow_refresh_ids)} refreshed)")
 
     # ---- Exit verification: programs in DB at some step but not discovered
     # at any Approve Pages role this scan. Don't clear unconditionally —
@@ -1213,6 +1264,11 @@ def run_full_scan():
                     confirmed_complete,
                 )
             print(f"    Cleared {len(confirmed_complete)} (workflow div confirms complete)")
+            # C3: these programs just transitioned to complete; their own
+            # reference (last-approved history) needs a refresh, and any
+            # non-Boston deployment pointing at one of them needs its
+            # ref recomputed against the new last-approved version.
+            completed_in_scan.extend(confirmed_complete)
         if moved_to_step:
             with get_db() as conn:
                 for pid, step in moved_to_step.items():
@@ -1263,6 +1319,10 @@ def run_full_scan():
         'programs_active': len(active_ids),
         'changes': changes,
         'phase_times': phase_times,
+        # C3 signals consumed by `do_scan` to compute the targeted
+        # set for `fetch_reference_curricula`.
+        'completed_in_scan': completed_in_scan,
+        'boston_curriculum_changed': boston_curriculum_changed,
     }
 
 
@@ -1288,7 +1348,7 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
 
     Returns:
         {'scanned': int, 'completed': int, 'in_progress': int, 'skipped': int,
-         'new_completions': int}
+         'new_completions': int, 'new_completion_ids': list[int]}
     """
     from database import upsert_program, upsert_workflow_steps, get_db
 
@@ -1310,6 +1370,9 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
     in_progress = 0
     skipped = 0
     new_completions = 0
+    new_completion_ids = []  # C3: programs that just transitioned to complete
+                             # in this sweep — their reference (last-approved
+                             # history) needs a fresh fetch.
 
     for prog_id, detail in details.items():
         steps = detail.get('steps') or []
@@ -1395,6 +1458,7 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
             prev = existing.get(prog_id)
             if not prev or not (prev.get('completion_date') or ''):
                 new_completions += 1
+                new_completion_ids.append(prog_id)
         else:
             in_progress += 1
 
@@ -1419,6 +1483,7 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
         'in_progress': in_progress,
         'skipped': skipped,
         'new_completions': new_completions,
+        'new_completion_ids': new_completion_ids,
     }
 
 
@@ -2364,8 +2429,20 @@ def compute_db_fingerprint():
     return h.hexdigest()
 
 
-def fetch_reference_curricula(program_ids, batch_size=10):
+def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
     """Fetch the most recent historical version (reference curriculum) for each program.
+
+    Args:
+        program_ids: list of all program IDs in scope. Used to build the
+            counterpart map and run the boston_in_workflow sentinel block
+            (cheap DB writes) over the full set.
+        batch_size: parallelism for the JS-history fetch loop.
+        targeted_ids: C3 — optional set/list of program IDs to actually
+            round-trip via the JS-history fetch. Programs not in this
+            set are skipped from that loop (their existing reference
+            row is assumed still current). The sentinel block + the
+            self-reference synth fallback always run for the full set.
+            When None, every program is fetched (legacy behavior).
 
     Uses the CourseLeaf history API:
     /courseleaf/courseleaf.cgi?page=/programadmin/{id}/index.html&output=xml&step=showtcf&view=history&diffversion={versionId}
@@ -2446,6 +2523,16 @@ def fetch_reference_curricula(program_ids, batch_size=10):
 
     # Remove those programs from the JS-history path — already handled above.
     fetch_ids = [pid for pid in program_ids if pid not in boston_in_workflow]
+
+    # C3: if a targeted set was supplied, only fetch programs in it. This
+    # avoids the ~16 min round-trip cost of checking version_ids for the
+    # 1500+ programs whose reference can't have changed since last scan.
+    if targeted_ids is not None:
+        targeted_set = set(targeted_ids)
+        before = len(fetch_ids)
+        fetch_ids = [pid for pid in fetch_ids if pid in targeted_set]
+        print(f"  C3 targeting: fetching {len(fetch_ids)} of {before} "
+              f"(skipping {before - len(fetch_ids)} assumed-fresh)")
 
     print(f"\nFetching reference curricula for {len(fetch_ids)} programs (via CIM history)...")
     # Larger batches are OK now since we parallelize fetches within each batch
