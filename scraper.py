@@ -946,33 +946,46 @@ def check_courseleaf_session():
 
 
 def run_full_scan():
-    """Run a program scan: incremental fetch over complete role discovery.
+    """Run a program scan: hybrid discovery, incremental fetch.
 
-    Architecture:
-    - Phase A (discovery): iterate the LIVE Approve Pages dropdown
-      (~215 roles) to find every program currently at any role. This
-      catches programs at obscure college-specific roles that the
-      hardcoded ALL_ROLES (~46) would miss. Cost ~25 min; completeness
-      is non-negotiable for the dashboard.
-    - Diff vs DB current_step: classify into new / moved / unchanged.
-    - Phase B (detail fetch): batch-fetch HTML+XML only for new+moved
-      programs, plus Boston-in-workflow programs (C2 — re-fetched
-      every scan to keep curriculum_html current for the
-      reference-curriculum sentinel block). Unchanged non-Boston
-      programs are skipped — their DB rows stay as-is.
-    - Step 3: process fetched programs, apply the workflow-div
-      reconciliation policy (CLAUDE.md "Reconciliation: which source
-      wins"), record step transitions.
+    Architecture (Option C — see CLAUDE.md):
+    - Phase A discovery has three sources:
+        A1) Iterate ALL_ROLES (46 hardcoded common pipeline + college
+            roles) — fast (~4 min) because empty roles short-circuit.
+        A2) DB programs at OBSCURE roles (current_step ∉ ALL_ROLES) —
+            already known, force-fetch their workflow div via Phase B
+            to verify. Catches drift among the ~258 programs at the
+            ~169 narrow roles that ALL_ROLES doesn't include.
+        A3) ID probe (max_db_id, max_db_id + 50) — catches brand-new
+            programs at any role, including obscure ones. CIM assigns
+            sequential IDs.
+    - Diff vs DB current_step: classify A1-discovered into new / moved
+      / unchanged. A2 programs are unconditionally added to active set.
+      A3 IDs that return real data are ingested as new.
+    - Phase B (detail fetch): batch-fetch HTML+XML for the active set
+      (new + moved + Boston-in-workflow refresh from C2 + A2 +
+      A3 probe). Unchanged non-Boston programs at common roles are
+      skipped — their DB rows stay as-is.
+    - Step 3: process fetched programs, apply workflow-div
+      reconciliation (CLAUDE.md "Reconciliation: which source wins"),
+      record step transitions.
     - Exit verification: programs in DB at a step but not discovered
       get cross-checked against their workflow div before any
       destructive change.
 
+    Why not iterate the live ~215-role dropdown for completeness?
+    Empirically that costs ~87 min of active scan time because ~165
+    of those roles are empty most of the time and each takes 5-15s
+    of JS poll-until-stable. The hybrid (A1+A2+A3) above gives the
+    same coverage at <1/10 the cost.
+
     Limitations (accepted, see CLAUDE.md):
     - Stale-cache from Approve Pages that happens to match a stale
-      DB current_step is silently missed by this scan. The weekly
-      `sweep_all_program_ids` is the safety net (iterates every
-      program ID 1-2100 directly via the XML API, no Approve Pages
-      dependency).
+      DB current_step is silently missed by this scan.
+    - A3 assumes new programs get sequential IDs within max_db_id+50.
+      Wider gaps would only be caught by the weekly
+      `sweep_all_program_ids` (iterates every program ID 1-2100
+      directly via the XML API, no Approve Pages dependency).
 
     First run on an empty DB → everyone is 'new', so it behaves like a
     full fetch. Subsequent scans typically have 0–10 active programs.
@@ -989,24 +1002,34 @@ def run_full_scan():
     # Get existing programs to detect changes
     existing_programs = {p['id']: p for p in get_all_programs()}
 
-    # ---- Phase A: Discover all programs at every Approve Pages role.
-    # We iterate the LIVE dropdown (~215 roles) rather than the hardcoded
-    # ALL_ROLES (46) — the hardcoded list misses many one-off
-    # college-specific roles like "Program MI Graduate Curriculum
-    # Committee Chair" or "Program SH Graduate POLS Curriculum Committee
-    # Chair", and brand-new programs entering at one of those would
-    # otherwise only be discovered by the weekly `sweep_all_program_ids`
-    # — up to 7 days late. ALL_ROLES is kept as a fallback if the live
-    # dropdown can't be read (e.g., Approve Pages tab transient error).
-    # Cost: ~25 min instead of ~4 min, but completeness is non-negotiable.
+    # ---- Phase A: hybrid discovery (Option C, see CLAUDE.md).
+    #
+    # Discovery has three sources, designed to be both fast and complete:
+    #   A1) Iterate ALL_ROLES (46 hardcoded common roles) — covers
+    #       programs at the standard pipeline + canonical college roles.
+    #       Fast (~4 min) because empty roles short-circuit.
+    #   A2) DB programs whose `current_step` is at an OBSCURE role (one
+    #       of the ~169 narrow roles like "Program MI Graduate
+    #       Curriculum Committee Chair" not in ALL_ROLES) — we already
+    #       know these exist; just force-fetch them via Phase B to
+    #       verify their workflow div didn't change.
+    #   A3) ID probe (max_db_id, max_db_id + 50) — catches brand-new
+    #       programs at any role. CIM assigns IDs sequentially, so
+    #       this catches anything created since last scan.
+    #
+    # The previous version iterated the live ~215-role dropdown for
+    # completeness; that worked but cost ~87 min of active scan time
+    # because ~165 of those roles are empty and each takes 5-15s of
+    # JS poll-until-stable. The hybrid approach gives the same
+    # coverage at <1/10 the cost: A1 hits the populated roles, A2
+    # covers DB-known programs at obscure roles, A3 catches brand-new
+    # programs by ID.
     all_discovered = {}  # id -> {name, role, user}
+    all_roles_set = set(ALL_ROLES)
 
-    print("\nStep 1: Scanning Approve Pages for all roles...")
+    print("\nStep 1: Scanning Approve Pages for all roles (A1)...")
     phase_start = time.time()
-    roles_to_scan = get_all_approve_roles() or ALL_ROLES
-    print(f"  Iterating {len(roles_to_scan)} roles "
-          f"({'live dropdown' if roles_to_scan is not ALL_ROLES else 'fallback ALL_ROLES'})")
-    for role in roles_to_scan:
+    for role in ALL_ROLES:
         print(f"  Scanning role: {role}...")
         programs = scrape_approve_pages_role(role)
         if programs:
@@ -1022,9 +1045,42 @@ def run_full_scan():
                 }
             all_discovered[pid]['current_step'] = role
     phase_times['1_discovery'] = time.time() - phase_start
-    print(f"\n  Total unique programs discovered: {len(all_discovered)} "
-          f"(discovery took {phase_times['1_discovery']:.0f}s across "
-          f"{len(roles_to_scan)} roles)")
+    print(f"\n  A1 total: {len(all_discovered)} programs at common roles "
+          f"(took {phase_times['1_discovery']:.0f}s across {len(ALL_ROLES)} roles)")
+
+    # ---- A2: DB-known programs at obscure roles
+    # A program already in DB whose current_step is NOT in ALL_ROLES is at
+    # an obscure role we didn't iterate. Add it to all_discovered as if we
+    # had observed it, then force it into the active fetch set so Phase B
+    # re-verifies its workflow div. This means a program that moves
+    # between two obscure roles still gets caught (Phase B's reconciliation
+    # uses the workflow div, not Approve Pages).
+    obscure_db_ids = []
+    for pid, db in existing_programs.items():
+        db_step = db.get('current_step') or ''
+        if not db_step or db_step in all_roles_set:
+            continue
+        if pid in all_discovered:
+            continue  # something at an obscure role also showed up at a common role somehow
+        all_discovered[pid] = {
+            'name': db.get('name', ''),
+            'user': '',
+            'current_step': db_step,  # tentative; Phase B will reconcile
+        }
+        obscure_db_ids.append(pid)
+    if obscure_db_ids:
+        print(f"  A2: {len(obscure_db_ids)} DB programs at obscure roles "
+              f"(forced into active fetch)")
+
+    # ---- A3: ID probe for brand-new programs
+    # Probe the next 50 IDs above max known DB ID. New CIM programs get
+    # sequential IDs, so this catches anything created since last scan.
+    # Cost: ~50 fetches in parallel batches = ~10s.
+    max_db_id = max(existing_programs.keys()) if existing_programs else 0
+    probe_id_count = 50
+    probe_ids = list(range(max_db_id + 1, max_db_id + 1 + probe_id_count))
+    if probe_ids:
+        print(f"  A3: probing IDs {probe_ids[0]}..{probe_ids[-1]} for brand-new programs")
 
     # ---- Diff: classify discovered programs vs DB (cheap change detector)
     phase_start = time.time()
@@ -1061,13 +1117,19 @@ def run_full_scan():
         if db_campus == 'boston' or (not db_campus and not name_campus):
             boston_workflow_refresh_ids.append(pid)
 
-    active_ids = new_ids + moved_ids + boston_workflow_refresh_ids
+    # Active set = moved/new (from diff) + Boston refresh (C2) +
+    # obscure-role DB programs (A2 — always re-fetched to verify) +
+    # ID probe (A3 — most return empty, real ones added back via
+    # synthetic discovered entry below).
+    active_ids = list(set(new_ids + moved_ids + boston_workflow_refresh_ids
+                          + obscure_db_ids + probe_ids))
     phase_times['2_diff'] = time.time() - phase_start
     print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
           f"{len(moved_ids)} moved, {len(new_ids)} new, "
-          f"{len(boston_workflow_refresh_ids)} boston-in-workflow refresh (C2)")
-    print(f"  Phase B will fetch details for {len(active_ids)} programs "
-          f"({len(unchanged_ids) - len(boston_workflow_refresh_ids)} skipped)")
+          f"{len(boston_workflow_refresh_ids)} boston-in-workflow refresh (C2), "
+          f"{len(obscure_db_ids)} obscure-role refresh (A2), "
+          f"{len(probe_ids)} ID probe (A3)")
+    print(f"  Phase B will fetch details for {len(active_ids)} programs")
 
     # ---- Phase B: Batch-fetch workflow + metadata via XHR for moved/new only
     print(f"\nStep 2: Batch-fetching details for {len(active_ids)} programs via XHR...")
@@ -1083,6 +1145,38 @@ def run_full_scan():
               f"{phase_times['3_detail_fetch']:.1f}s ({per:.0f}ms each)")
     else:
         print(f"  No programs needed re-fetch.")
+
+    # ---- A3 follow-up: probe IDs that returned real data are brand-new
+    # programs. Synthesize all_discovered entries for them using their
+    # workflow div's current step (or empty for completed-on-arrival).
+    # IDs that returned no data (404, empty steps, html_error) are skipped.
+    a3_ingested = 0
+    for pid in probe_ids:
+        if pid in all_discovered:
+            continue
+        detail = details.get(pid)
+        if not detail:
+            continue
+        steps = detail.get('steps') or []
+        meta = detail.get('meta') or {}
+        if not steps and not meta.get('program_title'):
+            continue  # empty ID slot
+        current_step = ''
+        for s in steps:
+            if s.get('status') == 'current':
+                current_step = s.get('name') or ''
+                break
+        all_discovered[pid] = {
+            'name': meta.get('program_title') or '',
+            'user': '',
+            'current_step': current_step,
+        }
+        # Treat as a new program for change tracking.
+        if pid not in new_ids and pid not in moved_ids:
+            new_ids.append(pid)
+        a3_ingested += 1
+    if a3_ingested:
+        print(f"  A3 follow-up: ingested {a3_ingested} brand-new programs from ID probe")
 
     # Debug: log XML metadata from first program
     import sys
@@ -1114,6 +1208,11 @@ def run_full_scan():
     boston_refresh_set = set(boston_workflow_refresh_ids)
 
     for prog_id in active_ids:
+        # Skip probe IDs with no data — they're empty CIM ID slots, not
+        # programs. (Real programs from the probe were added back to
+        # all_discovered above.)
+        if prog_id not in all_discovered:
+            continue
         info = all_discovered[prog_id]
         prog_name = info['name']
         detail = details.get(prog_id, {'steps': [], 'meta': {}})
@@ -3360,12 +3459,60 @@ def get_all_approve_roles():
         return []
 
 
-def scrape_courses():
-    """Scrape all courses from Approve Pages across every dropdown role."""
+def get_course_common_roles():
+    """Return the set of course roles currently observed in the DB.
+
+    Used as the iteration source for `scrape_courses` (Option F).
+    Iterating only roles where DB courses currently sit drops the
+    course-discovery cost from ~25 min (215 roles, mostly empty) to
+    ~10 min (~80 populated roles). Roles NOT in this set are covered by:
+    - process_course_scans's A2 block (DB courses at obscure roles
+      forced into the active fetch set, so they're verified every
+      scan even though we didn't iterate their role)
+    - A3 ID probe (catches brand-new courses regardless of role —
+      CIM assigns sequential IDs)
+    - Course exit-verification block (catches courses that completed
+      or moved between obscure roles).
+
+    The cache self-heals: when a course lands at a never-before-seen
+    role, A3's ID probe ingests it with the new role, and from the
+    *next* scan onward that role is in the common set.
+    """
+    from database import get_db
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT current_step FROM courses "
+            "WHERE current_step IS NOT NULL AND current_step != ''"
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def scrape_courses(only_common=True):
+    """Scrape courses from Approve Pages.
+
+    Args:
+        only_common: when True (default), iterate only the roles
+            currently observed in the DB (~80, see
+            `get_course_common_roles`). When False, iterate the
+            full live dropdown (~215). The False path is for
+            cold-start (empty DB) or weekly safety sweeps.
+    """
     print("\n=== COURSE SCRAPING ===", flush=True)
 
-    roles = get_all_approve_roles()
-    print(f"  Scanning {len(roles)} roles for courses...", flush=True)
+    if only_common:
+        roles = get_course_common_roles()
+        if not roles:
+            # First run / empty DB: fall back to full live dropdown.
+            roles = get_all_approve_roles()
+            print(f"  No common roles in DB; falling back to live "
+                  f"dropdown ({len(roles)} roles)", flush=True)
+        else:
+            print(f"  Scanning {len(roles)} common roles "
+                  f"(Option F; full dropdown has ~215)", flush=True)
+    else:
+        roles = get_all_approve_roles()
+        print(f"  Scanning {len(roles)} roles "
+              f"(full dropdown — only_common=False)", flush=True)
 
     all_courses = {}  # id -> {id, name, current_step, user}
 
@@ -3596,13 +3743,19 @@ def batch_fetch_course_details(course_ids, batch_size=25):
 
 
 def process_course_scans(courses):
-    """Store scraped courses in the database, including workflow + college.
+    """Store scraped courses in the database (Option F: hybrid discovery).
 
-    Incremental: same Phase A+B gating as `run_full_scan`. Each scraped
-    course is classified vs the DB by current_step; only new+moved
-    courses get re-fetched. Unchanged courses' DB rows are preserved
-    as-is. See `run_full_scan` docstring and CLAUDE.md for the rationale
-    and known limitations.
+    Discovery has the same shape as run_full_scan's Phase A:
+      A1) `courses` arg is whatever scrape_courses iterated (common roles)
+      A2) DB courses whose current_step is at an obscure role (one not
+          in the iterated set) — force-fetched via Phase B to verify
+      A3) ID probe (max_course_id, max_course_id + 50) for brand-new
+          courses
+
+    Plus a courses-side exit-verification block: courses in DB at a
+    common role that didn't show up in `courses` (typically because
+    they completed mid-workflow and disappeared from Approve Pages)
+    get verified via workflow div before any destructive change.
     """
     print("\nProcessing course scans...", flush=True)
     now = datetime.now().isoformat()
@@ -3624,15 +3777,46 @@ def process_course_scans(courses):
             moved_ids.append(cid)
         else:
             unchanged_ids.append(cid)
-    active_ids = set(new_ids) | set(moved_ids)
+
+    # ---- A2: DB courses at obscure roles (those NOT iterated by
+    # scrape_courses this run) — force-fetch via Phase B.
+    iterated_roles = {c.get('current_step', '') for c in courses if c.get('current_step')}
+    obscure_db_ids = []
+    for cid, db in existing.items():
+        db_step = db.get('current_step') or ''
+        if not db_step or db_step in iterated_roles:
+            continue
+        obscure_db_ids.append(cid)
+    if obscure_db_ids:
+        print(f"  A2: {len(obscure_db_ids)} DB courses at obscure roles "
+              f"(forced into active fetch)", flush=True)
+
+    # ---- A3: ID probe for brand-new courses.
+    # Max course ID is large (~24000); probe next 50 IDs for new courses.
+    max_db_cid = 0
+    for cid in existing.keys():
+        try:
+            n = int(cid)
+            if n > max_db_cid:
+                max_db_cid = n
+        except (ValueError, TypeError):
+            continue
+    probe_id_count = 50
+    probe_cids = [str(n) for n in range(max_db_cid + 1, max_db_cid + 1 + probe_id_count)]
+    if probe_cids:
+        print(f"  A3: probing course IDs {probe_cids[0]}..{probe_cids[-1]} "
+              f"for brand-new courses", flush=True)
+
+    active_ids = set(new_ids) | set(moved_ids) | set(obscure_db_ids) | set(probe_cids)
     phase_times['1_diff'] = time.time() - phase_start
     print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
-          f"{len(moved_ids)} moved, {len(new_ids)} new "
-          f"(skipping {len(unchanged_ids)})", flush=True)
+          f"{len(moved_ids)} moved, {len(new_ids)} new, "
+          f"{len(obscure_db_ids)} obscure-role refresh (A2), "
+          f"{len(probe_cids)} ID probe (A3)", flush=True)
 
-    # ---- Phase B: Batch-fetch details only for new+moved courses
+    # ---- Phase B: Batch-fetch details only for active courses
     phase_start = time.time()
-    course_ids = [cid for cid in (c['id'] for c in courses) if cid in active_ids]
+    course_ids = list(active_ids)
     details = batch_fetch_course_details(course_ids) if course_ids else {}
     phase_times['2_detail_fetch'] = time.time() - phase_start
     if details:
@@ -3641,6 +3825,56 @@ def process_course_scans(courses):
               f"{phase_times['2_detail_fetch']:.1f}s ({per:.0f}ms each)", flush=True)
     else:
         print(f"  No courses needed re-fetch.", flush=True)
+
+    # ---- A3 follow-up: probe IDs that returned real data are brand-new
+    # courses. Synthesize entries in the iterating list so Step 3 below
+    # processes them. IDs returning empty data are skipped (empty CIM ID
+    # slot). For obscure-role A2 courses, synthesize with their DB
+    # current_step as the live step (Phase B's reconciliation will
+    # adjust based on workflow div).
+    courses_by_id = {c['id']: c for c in courses}
+    a3_ingested = 0
+    for cid in probe_cids:
+        if cid in courses_by_id:
+            continue
+        detail = details.get(cid)
+        if not detail:
+            continue
+        steps = detail.get('steps') or []
+        meta = detail.get('meta') or {}
+        if not steps and not meta.get('course_title'):
+            continue  # empty ID slot
+        current_step = ''
+        for s in steps:
+            if s.get('status') == 'current':
+                current_step = s.get('name') or ''
+                break
+        # Try to get name from XML or workflow
+        name = meta.get('course_title') or cid
+        courses_by_id[cid] = {
+            'id': cid,
+            'name': name,
+            'user': '',
+            'current_step': current_step,
+        }
+        if cid not in new_ids and cid not in moved_ids:
+            new_ids.append(cid)
+        a3_ingested += 1
+    if a3_ingested:
+        print(f"  A3 follow-up: ingested {a3_ingested} brand-new courses from ID probe", flush=True)
+
+    # For obscure-role A2 courses, synthesize entries from DB so Step 3
+    # has the metadata it needs.
+    for cid in obscure_db_ids:
+        if cid in courses_by_id:
+            continue
+        db = existing[cid]
+        courses_by_id[cid] = {
+            'id': cid,
+            'name': db.get('title') or cid,
+            'user': '',
+            'current_step': db.get('current_step') or '',
+        }
 
     # Debug: dump info for first few courses missing workflow
     missing_dumped = 0
@@ -3676,10 +3910,11 @@ def process_course_scans(courses):
 
     # ---- Step 3: Process fetched results. Only iterates active courses;
     # unchanged courses' DB rows are intentionally left untouched.
+    # Iterates `courses_by_id` (which now includes A2 + A3 synthetic
+    # entries) instead of just the original `courses` list.
     phase_start = time.time()
     with_workflow = 0
-    for c in courses:
-        cid = c['id']
+    for cid, c in list(courses_by_id.items()):
         if cid not in active_ids:
             continue
         name = c['name']
@@ -3781,17 +4016,82 @@ def process_course_scans(courses):
 
     phase_times['3_processing'] = time.time() - phase_start
 
-    record_course_scan(now, len(courses), with_workflow, changes)
+    # ---- Exit verification (Option F): courses in DB at a common role
+    # but not discovered (and not in active_ids — i.e., they didn't
+    # appear in scrape_courses' output AND aren't being force-fetched
+    # via A2). Most likely they completed mid-workflow and disappeared
+    # from Approve Pages. Verify via workflow div before any
+    # destructive change — same positive-evidence policy as programs.
+    phase_start = time.time()
+    discovered_ids = {c['id'] for c in courses}
+    courses_to_verify = []
+    for cid, db in existing.items():
+        if not (db.get('current_step') or ''):
+            continue
+        if cid in discovered_ids or cid in active_ids:
+            continue
+        courses_to_verify.append(cid)
+
+    confirmed_complete = []
+    completed_in_scan = []
+    if courses_to_verify:
+        print(f"  Exit verification: {len(courses_to_verify)} candidates "
+              f"(in DB at a step but not discovered)", flush=True)
+        verify_details = batch_fetch_course_details(courses_to_verify, batch_size=25)
+        moved_to_step = {}
+        unverifiable = 0
+        for cid, d in verify_details.items():
+            steps = d.get('steps') or []
+            if not steps:
+                unverifiable += 1
+                continue
+            current = next(
+                (s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if current is None:
+                confirmed_complete.append(cid)
+            elif current != (existing[cid].get('current_step') or ''):
+                moved_to_step[cid] = current
+        if confirmed_complete:
+            from database import get_db
+            with get_db() as conn:
+                placeholders = ','.join('?' * len(confirmed_complete))
+                conn.execute(
+                    f"UPDATE courses SET current_step = '', "
+                    f"current_approver_emails = '', "
+                    f"completion_date = CASE WHEN completion_date != '' "
+                    f"THEN completion_date ELSE ? END "
+                    f"WHERE id IN ({placeholders})",
+                    [now] + confirmed_complete,
+                )
+            completed_in_scan.extend(confirmed_complete)
+            print(f"    Cleared {len(confirmed_complete)} (workflow div confirms complete)",
+                  flush=True)
+        if moved_to_step:
+            from database import get_db
+            with get_db() as conn:
+                for cid, step in moved_to_step.items():
+                    conn.execute(
+                        "UPDATE courses SET current_step = ? WHERE id = ?",
+                        (step, cid))
+            print(f"    Updated {len(moved_to_step)} to live workflow-div step",
+                  flush=True)
+        if unverifiable:
+            print(f"    Left {unverifiable} unchanged (workflow div fetch failed)",
+                  flush=True)
+    phase_times['4_exit_verification'] = time.time() - phase_start
+
+    record_course_scan(now, len(courses_by_id), with_workflow, changes)
     total_time = time.time() - overall_start
-    print(f"  Courses processed: {len(courses)} discovered, "
-          f"{len(active_ids)} re-fetched, {len(unchanged_ids)} skipped, "
+    print(f"  Courses processed: {len(courses_by_id)} discovered "
+          f"({len(courses)} from Approve Pages + {len(courses_by_id) - len(courses)} "
+          f"from A2/A3), {len(active_ids)} active, "
           f"with workflow: {with_workflow}, changes: {changes}", flush=True)
     print(f"  Course phase timings:", flush=True)
     for name in sorted(phase_times.keys()):
         secs = phase_times[name]
         print(f"    {name:.<24s} {secs:6.1f}s ({secs/max(total_time,1)*100:4.1f}%)", flush=True)
     print(f"  Course phase total: {total_time:.0f}s ({total_time/60:.1f} min)", flush=True)
-    return len(courses), with_workflow, changes
+    return len(courses_by_id), with_workflow, changes
 
 
 def run_course_scan():
