@@ -946,26 +946,36 @@ def check_courseleaf_session():
 
 
 def run_full_scan():
-    """Run a program scan: incremental by default.
+    """Run a program scan: incremental fetch over complete role discovery.
 
-    Architecture: Phase A discovery (Approve Pages role iteration) is the
-    cheap change-detector. It tells us each program's *live* role. We diff
-    that against the DB's stored current_step and only do the expensive
-    per-program detail fetch (Phase B) for programs that actually moved
-    or are brand new. Unchanged programs are not re-fetched and their DB
-    rows stay as-is.
+    Architecture:
+    - Phase A (discovery): iterate the LIVE Approve Pages dropdown
+      (~215 roles) to find every program currently at any role. This
+      catches programs at obscure college-specific roles that the
+      hardcoded ALL_ROLES (~46) would miss. Cost ~25 min; completeness
+      is non-negotiable for the dashboard.
+    - Diff vs DB current_step: classify into new / moved / unchanged.
+    - Phase B (detail fetch): batch-fetch HTML+XML only for new+moved
+      programs, plus Boston-in-workflow programs (C2 — re-fetched
+      every scan to keep curriculum_html current for the
+      reference-curriculum sentinel block). Unchanged non-Boston
+      programs are skipped — their DB rows stay as-is.
+    - Step 3: process fetched programs, apply the workflow-div
+      reconciliation policy (CLAUDE.md "Reconciliation: which source
+      wins"), record step transitions.
+    - Exit verification: programs in DB at a step but not discovered
+      get cross-checked against their workflow div before any
+      destructive change.
 
-    Limitations of incremental mode (accepted, see CLAUDE.md):
-    - Curriculum HTML edits at unchanged steps are not detected here.
-    - The Boston-in-workflow → non-Boston reference refresh is handled
-      in `fetch_reference_curricula`, not here.
-    - Stale-cache from Approve Pages that happens to match a stale DB
-      current_step is silently missed by this scan. The weekly
-      `sweep_all_program_ids` is the safety net (iterates every program
-      ID 1-2100 directly via the XML API, no Approve Pages dependency).
+    Limitations (accepted, see CLAUDE.md):
+    - Stale-cache from Approve Pages that happens to match a stale
+      DB current_step is silently missed by this scan. The weekly
+      `sweep_all_program_ids` is the safety net (iterates every
+      program ID 1-2100 directly via the XML API, no Approve Pages
+      dependency).
 
     First run on an empty DB → everyone is 'new', so it behaves like a
-    full scan. Subsequent scans typically have 0–10 active programs.
+    full fetch. Subsequent scans typically have 0–10 active programs.
     """
     print(f"\n{'='*60}")
     print(f"Starting full scan at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -979,15 +989,28 @@ def run_full_scan():
     # Get existing programs to detect changes
     existing_programs = {p['id']: p for p in get_all_programs()}
 
-    # ---- Phase A: Discover all programs at tracked roles via Approve Pages
+    # ---- Phase A: Discover all programs at every Approve Pages role.
+    # We iterate the LIVE dropdown (~215 roles) rather than the hardcoded
+    # ALL_ROLES (46) — the hardcoded list misses many one-off
+    # college-specific roles like "Program MI Graduate Curriculum
+    # Committee Chair" or "Program SH Graduate POLS Curriculum Committee
+    # Chair", and brand-new programs entering at one of those would
+    # otherwise only be discovered by the weekly `sweep_all_program_ids`
+    # — up to 7 days late. ALL_ROLES is kept as a fallback if the live
+    # dropdown can't be read (e.g., Approve Pages tab transient error).
+    # Cost: ~25 min instead of ~4 min, but completeness is non-negotiable.
     all_discovered = {}  # id -> {name, role, user}
 
     print("\nStep 1: Scanning Approve Pages for all roles...")
     phase_start = time.time()
-    for role in ALL_ROLES:
+    roles_to_scan = get_all_approve_roles() or ALL_ROLES
+    print(f"  Iterating {len(roles_to_scan)} roles "
+          f"({'live dropdown' if roles_to_scan is not ALL_ROLES else 'fallback ALL_ROLES'})")
+    for role in roles_to_scan:
         print(f"  Scanning role: {role}...")
         programs = scrape_approve_pages_role(role)
-        print(f"    Found {len(programs)} programs")
+        if programs:
+            print(f"    Found {len(programs)} programs")
         for p in programs:
             pid = p['id']
             if pid not in all_discovered:
@@ -1000,7 +1023,8 @@ def run_full_scan():
             all_discovered[pid]['current_step'] = role
     phase_times['1_discovery'] = time.time() - phase_start
     print(f"\n  Total unique programs discovered: {len(all_discovered)} "
-          f"(discovery took {phase_times['1_discovery']:.0f}s)")
+          f"(discovery took {phase_times['1_discovery']:.0f}s across "
+          f"{len(roles_to_scan)} roles)")
 
     # ---- Diff: classify discovered programs vs DB (cheap change detector)
     phase_start = time.time()
@@ -1288,16 +1312,18 @@ def run_full_scan():
     # changes when the whole pipeline is actually done, not when this
     # first phase completes.
 
-    # NOTE: The trailing `heal_stale_program_steps` call was removed
-    # after the first incremental cycle confirmed it was redundant.
-    # Empirically (8 May 2026 scan) it spent 73 min cross-fetching all
-    # 806 live programs, made 49 in-memory role corrections, and ended
-    # with `warnings=0` — i.e., it didn't change a single DB row,
-    # because the main scan's workflow-div reconciliation had already
-    # handled every "moved" case. The weekly `sweep_all_program_ids`
-    # remains as the deep safety net for any drift the incremental
-    # diff misses (it iterates every program ID 1-2100, more thorough
-    # than heal).
+    # NOTE: The trailing `heal_stale_program_steps` call was removed.
+    # That function did two things: (1) iterate the live ~215 Approve
+    # Pages roles for completeness, and (2) cross-check every live
+    # candidate against its per-program workflow div (the 73-min loop
+    # that motivated removal). After we observed cross-check made 49
+    # in-memory corrections but 0 DB changes (the main scan's
+    # reconciliation policy already covered them), it became clear the
+    # cross-check was redundant. We then folded heal's discovery
+    # iteration directly into Phase A above (run the live 215-role
+    # dropdown instead of the hardcoded 46) so completeness is
+    # preserved without a redundant second pass. The weekly
+    # `sweep_all_program_ids` remains as the deeper safety net.
 
     total_time = time.time() - overall_start
     print(f"\n{'='*60}")
