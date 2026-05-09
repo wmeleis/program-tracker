@@ -42,15 +42,16 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 ### Scheduled Execution
 The system runs in three cadences: a daily fast "scan" on weekdays, an on-demand "Update Now" button (also fast), and a weekly deep "heal" on Sunday morning.
 
-**Daily fast scan — launchd, weekdays**
+**Frequent fast scan — launchd, every 30 min on weekdays 6am–9pm PT**
 - **Agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
-- **Schedule:** `StartCalendarInterval` at 9am local (single firing). macOS reruns missed firings on wake.
+- **Schedule:** `StartCalendarInterval` array of 30 entries — fires at 6:00, 6:30, 7:00, ..., 20:30 local (PT). macOS reruns missed firings on wake.
 - **Runs:** `update.sh`, which gates on:
-  1. Mon–Fri ET (weekends skipped).
-  2. Inside the 9am–8pm ET window.
-  3. At least 20 hours since the last successful scan (`data/last_scan_unix`) — once-daily, so the gap dedupe absorbs any launchd retries.
+  1. Mon–Fri PT (weekends skipped).
+  2. Inside the 6am–9pm PT window (exclusive on 9pm — last allowed start is 8:59 pm).
+  3. At least 25 minutes since the last successful scan (`data/last_scan_unix`) — under the 30-min cadence so successive scheduled firings work, but close-together wake-up retries dedupe.
   4. The configured browser (`BROWSER_APP`, default Chrome) running with a live CourseLeaf session.
-- **What it does:** triggers `/api/scan/trigger` (Options C+F: hybrid discovery + incremental fetch + targeted reference + 24h-cached regulatory + fingerprint-gated export). ~22 min on a typical day.
+- **What it does:** triggers `/api/scan/trigger` (Options C+F: hybrid discovery + incremental fetch + targeted reference + 24h-cached regulatory + fingerprint-gated export). ~22 min on a typical day. Most firings will skip the export entirely (C1 fingerprint check) when nothing actually changed since last scan.
+- **Why every 30 min:** the scan path doesn't consume Claude API usage (it's all local AppleScript→Chrome→CourseLeaf), and Options C+F's fingerprint-gated export keeps the pure cost low when there's no real change. Frequent firings give near-real-time dashboard freshness during the workday with negligible overhead.
 
 **Update Now button — on-demand, fast**
 - The dashboard's "Update Now" button calls `/api/scan/trigger` (the same fast path as the daily scheduled scan). ~22 min.

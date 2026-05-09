@@ -15,36 +15,38 @@
 cd /Users/wmeleis/committees/nu-docs/Curriculum/CIM
 LOG="data/update.log"
 LAST_SCAN_FILE="data/last_scan_unix"
-WINDOW_START_HOUR=9
-WINDOW_END_HOUR=20  # exclusive: scans can start up through 7:59 pm ET
-MIN_GAP_SECONDS=$((20 * 3600))  # once-daily; 20h catches any launchd retries after wake
+WINDOW_TZ="America/Los_Angeles"  # PT
+WINDOW_START_HOUR=6              # 6am PT inclusive
+WINDOW_END_HOUR=21               # 9pm PT exclusive (last allowed start: 8:59 pm PT)
+MIN_GAP_SECONDS=1500             # 25 min — under the 30-min launchd cadence
+                                 # so successive scheduled firings work, but
+                                 # close-together wake-up retries dedupe.
 
 echo "$(date): Starting update" >> "$LOG"
 
-# Skip weekends (ET). Saturday=6, Sunday=7 (ISO).
-DOW_ET=$(TZ=America/New_York date +%u)
-if [ "$DOW_ET" -ge 6 ]; then
-    echo "$(date): Weekend (dow=$DOW_ET ET), skipping" >> "$LOG"
+# Skip weekends (PT). Saturday=6, Sunday=7 (ISO).
+DOW_PT=$(TZ="$WINDOW_TZ" date +%u)
+if [ "$DOW_PT" -ge 6 ]; then
+    echo "$(date): Weekend (dow=$DOW_PT PT), skipping" >> "$LOG"
     exit 0
 fi
 
-# Only scan within working hours (ET).
-HOUR_ET=$(TZ=America/New_York date +%H)
-# Strip a leading zero so bash arithmetic treats e.g. "09" as decimal 9.
-HOUR_ET=$((10#$HOUR_ET))
-if [ "$HOUR_ET" -lt "$WINDOW_START_HOUR" ] || [ "$HOUR_ET" -ge "$WINDOW_END_HOUR" ]; then
-    echo "$(date): Outside ${WINDOW_START_HOUR}am-${WINDOW_END_HOUR}:00 ET window (hour=$HOUR_ET), skipping" >> "$LOG"
+# Only scan within working hours (PT).
+HOUR_PT=$(TZ="$WINDOW_TZ" date +%H)
+HOUR_PT=$((10#$HOUR_PT))
+if [ "$HOUR_PT" -lt "$WINDOW_START_HOUR" ] || [ "$HOUR_PT" -ge "$WINDOW_END_HOUR" ]; then
+    echo "$(date): Outside ${WINDOW_START_HOUR}am-${WINDOW_END_HOUR}:00 PT window (hour=$HOUR_PT), skipping" >> "$LOG"
     exit 0
 fi
 
-# Don't scan if a previous scan finished less than 4 hours ago.
+# Don't scan if a previous scan finished too recently.
 if [ -f "$LAST_SCAN_FILE" ]; then
     LAST=$(cat "$LAST_SCAN_FILE" 2>/dev/null || echo 0)
     NOW=$(date +%s)
     GAP=$((NOW - LAST))
     if [ "$GAP" -lt "$MIN_GAP_SECONDS" ]; then
         MINS=$((GAP / 60))
-        echo "$(date): Last scan ${MINS}min ago (< 4h), skipping" >> "$LOG"
+        echo "$(date): Last scan ${MINS}min ago (< $((MIN_GAP_SECONDS / 60))min), skipping" >> "$LOG"
         exit 0
     fi
 fi
