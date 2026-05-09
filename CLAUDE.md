@@ -36,24 +36,35 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 | `static/app.js` | Frontend: pipeline bar, filters (type/proposal/smart views/college/campus/approver/step/search), sortable table with expandable workflow detail rows. |
 | `static/style.css` | Dashboard styling. Colored left borders: green=new, blue=change, red=inactivation. |
 | `templates/dashboard.html` | HTML template used by both Flask and static export. |
-| `update.sh` | Launched by launchd. Checks the configured browser (`BROWSER_APP`, default Chrome) + session validity, starts Flask if needed, triggers scan, waits for completion. Sends macOS notifications. |
+| `update.sh` | Launched by launchd weekday-mornings. Checks the configured browser (`BROWSER_APP`, default Chrome) + session validity, starts Flask if needed, triggers `/api/scan/trigger` (Options C+F fast scan, ~22 min), waits for completion. Sends macOS notifications. |
+| `weekly_heal.sh` | Launched by launchd Sunday 8am. Same Chrome+session checks as `update.sh` but triggers `/api/heal` instead — the deep ~70 min cross-check. Gates on `data/last_heal_unix` (5-day cooldown) so missed Sunday firings don't double-fire. |
 
 ### Scheduled Execution
-The system runs in two cadences: a once-daily heavy "full scan" via launchd, and a fast on-demand "Update Now" heal (the **Update Now** button in the dashboard or `POST /api/heal`).
+The system runs in three cadences: a daily fast "scan" on weekdays, an on-demand "Update Now" button (also fast), and a weekly deep "heal" on Sunday morning.
 
-**Full scan — launchd, once daily**
+**Daily fast scan — launchd, weekdays**
 - **Agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
-- **Schedule:** `StartCalendarInterval` at 9am ET (single firing). macOS reruns missed firings on wake.
+- **Schedule:** `StartCalendarInterval` at 9am local (single firing). macOS reruns missed firings on wake.
 - **Runs:** `update.sh`, which gates on:
   1. Mon–Fri ET (weekends skipped).
   2. Inside the 9am–8pm ET window.
   3. At least 20 hours since the last successful scan (`data/last_scan_unix`) — once-daily, so the gap dedupe absorbs any launchd retries.
-  4. The configured browser (`BROWSER_APP`, default Edge under launchd) running with a live CourseLeaf session.
-- **What the full scan does:** discovers brand-new program/course IDs via Approve Pages, re-fetches reference + regulatory data, runs the historical sweep when due (≥7 days), exports + pushes to GitHub Pages. Takes 30–45 min.
+  4. The configured browser (`BROWSER_APP`, default Chrome) running with a live CourseLeaf session.
+- **What it does:** triggers `/api/scan/trigger` (Options C+F: hybrid discovery + incremental fetch + targeted reference + 24h-cached regulatory + fingerprint-gated export). ~22 min on a typical day.
 
-**Update Now (quick heal) — on-demand**
-- The dashboard's "Update Now" button (and `POST /api/heal`) runs the deep-refresh path: iterate the live ~215 roles, then cross-check every observed program/course's workflow div. Slow (~70+ min for "both" scope). The everyday automated scan-trigger path is faster (~22 min) and more comprehensive — Update Now is the manual "force a deep refresh now" hook.
-- See "Heal: mirror DB to live Approve Pages" below for the precise semantics.
+**Update Now button — on-demand, fast**
+- The dashboard's "Update Now" button calls `/api/scan/trigger` (the same fast path as the daily scheduled scan). ~22 min.
+- Pre-Options C+F it called `/api/heal` and was the slow path; that was switched on 9 May 2026 once C+F made scan-trigger both faster and more comprehensive.
+
+**Weekly deep heal — launchd, Sunday morning**
+- **Agent:** `~/Library/LaunchAgents/com.programtracker.weeklyheal.plist`
+- **Schedule:** `StartCalendarInterval` Weekday=0 (Sunday), Hour=8, Minute=0 — Sunday 8am local. macOS reruns missed firings on wake.
+- **Runs:** `weekly_heal.sh`, which gates on:
+  1. At least 5 days since last successful heal (`data/last_heal_unix`) — slack below 7d so a missed Sunday firing still works on subsequent re-fires.
+  2. Chrome running with a live CourseLeaf session.
+  3. No scan currently in progress (skip if so; will retry next firing).
+- **What it does:** triggers `/api/heal` with `{scope: "both", deploy: true}` — iterates the live ~215 roles, cross-checks every observed program/course/catalog entry against its workflow div, then exports + pushes. ~70+ min. Catches the rare drift case where DB and Approve Pages BOTH disagree with workflow div (the stale-cache-matches-stale-DB case Options C+F can't detect).
+- **Why Sunday:** explicitly chosen so the slow scan doesn't impact weekday usage — runs while the user typically isn't at the computer. If the laptop is asleep through Sunday, macOS fires the missed slot on next wake; the 5-day gap check ensures it doesn't double-fire.
 
 ### How the Scraper Works
 
@@ -261,12 +272,16 @@ git add docs/ && git commit -m "Manual update" && git push
 # Reset database
 rm data/tracker.db && python3 -c "from database import init_db; init_db()"
 
-# Reload launchd agent
+# Reload launchd agents
 launchctl unload ~/Library/LaunchAgents/com.programtracker.update.plist
 launchctl load ~/Library/LaunchAgents/com.programtracker.update.plist
+launchctl unload ~/Library/LaunchAgents/com.programtracker.weeklyheal.plist
+launchctl load ~/Library/LaunchAgents/com.programtracker.weeklyheal.plist
 
 # Check launchd logs
-cat data/launchd.log
+cat data/launchd.log         # daily scan
+cat data/launchd_heal.log    # weekly Sunday heal
+cat data/heal.log            # what weekly_heal.sh did each firing
 ```
 
 ## Recent Features (added after initial build)
