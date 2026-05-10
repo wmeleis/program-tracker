@@ -43,7 +43,10 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 
 - **Agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
 - **Schedule:** `StartInterval` 300 sec (5 min). launchd fires `update.sh` every 5 minutes, 24/7.
-- **What `update.sh` does:** quick preflight — inside the 6am–9pm PT window (exclusive on 9pm), Chrome running, CourseLeaf session valid, no scan currently in progress. If all four pass, triggers `/api/scan/trigger`; otherwise exits silently. Net effect: scans run back-to-back as fast as the system completes them during the 15-hour daily window, paused only when Chrome is closed or the session expires.
+- **What `update.sh` does:** preflight — inside the 6am–9pm PT window (exclusive on 9pm); on weekends, at least 3 hours since last scan; Chrome running; CourseLeaf session valid; no scan currently in progress. If all checks pass, triggers `/api/scan/trigger`; otherwise exits silently.
+- **Effective cadence:**
+  - **Mon–Fri**: continuous back-to-back scans during 6am–9pm PT (~one completed scan per hour given ~50 min scan duration).
+  - **Sat–Sun**: every 3 hours during 6am–9pm PT (5 firings/day max: 6am, 9am, 12pm, 3pm, 6pm).
 - **What each scan does:** force-fetches the workflow div for every active program and course, regardless of whether Approve Pages says they moved. The workflow div is the authoritative source, so this guarantees zero missed step transitions per scan. ~50 min per scan during normal operation.
 - **Update Now button:** the dashboard's "Update Now" button calls the same `/api/scan/trigger` endpoint, so it does exactly what the scheduled scans do. Useful only when you want to force the very next scan to start sooner than the next 5-min launchd firing.
 - **No weekday/weekend distinction, no separate heal cadence.** Daily 6am–9pm PT window only. If Chrome+session are valid, scans run. If not, they don't. macOS sleep is naturally handled — scans pause while the laptop sleeps and resume on wake.

@@ -1,33 +1,49 @@
 #!/bin/bash
 # Continuous-mode update script for Program Approval Tracker.
-# launchd fires this every 5 minutes, 24/7. Each invocation either
-# triggers a new scan (if none is running, and we're inside the
-# 6am-9pm PT window) or skips silently. Net effect: scans run
-# back-to-back as fast as the system can complete them, every
-# day, during the 15-hour active window.
+# launchd fires this every 5 minutes, 24/7.
+#
+# Cadence:
+#   Mon-Fri: continuous (back-to-back scans). Each scan ~50 min
+#            so roughly one finished scan every hour.
+#   Sat-Sun: every 3 hours (3h gap between scan starts).
+#
+# Both apply only inside the 6am-9pm PT window. Outside the
+# window, or when Chrome/session is unavailable, the script
+# exits silently (a millisecond no-op).
 #
 # Each scan force-fetches the workflow div for every active program
-# and course (100% accuracy per scan). Cost: ~50 min per scan, so
-# roughly one finished scan every hour during the active window.
-#
-# Runs IFF: (1) inside the 6am-9pm PT window, (2) Chrome is running
-# with a live CourseLeaf session, (3) no scan currently running.
+# and course (100% accuracy per scan).
 
 cd /Users/wmeleis/committees/nu-docs/Curriculum/CIM
 LOG="data/update.log"
 LAST_SCAN_FILE="data/last_scan_unix"
 WINDOW_TZ="America/Los_Angeles"
-WINDOW_START_HOUR=6   # 6am PT inclusive
-WINDOW_END_HOUR=21    # 9pm PT exclusive (last allowed start: 8:59 pm PT)
+WINDOW_START_HOUR=6     # 6am PT inclusive
+WINDOW_END_HOUR=21      # 9pm PT exclusive (last allowed start: 8:59 pm PT)
+WEEKEND_GAP_SECONDS=$((3 * 3600))  # weekends: scans run every 3 hours
 
 echo "$(date): Starting update" >> "$LOG"
 
-# Time-of-day window — scans run continuously 6am-9pm PT every day.
+# Time-of-day window — applies every day.
 HOUR_PT=$(TZ="$WINDOW_TZ" date +%H)
 HOUR_PT=$((10#$HOUR_PT))
 if [ "$HOUR_PT" -lt "$WINDOW_START_HOUR" ] || [ "$HOUR_PT" -ge "$WINDOW_END_HOUR" ]; then
     echo "$(date): Outside ${WINDOW_START_HOUR}am-${WINDOW_END_HOUR}:00 PT window (hour=$HOUR_PT), skipping" >> "$LOG"
     exit 0
+fi
+
+# Weekend cadence: at most one scan per 3 hours. Weekday cadence:
+# continuous (no gap; the running-scan check below handles dedup).
+DOW_PT=$(TZ="$WINDOW_TZ" date +%u)
+if [ "$DOW_PT" -ge 6 ] && [ -f "$LAST_SCAN_FILE" ]; then
+    LAST=$(cat "$LAST_SCAN_FILE" 2>/dev/null || echo 0)
+    NOW=$(date +%s)
+    GAP=$((NOW - LAST))
+    if [ "$GAP" -lt "$WEEKEND_GAP_SECONDS" ]; then
+        MINS=$((GAP / 60))
+        echo "$(date): Weekend: last scan ${MINS}min ago (< $((WEEKEND_GAP_SECONDS / 60))min), skipping" >> "$LOG"
+        exit 0
+    fi
 fi
 
 # Browser must be running with a valid CourseLeaf session.
