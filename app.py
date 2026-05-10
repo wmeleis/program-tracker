@@ -496,6 +496,58 @@ def api_scan_trigger():
             'detail': session.get('detail', 'CourseLeaf session invalid')
         }), 503
 
+    def do_quick_role_update(label='quick role update'):
+        """Force-fetch every DB-active program and course's workflow div,
+        reconcile DB, and push to GitHub Pages if anything changed.
+        Called multiple times throughout a thorough scan to publish
+        role changes mid-scan instead of waiting until the end. ~3-4
+        min per call. C1 fingerprint check makes this a no-op (no push)
+        when no role changed since the last call.
+        """
+        from scraper import (
+            run_full_scan as _scraper_run_full_scan,
+            process_course_scans as _scraper_process_course_scans,
+            compute_db_fingerprint,
+        )
+        print(f"\n>>> {label.upper()} — START", flush=True)
+        scan_status['phase'] = f'{label} (programs)…'
+        try:
+            _scraper_run_full_scan(force_fetch_only=True)
+        except Exception as e:
+            print(f">>> {label} (programs) error: {e}", flush=True)
+        scan_status['phase'] = f'{label} (courses)…'
+        try:
+            _scraper_process_course_scans([], force_fetch_only=True)
+        except Exception as e:
+            print(f">>> {label} (courses) error: {e}", flush=True)
+        # C1: export + push if and only if DB content changed.
+        try:
+            import subprocess
+            cwd = os.path.dirname(os.path.abspath(__file__))
+            fp_path = os.path.join(cwd, 'data', 'last_export_fingerprint')
+            current_fp = compute_db_fingerprint()
+            prev_fp = ''
+            if os.path.exists(fp_path):
+                try:
+                    with open(fp_path) as f:
+                        prev_fp = f.read().strip()
+                except Exception:
+                    prev_fp = ''
+            if current_fp != prev_fp:
+                scan_status['phase'] = f'{label} (publishing)…'
+                subprocess.run(['python3', 'export_static.py'], cwd=cwd)
+                subprocess.run(['git', 'add', 'docs/'], cwd=cwd)
+                subprocess.run(['git', 'commit', '-m',
+                                f'Quick role update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd)
+                subprocess.run(['git', 'push'], cwd=cwd)
+                with open(fp_path, 'w') as f:
+                    f.write(current_fp)
+                print(f">>> {label.upper()} pushed (fp {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)", flush=True)
+            else:
+                print(f">>> {label.upper()} no DB changes (fp unchanged)", flush=True)
+        except Exception as e:
+            print(f">>> {label} (publish) error: {e}", flush=True)
+
     def do_scan():
         try:
             scan_status['running'] = True
@@ -503,23 +555,28 @@ def api_scan_trigger():
             scan_status['phase'] = 'Discovering programs (discovering roles)...'
             scan_status['progress'] = 5
 
-            # Scan programs
+            # Scan programs (full path: A1 discovery + force-fetch + reconcile)
             print("\n>>> STARTING RUN_FULL_SCAN", flush=True)
             result = run_full_scan()
             print(f">>> RUN_FULL_SCAN COMPLETE, result: {result}", flush=True)
             scan_status['last_result'] = result
-            scan_status['phase'] = 'Processing programs...'
             scan_status['progress'] = 40
-            print(">>> PHASE SET TO: Processing programs...", flush=True)
 
-            # Scan courses
+            # Quick update after program-side discovery (catches anything
+            # the A1 discovery + force-fetch turned up).
+            do_quick_role_update(label='post-programs quick update')
+
+            # Scan courses with interleaved quick updates every 15 roles
+            # (so within the ~22-min courses scrape, role updates publish
+            # every ~5-7 min).
             print("\n>>> About to start course scanning...", flush=True)
             scan_status['phase'] = 'Discovering courses...'
             scan_status['progress'] = 50
-            print(">>> Phase/progress updated for courses", flush=True)
             try:
-                print(">>> Calling run_course_scan()...", flush=True)
-                course_result = run_course_scan()
+                print(">>> Calling run_course_scan() with interleaved callback...", flush=True)
+                course_result = run_course_scan(
+                    progress_callback=lambda done, total: do_quick_role_update(
+                        label=f'mid-courses quick update ({done}/{total} roles)'))
                 print(f">>> Course scan result: {course_result}", flush=True)
                 scan_status['phase'] = 'Processing courses...'
                 scan_status['progress'] = 65
@@ -528,15 +585,23 @@ def api_scan_trigger():
                 import traceback
                 traceback.print_exc()
 
-            # Catalog page sync — iterates UCAT/GCAT roles and mirrors live
-            # pending lists into catalog_pages. Lightweight; ~30 roles.
+            # Quick update after courses phase
+            do_quick_role_update(label='post-courses quick update')
+
+            # Catalog page sync with interleaved quick updates
             scan_status['phase'] = 'Syncing catalog pages...'
             scan_status['progress'] = 68
             try:
                 from scraper import heal_stale_catalog_pages
-                heal_stale_catalog_pages(log=True)
+                heal_stale_catalog_pages(
+                    log=True,
+                    progress_callback=lambda done, total: do_quick_role_update(
+                        label=f'mid-catalog quick update ({done}/{total} roles)'))
             except Exception as e:
                 print(f">>> Catalog sync error: {e}", flush=True)
+
+            # Quick update after catalog sync
+            do_quick_role_update(label='post-catalog quick update')
 
             # Weekly historical sweeps run FIRST (before reference/regulatory
             # fetches) so any newly-ingested completed programs/courses are

@@ -51,6 +51,13 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 - **Update Now button:** the dashboard's "Update Now" button calls the same `/api/scan/trigger` endpoint, so it does exactly what the scheduled scans do. Useful only when you want to force the very next scan to start sooner than the next 5-min launchd firing.
 - **No weekday/weekend distinction, no separate heal cadence.** Daily 6am–9pm PT window only. If Chrome+session are valid, scans run. If not, they don't. macOS sleep is naturally handled — scans pause while the laptop sleeps and resume on wake.
 
+**Interleaved quick role updates.** Within each thorough scan, `do_quick_role_update()` (in `app.py`) is called multiple times — after `run_full_scan`, between groups of ~15 course roles, between groups of ~10 catalog roles, and after each major phase. Each call:
+1. Force-fetches every DB-active program's workflow div via `run_full_scan(force_fetch_only=True)` (~2 min).
+2. Force-fetches every DB-active course's workflow div via `process_course_scans([], force_fetch_only=True)` (~1.5 min).
+3. Computes the C1 fingerprint; if changed, runs `export_static.py` + `git push`. If unchanged, skips silently.
+
+This publishes role transitions to the dashboard mid-scan instead of only at the end. Net effect: role-update lag drops from ~42 min (end-of-scan) to **roughly every 5–7 min throughout the scan**. Total scan time grows from ~42 min to ~55–65 min depending on how many quick updates fire (each is ~3 min, most don't push anything because nothing changed). The `force_fetch_only` flag on `run_full_scan` and `process_course_scans` skips A1/A2/A3 discovery and exit verification — just force-fetch + reconcile, the fast portion of the full scan.
+
 ### How the Scraper Works
 
 **Step 1 - Program Discovery (Option C — hybrid, ~4 min):** Discovery has three sources, designed to be both fast and complete:

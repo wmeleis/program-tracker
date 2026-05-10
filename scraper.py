@@ -945,8 +945,15 @@ def check_courseleaf_session():
     return {'ok': True, 'detail': 'CourseLeaf session is valid.'}
 
 
-def run_full_scan():
+def run_full_scan(force_fetch_only=False):
     """Run a program scan: hybrid discovery, incremental fetch.
+
+    When `force_fetch_only=True`: skips A1 discovery, A2 obscure-role
+    lookup, A3 ID probe, and exit verification — just force-fetches
+    the workflow div for every DB-active program and reconciles. Used
+    by do_quick_role_update for fast role-change checks interleaved
+    between thorough scans' slow phases. ~2 min instead of ~5 min.
+
 
     Architecture (Option C — see CLAUDE.md):
     - Phase A discovery has three sources:
@@ -1026,112 +1033,106 @@ def run_full_scan():
     # programs by ID.
     all_discovered = {}  # id -> {name, role, user}
     all_roles_set = set(ALL_ROLES)
-
-    print("\nStep 1: Scanning Approve Pages for all roles (A1)...")
-    phase_start = time.time()
-    for role in ALL_ROLES:
-        print(f"  Scanning role: {role}...")
-        programs = scrape_approve_pages_role(role)
-        if programs:
-            print(f"    Found {len(programs)} programs")
-        for p in programs:
-            pid = p['id']
-            if pid not in all_discovered:
-                clean_name = p['name'].lstrip(': ').strip()
-                all_discovered[pid] = {
-                    'name': clean_name,
-                    'user': p.get('user', ''),
-                    'current_step': role,
-                }
-            all_discovered[pid]['current_step'] = role
-    phase_times['1_discovery'] = time.time() - phase_start
-    print(f"\n  A1 total: {len(all_discovered)} programs at common roles "
-          f"(took {phase_times['1_discovery']:.0f}s across {len(ALL_ROLES)} roles)")
-
-    # ---- A2: DB-known programs at obscure roles
-    # A program already in DB whose current_step is NOT in ALL_ROLES is at
-    # an obscure role we didn't iterate. Add it to all_discovered as if we
-    # had observed it, then force it into the active fetch set so Phase B
-    # re-verifies its workflow div. This means a program that moves
-    # between two obscure roles still gets caught (Phase B's reconciliation
-    # uses the workflow div, not Approve Pages).
-    obscure_db_ids = []
-    for pid, db in existing_programs.items():
-        db_step = db.get('current_step') or ''
-        if not db_step or db_step in all_roles_set:
-            continue
-        if pid in all_discovered:
-            continue  # something at an obscure role also showed up at a common role somehow
-        all_discovered[pid] = {
-            'name': db.get('name', ''),
-            'user': '',
-            'current_step': db_step,  # tentative; Phase B will reconcile
-        }
-        obscure_db_ids.append(pid)
-    if obscure_db_ids:
-        print(f"  A2: {len(obscure_db_ids)} DB programs at obscure roles "
-              f"(forced into active fetch)")
-
-    # ---- A3: ID probe for brand-new programs
-    # Probe the next 50 IDs above max known DB ID. New CIM programs get
-    # sequential IDs, so this catches anything created since last scan.
-    # Cost: ~50 fetches in parallel batches = ~10s.
-    max_db_id = max(existing_programs.keys()) if existing_programs else 0
-    probe_id_count = 50
-    probe_ids = list(range(max_db_id + 1, max_db_id + 1 + probe_id_count))
-    if probe_ids:
-        print(f"  A3: probing IDs {probe_ids[0]}..{probe_ids[-1]} for brand-new programs")
-
-    # ---- Diff: classify discovered programs vs DB (cheap change detector)
-    phase_start = time.time()
     new_ids = []
     moved_ids = []
     unchanged_ids = []
-    for pid, info in all_discovered.items():
-        live_step = info['current_step']
-        db = existing_programs.get(pid)
-        if db is None:
-            new_ids.append(pid)
-        elif (db.get('current_step') or '') != live_step:
-            moved_ids.append(pid)
-        else:
-            unchanged_ids.append(pid)
-
-    # C2: Boston-in-workflow programs whose step didn't change still get
-    # their HTML refreshed every scan, so `programs.curriculum_html`
-    # stays current. The reference-curriculum sentinel block (in
-    # `fetch_reference_curricula`) reads that field to update non-Boston
-    # deployments' references in `version_id=0` mode — if the field is
-    # stale, the sentinel propagates stale data to every dependent
-    # deployment until Boston's step changes. ~50 Boston programs, ~10s
-    # extra per scan; cheap insurance.
     boston_workflow_refresh_ids = []
-    for pid in unchanged_ids:
-        db = existing_programs[pid]
-        if not (db.get('current_step') or ''):
-            continue  # not in workflow → ref is stable
-        # "Boston" = explicit "Boston" campus, OR no campus parenthetical
-        # in the name (the convention for the canonical Boston program).
-        db_campus = (db.get('campus') or '').lower()
-        _, name_campus = _parse_campus_from_name(db.get('name') or '')
-        if db_campus == 'boston' or (not db_campus and not name_campus):
-            boston_workflow_refresh_ids.append(pid)
-
-    # Active set: EVERY DB program that's currently in workflow gets
-    # its workflow div re-fetched and reconciled this scan. This
-    # guarantees 100% accuracy per scan — no chance that a stale
-    # Approve Pages cache can hide a step transition. Plus newly-
-    # discovered programs (in all_discovered, not in DB) and the A3
-    # ID probe.
+    obscure_db_ids = []
+    probe_ids = []
     all_active_db_ids = [pid for pid, db in existing_programs.items()
                          if db.get('current_step')]
-    active_ids = list(set(new_ids + moved_ids + boston_workflow_refresh_ids
-                          + obscure_db_ids + probe_ids + all_active_db_ids))
-    phase_times['2_diff'] = time.time() - phase_start
-    print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
-          f"{len(moved_ids)} moved, {len(new_ids)} new, "
-          f"{len(all_active_db_ids)} DB-active force-fetch (100% verify)")
-    print(f"  Phase B will fetch details for {len(active_ids)} programs")
+
+    if force_fetch_only:
+        # Quick role-update mode: skip A1/A2/A3 discovery, just force-fetch
+        # every DB-active program's workflow div and reconcile.
+        print(f"\nStep 1: SKIPPED (force_fetch_only mode — fetching {len(all_active_db_ids)} DB-active programs)")
+        phase_times['1_discovery'] = 0.0
+        # Synthesize all_discovered entries from DB so Step 3 can process them.
+        for pid in all_active_db_ids:
+            db = existing_programs[pid]
+            all_discovered[pid] = {
+                'name': db.get('name', ''),
+                'user': '',
+                'current_step': db.get('current_step', ''),
+            }
+        active_ids = list(all_active_db_ids)
+        phase_times['2_diff'] = 0.0
+        print(f"  Phase B will fetch details for {len(active_ids)} programs (force-fetch all DB-active)")
+    else:
+        print("\nStep 1: Scanning Approve Pages for all roles (A1)...")
+        phase_start = time.time()
+        for role in ALL_ROLES:
+            print(f"  Scanning role: {role}...")
+            programs = scrape_approve_pages_role(role)
+            if programs:
+                print(f"    Found {len(programs)} programs")
+            for p in programs:
+                pid = p['id']
+                if pid not in all_discovered:
+                    clean_name = p['name'].lstrip(': ').strip()
+                    all_discovered[pid] = {
+                        'name': clean_name,
+                        'user': p.get('user', ''),
+                        'current_step': role,
+                    }
+                all_discovered[pid]['current_step'] = role
+        phase_times['1_discovery'] = time.time() - phase_start
+        print(f"\n  A1 total: {len(all_discovered)} programs at common roles "
+              f"(took {phase_times['1_discovery']:.0f}s across {len(ALL_ROLES)} roles)")
+
+        # ---- A2: DB-known programs at obscure roles
+        for pid, db in existing_programs.items():
+            db_step = db.get('current_step') or ''
+            if not db_step or db_step in all_roles_set:
+                continue
+            if pid in all_discovered:
+                continue
+            all_discovered[pid] = {
+                'name': db.get('name', ''),
+                'user': '',
+                'current_step': db_step,
+            }
+            obscure_db_ids.append(pid)
+        if obscure_db_ids:
+            print(f"  A2: {len(obscure_db_ids)} DB programs at obscure roles "
+                  f"(forced into active fetch)")
+
+        # ---- A3: ID probe for brand-new programs
+        max_db_id = max(existing_programs.keys()) if existing_programs else 0
+        probe_id_count = 50
+        probe_ids = list(range(max_db_id + 1, max_db_id + 1 + probe_id_count))
+        if probe_ids:
+            print(f"  A3: probing IDs {probe_ids[0]}..{probe_ids[-1]} for brand-new programs")
+
+        # ---- Diff: classify discovered programs vs DB
+        phase_start = time.time()
+        for pid, info in all_discovered.items():
+            live_step = info['current_step']
+            db = existing_programs.get(pid)
+            if db is None:
+                new_ids.append(pid)
+            elif (db.get('current_step') or '') != live_step:
+                moved_ids.append(pid)
+            else:
+                unchanged_ids.append(pid)
+
+        # C2: Boston-in-workflow programs (refresh curriculum_html every scan)
+        for pid in unchanged_ids:
+            db = existing_programs[pid]
+            if not (db.get('current_step') or ''):
+                continue
+            db_campus = (db.get('campus') or '').lower()
+            _, name_campus = _parse_campus_from_name(db.get('name') or '')
+            if db_campus == 'boston' or (not db_campus and not name_campus):
+                boston_workflow_refresh_ids.append(pid)
+
+        active_ids = list(set(new_ids + moved_ids + boston_workflow_refresh_ids
+                              + obscure_db_ids + probe_ids + all_active_db_ids))
+        phase_times['2_diff'] = time.time() - phase_start
+        print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
+              f"{len(moved_ids)} moved, {len(new_ids)} new, "
+              f"{len(all_active_db_ids)} DB-active force-fetch (100% verify)")
+        print(f"  Phase B will fetch details for {len(active_ids)} programs")
 
     # ---- Phase B: Batch-fetch workflow + metadata via XHR for moved/new only
     print(f"\nStep 2: Batch-fetching details for {len(active_ids)} programs via XHR...")
@@ -1367,6 +1368,11 @@ def run_full_scan():
     # at any Approve Pages role this scan. Don't clear unconditionally —
     # verify against each program's workflow div first (positive-evidence
     # policy, see CLAUDE.md "Reconciliation: which source wins").
+    #
+    # In force_fetch_only mode every DB-active program is already in
+    # all_discovered (synthesized from DB), so existing_in_pipeline is
+    # empty and this block is a no-op — workflow-div reconciliation
+    # already happened in Step 3.
     phase_start = time.time()
     from database import get_db
     discovered_ids = set(all_discovered.keys())
@@ -3252,7 +3258,7 @@ def scrape_catalog_pages_from_role(role_name):
     return data
 
 
-def heal_stale_catalog_pages(log=False):
+def heal_stale_catalog_pages(log=False, progress_callback=None, callback_every=10):
     """Mirror DB catalog_pages to live UCAT/GCAT pending lists.
 
     Same approach as heal_stale_program_steps / heal_stale_course_steps but
@@ -3262,6 +3268,13 @@ def heal_stale_catalog_pages(log=False):
     list. Catalog pages have no per-page admin URL so there's no equivalent
     of "fetch full details for new IDs" — the Approve Pages line gives us
     everything we display (path, title, role, approver name).
+
+    Args:
+        log: print per-role counts.
+        progress_callback: optional callable invoked every
+            `callback_every` roles (used by chunked-scan path to
+            interleave quick role-update fetches between groups).
+        callback_every: roles between callback firings.
     """
     from database import (
         get_all_catalog_pages, get_db, upsert_catalog_page, record_catalog_scan,
@@ -3272,7 +3285,7 @@ def heal_stale_catalog_pages(log=False):
               f"({len(CATALOG_TRACKED_ROLES)} roles)...")
 
     live_assignments = {}  # path -> {role, title, user}
-    for role in CATALOG_TRACKED_ROLES:
+    for idx, role in enumerate(CATALOG_TRACKED_ROLES):
         pages = scrape_catalog_pages_from_role(role)
         for p in pages:
             path = p['id']
@@ -3284,6 +3297,11 @@ def heal_stale_catalog_pages(log=False):
                 }
         if log and pages:
             print(f"  {role}: {len(pages)}")
+        if progress_callback and (idx + 1) % callback_every == 0 and (idx + 1) < len(CATALOG_TRACKED_ROLES):
+            try:
+                progress_callback(idx + 1, len(CATALOG_TRACKED_ROLES))
+            except Exception as e:
+                print(f"  heal_stale_catalog_pages progress_callback error: {e}")
 
     if log:
         print(f"\nLive: {len(live_assignments)} unique catalog pages")
@@ -3503,7 +3521,7 @@ def get_course_common_roles():
     return [row[0] for row in rows]
 
 
-def scrape_courses(only_common=True):
+def scrape_courses(only_common=True, progress_callback=None, callback_every=15):
     """Scrape courses from Approve Pages.
 
     Args:
@@ -3512,6 +3530,12 @@ def scrape_courses(only_common=True):
             `get_course_common_roles`). When False, iterate the
             full live dropdown (~215). The False path is for
             cold-start (empty DB) or weekly safety sweeps.
+        progress_callback: optional callable invoked every
+            `callback_every` roles with (roles_done, total_roles).
+            Used by the chunked-scan path to interleave quick
+            role-update fetches between groups of slow Approve
+            Pages role iterations.
+        callback_every: how many roles between callback firings.
     """
     print("\n=== COURSE SCRAPING ===", flush=True)
 
@@ -3532,7 +3556,7 @@ def scrape_courses(only_common=True):
 
     all_courses = {}  # id -> {id, name, current_step, user}
 
-    for role in roles:
+    for idx, role in enumerate(roles):
         courses = scrape_courses_from_role(role)
         if courses:
             print(f"    {role}: {len(courses)} courses", flush=True)
@@ -3548,6 +3572,15 @@ def scrape_courses(only_common=True):
                 else:
                     # Update to latest role where the course was found
                     all_courses[cid]['current_step'] = role
+        # Interleaved-chunk hook: every `callback_every` roles, call
+        # the callback. Caller typically uses this to fire a quick
+        # role-update fetch + export so dashboard sees role changes
+        # mid-scan instead of only at the end.
+        if progress_callback and (idx + 1) % callback_every == 0 and (idx + 1) < len(roles):
+            try:
+                progress_callback(idx + 1, len(roles))
+            except Exception as e:
+                print(f"  scrape_courses progress_callback error: {e}", flush=True)
 
     print(f"  Total unique courses found: {len(all_courses)}", flush=True)
     return list(all_courses.values())
@@ -3758,8 +3791,14 @@ def batch_fetch_course_details(course_ids, batch_size=25):
     return all_results
 
 
-def process_course_scans(courses):
+def process_course_scans(courses, force_fetch_only=False):
     """Store scraped courses in the database (Option F: hybrid discovery).
+
+    When `force_fetch_only=True`: ignores `courses` (caller can pass
+    `[]`), skips A2 obscure-role lookup, A3 ID probe, and exit
+    verification — just force-fetches the workflow div for every
+    DB-active course and reconciles. Used by do_quick_role_update.
+
 
     Discovery has the same shape as run_full_scan's Phase A:
       A1) `courses` arg is whatever scrape_courses iterated (common roles)
@@ -3783,45 +3822,50 @@ def process_course_scans(courses):
     # ---- Diff: classify scraped courses vs DB
     phase_start = time.time()
     new_ids, moved_ids, unchanged_ids = [], [], []
-    for c in courses:
-        cid = c['id']
-        live_step = c.get('current_step', '') or ''
-        db = existing.get(cid)
-        if db is None:
-            new_ids.append(cid)
-        elif (db.get('current_step') or '') != live_step:
-            moved_ids.append(cid)
-        else:
-            unchanged_ids.append(cid)
-
-    # ---- A2: DB courses at obscure roles (those NOT iterated by
-    # scrape_courses this run) — force-fetch via Phase B.
-    iterated_roles = {c.get('current_step', '') for c in courses if c.get('current_step')}
     obscure_db_ids = []
-    for cid, db in existing.items():
-        db_step = db.get('current_step') or ''
-        if not db_step or db_step in iterated_roles:
-            continue
-        obscure_db_ids.append(cid)
-    if obscure_db_ids:
-        print(f"  A2: {len(obscure_db_ids)} DB courses at obscure roles "
-              f"(forced into active fetch)", flush=True)
+    probe_cids = []
 
-    # ---- A3: ID probe for brand-new courses.
-    # Max course ID is large (~24000); probe next 50 IDs for new courses.
-    max_db_cid = 0
-    for cid in existing.keys():
-        try:
-            n = int(cid)
-            if n > max_db_cid:
-                max_db_cid = n
-        except (ValueError, TypeError):
-            continue
-    probe_id_count = 50
-    probe_cids = [str(n) for n in range(max_db_cid + 1, max_db_cid + 1 + probe_id_count)]
-    if probe_cids:
-        print(f"  A3: probing course IDs {probe_cids[0]}..{probe_cids[-1]} "
-              f"for brand-new courses", flush=True)
+    if force_fetch_only:
+        # Quick mode: skip discovery, just force-fetch all DB-active.
+        print(f"  Force-fetch only mode (skipping diff/A2/A3)", flush=True)
+    else:
+        for c in courses:
+            cid = c['id']
+            live_step = c.get('current_step', '') or ''
+            db = existing.get(cid)
+            if db is None:
+                new_ids.append(cid)
+            elif (db.get('current_step') or '') != live_step:
+                moved_ids.append(cid)
+            else:
+                unchanged_ids.append(cid)
+
+        # ---- A2: DB courses at obscure roles (those NOT iterated by
+        # scrape_courses this run) — force-fetch via Phase B.
+        iterated_roles = {c.get('current_step', '') for c in courses if c.get('current_step')}
+        for cid, db in existing.items():
+            db_step = db.get('current_step') or ''
+            if not db_step or db_step in iterated_roles:
+                continue
+            obscure_db_ids.append(cid)
+        if obscure_db_ids:
+            print(f"  A2: {len(obscure_db_ids)} DB courses at obscure roles "
+                  f"(forced into active fetch)", flush=True)
+
+        # ---- A3: ID probe for brand-new courses.
+        max_db_cid = 0
+        for cid in existing.keys():
+            try:
+                n = int(cid)
+                if n > max_db_cid:
+                    max_db_cid = n
+            except (ValueError, TypeError):
+                continue
+        probe_id_count = 50
+        probe_cids = [str(n) for n in range(max_db_cid + 1, max_db_cid + 1 + probe_id_count)]
+        if probe_cids:
+            print(f"  A3: probing course IDs {probe_cids[0]}..{probe_cids[-1]} "
+                  f"for brand-new courses", flush=True)
 
     # 100% accuracy: every DB course currently in workflow gets its
     # workflow div re-fetched and reconciled this scan, regardless of
@@ -4130,11 +4174,16 @@ def process_course_scans(courses):
     return len(courses_by_id), with_workflow, changes
 
 
-def run_course_scan():
-    """Run a full course scan across all roles."""
+def run_course_scan(progress_callback=None):
+    """Run a full course scan across all roles.
+
+    `progress_callback` is forwarded to `scrape_courses` so callers
+    can interleave quick role-update fetches between groups of slow
+    Approve Pages role iterations.
+    """
     print("\n=== STARTING COURSE SCAN ===")
     init_db()
-    courses = scrape_courses()
+    courses = scrape_courses(progress_callback=progress_callback)
     if not courses:
         print("No courses found")
         return 0, 0, 0
