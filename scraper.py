@@ -1117,18 +1117,20 @@ def run_full_scan():
         if db_campus == 'boston' or (not db_campus and not name_campus):
             boston_workflow_refresh_ids.append(pid)
 
-    # Active set = moved/new (from diff) + Boston refresh (C2) +
-    # obscure-role DB programs (A2 — always re-fetched to verify) +
-    # ID probe (A3 — most return empty, real ones added back via
-    # synthetic discovered entry below).
+    # Active set: EVERY DB program that's currently in workflow gets
+    # its workflow div re-fetched and reconciled this scan. This
+    # guarantees 100% accuracy per scan — no chance that a stale
+    # Approve Pages cache can hide a step transition. Plus newly-
+    # discovered programs (in all_discovered, not in DB) and the A3
+    # ID probe.
+    all_active_db_ids = [pid for pid, db in existing_programs.items()
+                         if db.get('current_step')]
     active_ids = list(set(new_ids + moved_ids + boston_workflow_refresh_ids
-                          + obscure_db_ids + probe_ids))
+                          + obscure_db_ids + probe_ids + all_active_db_ids))
     phase_times['2_diff'] = time.time() - phase_start
     print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
           f"{len(moved_ids)} moved, {len(new_ids)} new, "
-          f"{len(boston_workflow_refresh_ids)} boston-in-workflow refresh (C2), "
-          f"{len(obscure_db_ids)} obscure-role refresh (A2), "
-          f"{len(probe_ids)} ID probe (A3)")
+          f"{len(all_active_db_ids)} DB-active force-fetch (100% verify)")
     print(f"  Phase B will fetch details for {len(active_ids)} programs")
 
     # ---- Phase B: Batch-fetch workflow + metadata via XHR for moved/new only
@@ -1145,6 +1147,20 @@ def run_full_scan():
               f"{phase_times['3_detail_fetch']:.1f}s ({per:.0f}ms each)")
     else:
         print(f"  No programs needed re-fetch.")
+
+    # ---- Force-fetch follow-up: synthesize all_discovered entries for
+    # every DB-active program that wasn't already in all_discovered
+    # (Approve Pages didn't show it). They WILL be processed in Step 3
+    # using the workflow div as authoritative.
+    for pid in all_active_db_ids:
+        if pid in all_discovered:
+            continue
+        db = existing_programs[pid]
+        all_discovered[pid] = {
+            'name': db.get('name', ''),
+            'user': '',
+            'current_step': db.get('current_step', ''),
+        }
 
     # ---- A3 follow-up: probe IDs that returned real data are brand-new
     # programs. Synthesize all_discovered entries for them using their
@@ -3807,12 +3823,19 @@ def process_course_scans(courses):
         print(f"  A3: probing course IDs {probe_cids[0]}..{probe_cids[-1]} "
               f"for brand-new courses", flush=True)
 
-    active_ids = set(new_ids) | set(moved_ids) | set(obscure_db_ids) | set(probe_cids)
+    # 100% accuracy: every DB course currently in workflow gets its
+    # workflow div re-fetched and reconciled this scan, regardless of
+    # what Approve Pages said.
+    all_active_db_cids = [cid for cid, db in existing.items()
+                          if db.get('current_step')]
+
+    active_ids = (set(new_ids) | set(moved_ids) | set(obscure_db_ids)
+                  | set(probe_cids) | set(all_active_db_cids))
     phase_times['1_diff'] = time.time() - phase_start
     print(f"  Diff vs DB: {len(unchanged_ids)} unchanged, "
           f"{len(moved_ids)} moved, {len(new_ids)} new, "
-          f"{len(obscure_db_ids)} obscure-role refresh (A2), "
-          f"{len(probe_cids)} ID probe (A3)", flush=True)
+          f"{len(all_active_db_cids)} DB-active force-fetch (100% verify)",
+          flush=True)
 
     # ---- Phase B: Batch-fetch details only for active courses
     phase_start = time.time()
@@ -3866,6 +3889,19 @@ def process_course_scans(courses):
     # For obscure-role A2 courses, synthesize entries from DB so Step 3
     # has the metadata it needs.
     for cid in obscure_db_ids:
+        if cid in courses_by_id:
+            continue
+        db = existing[cid]
+        courses_by_id[cid] = {
+            'id': cid,
+            'name': db.get('title') or cid,
+            'user': '',
+            'current_step': db.get('current_step') or '',
+        }
+
+    # 100% accuracy: every DB-active course must have an entry in
+    # courses_by_id so Step 3's processing loop covers it.
+    for cid in all_active_db_cids:
         if cid in courses_by_id:
             continue
         db = existing[cid]
