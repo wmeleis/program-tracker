@@ -1,21 +1,34 @@
 #!/bin/bash
 # Continuous-mode update script for Program Approval Tracker.
 # launchd fires this every 5 minutes, 24/7. Each invocation either
-# triggers a new scan (if none is running) or skips silently. Net
-# effect: scans run back-to-back as fast as the system can complete
-# them.
+# triggers a new scan (if none is running, and we're inside the
+# 6am-9pm PT window) or skips silently. Net effect: scans run
+# back-to-back as fast as the system can complete them, every
+# day, during the 15-hour active window.
 #
 # Each scan force-fetches the workflow div for every active program
 # and course (100% accuracy per scan). Cost: ~50 min per scan, so
 # roughly one finished scan every hour during the active window.
 #
-# Runs IFF Chrome is running with a live CourseLeaf session.
+# Runs IFF: (1) inside the 6am-9pm PT window, (2) Chrome is running
+# with a live CourseLeaf session, (3) no scan currently running.
 
 cd /Users/wmeleis/committees/nu-docs/Curriculum/CIM
 LOG="data/update.log"
 LAST_SCAN_FILE="data/last_scan_unix"
+WINDOW_TZ="America/Los_Angeles"
+WINDOW_START_HOUR=6   # 6am PT inclusive
+WINDOW_END_HOUR=21    # 9pm PT exclusive (last allowed start: 8:59 pm PT)
 
 echo "$(date): Starting update" >> "$LOG"
+
+# Time-of-day window — scans run continuously 6am-9pm PT every day.
+HOUR_PT=$(TZ="$WINDOW_TZ" date +%H)
+HOUR_PT=$((10#$HOUR_PT))
+if [ "$HOUR_PT" -lt "$WINDOW_START_HOUR" ] || [ "$HOUR_PT" -ge "$WINDOW_END_HOUR" ]; then
+    echo "$(date): Outside ${WINDOW_START_HOUR}am-${WINDOW_END_HOUR}:00 PT window (hour=$HOUR_PT), skipping" >> "$LOG"
+    exit 0
+fi
 
 # Browser must be running with a valid CourseLeaf session.
 BROWSER_APP="${BROWSER_APP:-Google Chrome}"
