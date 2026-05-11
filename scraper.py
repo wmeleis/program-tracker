@@ -1294,9 +1294,52 @@ def run_full_scan(force_fetch_only=False):
         verified_via_workflow_div = bool(steps) and not html_error
 
         if verified_via_workflow_div:
-            # Case 1 or 2: workflow div is authoritative.
-            current_step = html_current.get('name', '') if html_current else ''
-            current_emails = html_current.get('emails', '') if html_current else ''
+            # Case 1 or 2: workflow div is the primary source.
+            wf_current_name = html_current.get('name', '') if html_current else ''
+            wf_current_emails = html_current.get('emails', '') if html_current else ''
+
+            # Stale-workflow-div correction: empirically (May 2026) CIM's
+            # workflow div can lag the actual workflow state by hours,
+            # *even after the user has clicked "approve"*. Detection: if
+            # the most recent approval-log entry on the same page says
+            # "Approved for X" and the workflow div STILL marks X as
+            # "current", then the workflow has actually advanced past X
+            # and the workflow div is stale. The real current step is the
+            # next pending step in the workflow array.
+            approvals = meta.get('approvals') or []
+            stale_correction_applied = False
+            if approvals and wf_current_name:
+                latest_approval = None
+                latest_t = None
+                from email.utils import parsedate_to_datetime as _pdt
+                for a in approvals:
+                    try:
+                        t = _pdt(a.get('date', '')).timestamp()
+                    except Exception:
+                        continue
+                    if latest_t is None or t > latest_t:
+                        latest_t = t
+                        latest_approval = a
+                if latest_approval and \
+                   (latest_approval.get('step') or '').strip() == wf_current_name.strip():
+                    # Workflow div is stale: find the next step.
+                    current_order = html_current.get('order') if html_current else None
+                    if current_order is not None:
+                        next_step = next(
+                            (s for s in steps
+                                if s.get('order') == current_order + 1),
+                            None)
+                        if next_step:
+                            current_step = next_step.get('name', '')
+                            current_emails = next_step.get('emails', '')
+                            stale_correction_applied = True
+                            print(f"  Workflow-div lag corrected for {prog_id}: "
+                                  f"latest approval-log entry already approved "
+                                  f"{wf_current_name!r}, advancing to {current_step!r}")
+
+            if not stale_correction_applied:
+                current_step = wf_current_name
+                current_emails = wf_current_emails
         else:
             # Case 3: unverifiable. Fall back to Approve Pages.
             current_step = approve_pages_step
