@@ -858,7 +858,12 @@ def check_courseleaf_session():
     holder.style.display = "none";
     holder.setAttribute("data-status", "running");
     document.body.appendChild(holder);
-    fetch("/programadmin/2/index.xml", {cache: 'no-store'})
+    // No cache: 'no-store' — this is a session-validity probe; we
+    // don't care whether the response is fresh, only whether the
+    // session is authenticated. Allowing the HTTP cache here also
+    // sidesteps a CIM-side oddity where /programadmin/2/index.xml
+    // returns 400 for direct uncached requests.
+    fetch("/programadmin/2/index.xml")
         .then(function(r) {{
             return r.text().then(function(txt) {{ return [r.status, txt]; }});
         }})
