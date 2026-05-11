@@ -1307,20 +1307,19 @@ def run_full_scan(force_fetch_only=False):
         if verified_via_workflow_div:
             # Authoritative source: the approval log on /programadmin/{id}/.
             # CIM's `class="current"` marker is *derived* and can lag the
-            # actual workflow state for hours (observed 11 May 2026: user
-            # approved 7 programs, the marker stayed on the same step for
-            # 4+ hours despite the approval log clearly recording the
-            # advance). The approval log itself is the audit trail and
-            # cannot be stale.
+            # actual workflow state for hours. The approval log is the
+            # audit trail and cannot be stale.
             #
-            # Algorithm:
-            #   1. Sort approval + rollback events by timestamp.
-            #   2. Latest event is "Approved for X" → current = step after X
-            #   3. Latest event is "Rollback to X"  → current = X
-            #   4. No events → use first step in workflow (brand-new program)
-            #   5. No "next step" after last approval → workflow complete
-            #
-            # The `class="current"` marker is no longer consulted.
+            # Algorithm: WALK the workflow chronologically through every
+            # event. Each "Approved for X" advances past the matching step;
+            # each "Rollback to X" rewinds to it. The final position is
+            # the current step. Walking (rather than just looking at the
+            # latest event) handles workflows where the same step name
+            # appears multiple times — e.g., program 177's workflow has
+            # "Program Review 2" at both step 3 AND step 8 (because the
+            # workflow loops back through it after Banner Setup). A
+            # naive "find first match" picks the wrong occurrence and
+            # advances to the wrong next step.
             from email.utils import parsedate_to_datetime as _pdt
             events = []
             for a in (meta.get('approvals') or []):
@@ -1336,37 +1335,39 @@ def run_full_scan(force_fetch_only=False):
                     continue
                 events.append({'t': t, 'type': 'rollback', 'step': (r.get('step') or '').strip()})
             events.sort(key=lambda e: e['t'])
-            latest_event = events[-1] if events else None
 
             current_step = ''
             current_emails = ''
-            if latest_event and latest_event['type'] == 'approved':
-                # Find the approved step in the workflow ordering.
-                approved_name = latest_event['step']
-                approved_step_obj = next(
-                    (s for s in steps if (s.get('name') or '').strip() == approved_name),
-                    None)
-                if approved_step_obj is not None:
-                    next_order = approved_step_obj.get('order', -1) + 1
-                    next_step = next(
-                        (s for s in steps if s.get('order') == next_order),
-                        None)
-                    if next_step:
-                        current_step = (next_step.get('name') or '').strip()
-                        current_emails = next_step.get('emails', '')
-                    # else: no next step → workflow complete; leave current_step empty
-                else:
-                    # Approved step name doesn't match any workflow step
-                    # (could be a step from a prior cycle / renamed). Fall
-                    # back to the class marker.
-                    current_step = (html_current.get('name') or '') if html_current else ''
-                    current_emails = (html_current.get('emails') or '') if html_current else ''
-            elif latest_event and latest_event['type'] == 'rollback':
-                current_step = latest_event['step']
-                matched = next(
-                    (s for s in steps if (s.get('name') or '').strip() == current_step),
-                    None)
-                current_emails = matched.get('emails', '') if matched else ''
+
+            if events:
+                # Walk the workflow forward through every event.
+                current_idx = 0
+                for event in events:
+                    name = event['step']
+                    if event['type'] == 'approved':
+                        # Find the matching step at or after current position.
+                        match = next(
+                            (s for s in steps
+                                if s.get('order', -1) >= current_idx
+                                   and (s.get('name') or '').strip() == name),
+                            None)
+                        if match is not None:
+                            current_idx = match.get('order', current_idx) + 1
+                    else:  # rollback
+                        match = next(
+                            (s for s in steps
+                                if (s.get('name') or '').strip() == name),
+                            None)
+                        if match is not None:
+                            current_idx = match.get('order', current_idx)
+
+                # current_step = workflow step at current_idx
+                cur_step_obj = next(
+                    (s for s in steps if s.get('order') == current_idx), None)
+                if cur_step_obj:
+                    current_step = (cur_step_obj.get('name') or '').strip()
+                    current_emails = cur_step_obj.get('emails', '') or ''
+                # else: walked past the end → workflow complete (empty)
             else:
                 # No approval/rollback events: brand-new program. Use the
                 # workflow div's class marker if present, else first step.
