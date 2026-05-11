@@ -590,20 +590,36 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 var dsMatch = text.match(/Date Submitted:\\s*([^\\n]+)/);
                 if (dsMatch) result.meta.date_submitted = dsMatch[1].trim();
 
+                // CRITICAL: the inner negative lookahead prevents the
+                // greedy `[\\s\\S]*?` from spanning across another date.
+                // Without it, when there is only one "Rollback to X"
+                // entry in the page, the regex would happily capture
+                // the FIRST date in the file and skip past dozens of
+                // approval entries to reach "Rollback to". Same risk
+                // for approvals if a single "Approved for X" exists
+                // far from its date. The lookahead forces the captured
+                // date to be the one immediately preceding the keyword.
+                var DATE_RE_SRC = '[A-Z][a-z]{{2}}, \\\\d+ [A-Z][a-z]+ \\\\d{{4}} [\\\\d:]+ GMT';
                 var approvalDates = [];
                 var apMatch;
-                var apPattern = /([A-Z][a-z]{{2}}, \\d+ [A-Z][a-z]+ \\d{{4}} [\\d:]+ GMT)[\\s\\S]*?Approved for ([^<\\n]+)/g;
+                var apPattern = new RegExp(
+                    '(' + DATE_RE_SRC + ')' +
+                    '((?:(?!' + DATE_RE_SRC + ')[\\\\s\\\\S])*?)' +
+                    'Approved for ([^<\\\\n]+)', 'g');
                 while ((apMatch = apPattern.exec(text)) !== null) {{
-                    approvalDates.push({{date: apMatch[1], step: apMatch[2].trim()}});
+                    approvalDates.push({{date: apMatch[1], step: apMatch[3].trim()}});
                 }}
 
-                // Rollbacks: "Rollback to X for Y" → workflow goes back to X.
-                // Captures both X and Y; the "for Y" suffix is stripped from X.
+                // Rollbacks: "Rollback to X for Y" → workflow goes back
+                // to X. Captures X (the "for Y" suffix is stripped).
                 var rollbackDates = [];
                 var rbMatch;
-                var rbPattern = /([A-Z][a-z]{{2}}, \\d+ [A-Z][a-z]+ \\d{{4}} [\\d:]+ GMT)[\\s\\S]*?Rollback to ([^<\\n]+)/g;
+                var rbPattern = new RegExp(
+                    '(' + DATE_RE_SRC + ')' +
+                    '((?:(?!' + DATE_RE_SRC + ')[\\\\s\\\\S])*?)' +
+                    'Rollback to ([^<\\\\n]+)', 'g');
                 while ((rbMatch = rbPattern.exec(text)) !== null) {{
-                    var rbStep = rbMatch[2].replace(/ for .*$/, '').trim();
+                    var rbStep = rbMatch[3].replace(/ for .*$/, '').trim();
                     rollbackDates.push({{date: rbMatch[1], step: rbStep}});
                 }}
                 result.meta.rollbacks = rollbackDates;
