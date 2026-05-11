@@ -1413,6 +1413,40 @@ def run_full_scan(force_fetch_only=False):
                     first = steps[0]
                     current_step = (first.get('name') or '').strip()
                     current_emails = first.get('emails', '') or ''
+
+            # Parallel-branch preservation (force_fetch_only only).
+            #
+            # The walk algorithm only tracks the LINEAR workflow recorded
+            # in the visible workflow div + approval log. CIM also routes
+            # some programs to *parallel* reviewers — e.g., Program
+            # Graduate Provost Review for a Vancouver program whose
+            # linear workflow goes through GRA Regulatory steps. The
+            # parallel-branch role is visible in Approve Pages but
+            # absent from the linear workflow div, so the walk silently
+            # clobbers a correct GP assignment with the linear truth
+            # ("GRA Regulatory Modifications Submitted").
+            #
+            # Quick role updates (force_fetch_only=True) skip A1
+            # discovery, so they have no way to verify a parallel-
+            # branch role is still active. Heuristic: if the existing
+            # current_step is NOT one of the workflow div step names,
+            # it's a parallel-branch (or obscure-role) assignment —
+            # leave it alone. The next FULL scan will iterate Approve
+            # Pages and correctly reassign if the program has moved.
+            #
+            # We deliberately do NOT apply this preservation in full
+            # scan mode (force_fetch_only=False). In a full scan, A1
+            # had the chance to see this program at any pipeline role
+            # and didn't, so the walk's result is what we should trust.
+            # (Even fully-completed programs flow through the end-of-
+            # scan verification block below.)
+            if force_fetch_only:
+                existing_step = (info.get('current_step') or '').strip()
+                if existing_step and existing_step != current_step:
+                    step_names = {(s.get('name') or '').strip() for s in steps}
+                    if existing_step not in step_names:
+                        current_step = existing_step
+                        current_emails = ''
         else:
             # Workflow div unverifiable (fetch failed/empty) AND Approve
             # Pages didn't see it. Best we can do is whatever Approve
