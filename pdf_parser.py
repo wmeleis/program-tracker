@@ -72,6 +72,9 @@ def _parse_table(table):
                 'code': f'{prefix} {code}',
                 'title': title,
                 'hours': hours.strip(),
+                # See docx_parser.py: emit as CIM "orclass" continuation row
+                # so it visually attaches to the row above as an alternative.
+                'is_or_continuation': True,
             })
         elif code_cell and not has_other_content:
             rows.append({'is_header': True, 'text': code_cell})
@@ -139,6 +142,15 @@ def _render_section_html(heading, rows):
                 f'<tr class="{row_cls} nochange areaheader">'
                 f'<td colspan="2"><span class="courselistcomment areaheader">{escape(r["text"])}</span></td>'
                 f'<td class="hourscol"></td></tr>'
+            )
+        elif r.get('is_or_continuation'):
+            parts.append(
+                f'<tr class="orclass {row_cls} nochange">'
+                f'<td class="codecol orclass">'
+                f'<div class="blockindent" style="margin-left:20px;">{escape(r["code"])}</div>'
+                f'</td>'
+                f'<td colspan="2">{escape(r["title"])}</td>'
+                f'</tr>'
             )
         else:
             parts.append(

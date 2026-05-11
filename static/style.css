@@ -1248,6 +1248,18 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     margin-left: 20px !important;
 }
 
+/* "or COURSE 1234" alternative rows attach visually to the row above:
+   no top spacing, no border separating them from the primary course.
+   The blockindent on the code cell already provides the visual indent.
+   :has() drops the bottom border of the row preceding an orclass so the
+   primary + its alternatives read as one grouped requirement. */
+.curriculum-content tr.orclass td {
+    padding-top: 0;
+}
+.curriculum-content tr:has(+ tr.orclass) td {
+    border-bottom: none;
+}
+
 /* H2 — major section (Core Requirements, Electives Option, etc.) */
 .curriculum-content h2 {
     margin: 18px 0 6px;

@@ -160,6 +160,13 @@ def _parse_table(tbl):
                 'code': f'{prefix} {code}',
                 'title': title,
                 'hours': hours.strip(),
+                # Mark as an alternative-course continuation row so the
+                # renderer can emit CIM's "orclass" + blockindent HTML
+                # convention. Without this flag the row renders as a
+                # standalone course at the same width as the primary,
+                # which reads as "another required course" instead of
+                # "alternative to the row above".
+                'is_or_continuation': True,
             })
         elif code_cell and not has_other_content:
             rows.append({'is_header': True, 'text': code_cell})
@@ -214,6 +221,22 @@ def _render_section_html(heading, rows):
                 f'<tr class="{row_cls} nochange areaheader">'
                 f'<td colspan="2"><span class="courselistcomment areaheader">{escape(r["text"])}</span></td>'
                 f'<td class="hourscol"></td></tr>'
+            )
+        elif r.get('is_or_continuation'):
+            # CIM's catalog encodes "or COURSE 1234" rows as orclass
+            # continuations of the preceding course: no top border (via
+            # the orclass CSS), code indented in a blockindent div, and
+            # the title spanning 2 columns (no hourscol cell). Match
+            # that exact structure so the rendered docx reference looks
+            # the same as a native CIM reference and the user can
+            # clearly see the alternative relationship.
+            parts.append(
+                f'<tr class="orclass {row_cls} nochange">'
+                f'<td class="codecol orclass">'
+                f'<div class="blockindent" style="margin-left:20px;">{escape(r["code"])}</div>'
+                f'</td>'
+                f'<td colspan="2">{escape(r["title"])}</td>'
+                f'</tr>'
             )
         else:
             parts.append(
