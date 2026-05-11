@@ -558,7 +558,12 @@ def batch_fetch_program_details(program_ids, batch_size=25):
 
     function processOne(id, idx) {{
         var result = {{steps: [], meta: {{}}}};
-        var htmlPromise = fetch("/programadmin/" + id + "/")
+        // cache:'no-store' is critical: without it, Chrome's HTTP
+        // cache can serve a stale /programadmin/{id}/ that still
+        // shows the OLD workflow step, even after the user has
+        // moved the program forward in CIM. We'd then conclude
+        // "no change" and the dashboard would stay stale.
+        var htmlPromise = fetch("/programadmin/" + id + "/", {{cache: 'no-store'}})
             .then(function(r) {{ return r.ok ? r.text() : ""; }})
             .then(function(html) {{
                 if (!html) return;
@@ -627,7 +632,7 @@ def batch_fetch_program_details(program_ids, batch_size=25):
             }})
             .catch(function(e) {{ result.html_error = e.message || String(e); }});
 
-        var xmlPromise = fetch("/programadmin/" + id + "/index.xml")
+        var xmlPromise = fetch("/programadmin/" + id + "/index.xml", {{cache: 'no-store'}})
             .then(function(r) {{
                 result.meta.xml_status = r.status;
                 return r.ok ? r.text() : "";
@@ -853,7 +858,7 @@ def check_courseleaf_session():
     holder.style.display = "none";
     holder.setAttribute("data-status", "running");
     document.body.appendChild(holder);
-    fetch("/programadmin/2/index.xml")
+    fetch("/programadmin/2/index.xml", {cache: 'no-store'})
         .then(function(r) {{
             return r.text().then(function(txt) {{ return [r.status, txt]; }});
         }})
@@ -2374,7 +2379,7 @@ def _search_cim_for_boston_ids(banner_codes):
     var parser = new DOMParser();
 
     function probe(id) {{
-        return fetch("/programadmin/" + id + "/index.xml")
+        return fetch("/programadmin/" + id + "/index.xml", {{cache: 'no-store'}})
             .then(function(r) {{ return r.ok ? r.text() : ""; }})
             .then(function(txt) {{
                 if (!txt || txt.length < 100) return null;
@@ -2729,7 +2734,7 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
     function processOne(id) {{
         var fetchId = counterparts[id] || id;
         // Step 1: page fetch (parallelizable — network limited)
-        return fetch("/programadmin/" + fetchId + "/")
+        return fetch("/programadmin/" + fetchId + "/", {{cache: 'no-store'}})
             .then(function(res) {{
                 if (!res.ok) throw new Error("fetch_failed:" + res.status);
                 return res.text();
@@ -2748,7 +2753,7 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
                 // Step 2: CGI fetch (server serializes, but still faster with concurrent requests)
                 var apiUrl = "/courseleaf/courseleaf.cgi?page=/programadmin/" + fetchId +
                     "/index.html&output=xml&step=showtcf&view=history&diffversion=" + versionId;
-                return fetch(apiUrl).then(function(res) {{
+                return fetch(apiUrl, {{cache: 'no-store'}}).then(function(res) {{
                     if (!res.ok) throw new Error("history_fetch_failed:" + res.status);
                     return res.text();
                 }}).then(function(xml) {{
@@ -3617,7 +3622,10 @@ def batch_fetch_course_details(course_ids, batch_size=25):
 
     function processOne(id) {{
         var result = {{steps: [], meta: {{}}}};
-        var htmlPromise = fetch("/courseadmin/" + id + "/")
+        // cache:'no-store' — same rationale as the programadmin
+        // fetch: without it, Chrome HTTP-cached HTML can show stale
+        // workflow steps and the scan would miss role transitions.
+        var htmlPromise = fetch("/courseadmin/" + id + "/", {{cache: 'no-store'}})
             .then(function(r) {{ return r.ok ? r.text() : ""; }})
             .then(function(html) {{
                 if (!html) return;
@@ -3672,7 +3680,7 @@ def batch_fetch_course_details(course_ids, batch_size=25):
             }})
             .catch(function(e) {{ result.html_error = e.message || String(e); }});
 
-        var xmlPromise = fetch("/courseadmin/" + id + "/index.xml")
+        var xmlPromise = fetch("/courseadmin/" + id + "/index.xml", {{cache: 'no-store'}})
             .then(function(r) {{
                 result.meta.xml_status = r.status;
                 return r.ok ? r.text() : "";
