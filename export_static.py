@@ -1065,8 +1065,11 @@ function __staticInit() {
         const btn = document.getElementById('scan-btn');
         const statusEl = document.getElementById('scan-status');
         btn.disabled = true;
-        statusEl.innerHTML = '<span class="spinner"></span> Connecting...';
-        statusEl.className = 'scan-status running';
+        // No "Updating..." text — scans run continuously in the
+        // background; the last-updated timestamp tells the user when
+        // they last received fresh data.
+        statusEl.textContent = '';
+        statusEl.className = 'scan-status';
         try {
             const res = await fetch('http://localhost:5001/api/scan/trigger', {
                 method: 'POST',
@@ -1074,14 +1077,13 @@ function __staticInit() {
                 headers: {'Content-Type': 'application/json'},
             });
             if (res.ok) {
-                statusEl.innerHTML = '<span class="spinner"></span> Updating (~22 min)...';
+                // Poll silently; only re-enable the button when idle.
                 const poll = setInterval(async () => {
                     try {
                         const s = await fetch('http://localhost:5001/api/scan/status');
                         const d = await s.json();
                         if (!d.running) {
                             clearInterval(poll);
-                            statusEl.textContent = 'Update complete! Refresh the page to see the new data.';
                             btn.disabled = false;
                         }
                     } catch(e) { clearInterval(poll); btn.disabled = false; }

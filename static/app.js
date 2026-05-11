@@ -992,22 +992,14 @@ async function loadScanStatus() {
         const updatedEl = document.getElementById('last-updated');
         const progressContainer = document.getElementById('progress-container');
 
-        if (data.running) {
-            statusEl.innerHTML = '<span class="spinner"></span> Updating...';
-            statusEl.className = 'scan-status running';
-            document.getElementById('scan-btn').disabled = true;
-
-            // Show progress phase text
-            progressContainer.style.display = 'block';
-            document.getElementById('progress-phase').textContent = data.phase || 'Scanning...';
-        } else {
-            statusEl.textContent = '';
-            statusEl.className = 'scan-status';
-            document.getElementById('scan-btn').disabled = false;
-
-            // Hide progress phase
-            progressContainer.style.display = 'none';
-        }
+        // Updates run continuously in the background — no need to show
+        // a "Updating..." spinner or per-phase progress text. Just the
+        // last-updated timestamp.
+        statusEl.textContent = '';
+        statusEl.className = 'scan-status';
+        if (progressContainer) progressContainer.style.display = 'none';
+        const btn = document.getElementById('scan-btn');
+        if (btn) btn.disabled = false;
 
         if (data.last_scan) {
             const d = new Date(data.last_scan.scan_time);
@@ -2790,8 +2782,9 @@ async function checkSessionHealth() {
 async function triggerScan() {
     const btn = document.getElementById('scan-btn');
     btn.disabled = true;
-    document.getElementById('scan-status').innerHTML = '<span class="spinner"></span> Updating...';
-    document.getElementById('scan-status').className = 'scan-status running';
+    // Don't show "Updating..." text — scans run continuously in the
+    // background, the last-updated timestamp tells the user when they
+    // last received fresh data.
 
     try {
         // "Update Now" runs the quick heal — re-fetches workflow HTML for
