@@ -1111,8 +1111,10 @@ def run_full_scan(force_fetch_only=False):
                         'name': clean_name,
                         'user': p.get('user', ''),
                         'current_step': role,
+                        'from_approve_pages': True,
                     }
                 all_discovered[pid]['current_step'] = role
+                all_discovered[pid]['from_approve_pages'] = True
         phase_times['1_discovery'] = time.time() - phase_start
         print(f"\n  A1 total: {len(all_discovered)} programs at common roles "
               f"(took {phase_times['1_discovery']:.0f}s across {len(ALL_ROLES)} roles)")
@@ -1128,6 +1130,7 @@ def run_full_scan(force_fetch_only=False):
                 'name': db.get('name', ''),
                 'user': '',
                 'current_step': db_step,
+                'from_approve_pages': False,
             }
             obscure_db_ids.append(pid)
         if obscure_db_ids:
@@ -1198,6 +1201,7 @@ def run_full_scan(force_fetch_only=False):
             'name': db.get('name', ''),
             'user': '',
             'current_step': db.get('current_step', ''),
+            'from_approve_pages': False,
         }
 
     # ---- A3 follow-up: probe IDs that returned real data are brand-new
@@ -1224,6 +1228,7 @@ def run_full_scan(force_fetch_only=False):
             'name': meta.get('program_title') or '',
             'user': '',
             'current_step': current_step,
+            'from_approve_pages': False,
         }
         # Treat as a new program for change tracking.
         if pid not in new_ids and pid not in moved_ids:
@@ -1302,40 +1307,59 @@ def run_full_scan(force_fetch_only=False):
         completed = sum(1 for s in steps if s.get('status') == 'approved')
 
         # ---- Reconciliation policy (see CLAUDE.md "Reconciliation: which
-        # source wins"): the per-program workflow div is authoritative
-        # for current_step. Approve Pages' role pending list is a hint
-        # used for discovery; it can have stale-cache entries that
-        # disagree with the workflow div, so we never let Approve Pages
-        # override the workflow div when both have data.
+        # source wins"):
         #
-        # Cases:
-        #   1. workflow div fetched OK + has a 'current' step → use it
-        #   2. workflow div fetched OK + steps present + no 'current' →
-        #      program is complete; clear current_step
-        #   3. workflow div empty / fetch failed → unverifiable; fall
-        #      back to whatever Approve Pages discovered (avoids losing
-        #      data on transient fetch errors)
+        # Approve Pages role discovery is the AUTHORITATIVE source for
+        # current_step. It's literally the pending list CIM shows to
+        # approvers — "this program is waiting for you at role X". CIM
+        # supports parallel workflow branches (especially for regulated
+        # campuses like Vancouver) where a program is simultaneously
+        # pending at a regulatory step AND at Program Graduate Provost
+        # Review. The linear workflow div only renders one branch, so
+        # walking the approval log can land on the wrong step (or one
+        # that doesn't even exist in the visible workflow) while
+        # Approve Pages correctly reflects what's pending right now.
+        #
+        # Priority order:
+        #   1. Approve Pages saw this program in the current scan → use that
+        #      role. This is the user-visible truth.
+        #   2. Otherwise (DB-active program not surfaced by Approve Pages,
+        #      or A3 probe brand-new), fall back to walking the approval
+        #      log on /programadmin/{id}/. This handles obscure roles
+        #      not in ALL_ROLES, programs we re-fetch to verify, etc.
+        #   3. If the workflow div was empty/errored AND Approve Pages
+        #      had nothing, leave current_step blank.
+        #
+        # Walking the log (used as the fallback): each "Approved for X"
+        # advances past the matching step at-or-after the current index;
+        # each "Rollback to X" rewinds to it. Walking handles workflows
+        # with duplicate step names (e.g., "Program Review 2" appearing
+        # twice when CIM loops back through it after Banner Setup).
         html_current = next((s for s in steps if s.get('status') == 'current'), None)
         html_error = detail.get('html_error')
         approve_pages_step = info.get('current_step', '')
+        from_approve_pages = bool(info.get('from_approve_pages'))
         verified_via_workflow_div = bool(steps) and not html_error
 
-        if verified_via_workflow_div:
-            # Authoritative source: the approval log on /programadmin/{id}/.
-            # CIM's `class="current"` marker is *derived* and can lag the
-            # actual workflow state for hours. The approval log is the
-            # audit trail and cannot be stale.
-            #
-            # Algorithm: WALK the workflow chronologically through every
-            # event. Each "Approved for X" advances past the matching step;
-            # each "Rollback to X" rewinds to it. The final position is
-            # the current step. Walking (rather than just looking at the
-            # latest event) handles workflows where the same step name
-            # appears multiple times — e.g., program 177's workflow has
-            # "Program Review 2" at both step 3 AND step 8 (because the
-            # workflow loops back through it after Banner Setup). A
-            # naive "find first match" picks the wrong occurrence and
-            # advances to the wrong next step.
+        current_step = ''
+        current_emails = ''
+
+        if from_approve_pages and approve_pages_step:
+            # Authoritative: this program is pending at this role per CIM.
+            current_step = approve_pages_step
+            # Try to find emails for this step in the parsed workflow div
+            # (it may not contain this step at all if it's a parallel
+            # branch like Graduate Provost Review on a Vancouver program;
+            # in that case current_emails stays empty and the approver
+            # filter just doesn't show it for this program).
+            match = next(
+                (s for s in steps
+                    if (s.get('name') or '').strip() == approve_pages_step),
+                None)
+            if match is not None:
+                current_emails = match.get('emails', '') or ''
+        elif verified_via_workflow_div:
+            # Approve Pages didn't see this program. Walk the approval log.
             from email.utils import parsedate_to_datetime as _pdt
             events = []
             for a in (meta.get('approvals') or []):
@@ -1352,16 +1376,12 @@ def run_full_scan(force_fetch_only=False):
                 events.append({'t': t, 'type': 'rollback', 'step': (r.get('step') or '').strip()})
             events.sort(key=lambda e: e['t'])
 
-            current_step = ''
-            current_emails = ''
-
             if events:
                 # Walk the workflow forward through every event.
                 current_idx = 0
                 for event in events:
                     name = event['step']
                     if event['type'] == 'approved':
-                        # Find the matching step at or after current position.
                         match = next(
                             (s for s in steps
                                 if s.get('order', -1) >= current_idx
@@ -1377,13 +1397,12 @@ def run_full_scan(force_fetch_only=False):
                         if match is not None:
                             current_idx = match.get('order', current_idx)
 
-                # current_step = workflow step at current_idx
                 cur_step_obj = next(
                     (s for s in steps if s.get('order') == current_idx), None)
                 if cur_step_obj:
                     current_step = (cur_step_obj.get('name') or '').strip()
                     current_emails = cur_step_obj.get('emails', '') or ''
-                # else: walked past the end → workflow complete (empty)
+                # else: walked past the end → workflow complete
             else:
                 # No approval/rollback events: brand-new program. Use the
                 # workflow div's class marker if present, else first step.
@@ -1395,8 +1414,9 @@ def run_full_scan(force_fetch_only=False):
                     current_step = (first.get('name') or '').strip()
                     current_emails = first.get('emails', '') or ''
         else:
-            # Workflow div unverifiable (fetch failed or empty). Fall back
-            # to whatever Approve Pages discovered.
+            # Workflow div unverifiable (fetch failed/empty) AND Approve
+            # Pages didn't see it. Best we can do is whatever Approve
+            # Pages-style step was carried over from the DB.
             current_step = approve_pages_step
             current_emails = ''
 

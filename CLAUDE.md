@@ -418,19 +418,23 @@ Both Programs and Courses views have a **Complete** button at the right end of t
      - **Stale-cache bug**: when the dropdown is set to an EMPTY role, `showPendingList(role)` does NOT clear the previous role's content from the DOM. Our scrape's `body.innerText` polling locks onto the prior role's program list and reports it as the new role's. Concurrent scrapes (heal vs full-scan) compound this.
      - Programs sometimes appear in a role's pending list AFTER they've moved on to the next step (lag).
 
-  **Policy: workflow div is authoritative; Approve Pages is a hint.** Specifically:
+  **Policy: Approve Pages role discovery is authoritative; the workflow div + approval log are the fallback.** Specifically:
 
   | Signal | Action |
   |---|---|
-  | Workflow div fetched OK + has `<li class="current">` | Authoritative. Set `current_step` from the workflow div. (Override any conflicting Approve Pages hint.) |
-  | Workflow div fetched OK + has steps + no `current` | Authoritative. Program is complete. Clear `current_step`. |
-  | Workflow div empty / fetch failed (`html_error` set or `steps` is `[]`) | Unverifiable. **Do NOT** mark as complete. **Do NOT** clear `current_step`. Fall back to Approve Pages assignment (if any) or preserve existing DB value. |
-  | Approve Pages lists program at role Y, no workflow div data yet | Tentative. Use Y for `current_step`, but next scan should verify via workflow div. |
-  | Approve Pages doesn't list program | Hint that program is complete — but NOT proof. Verify via workflow div before clearing `current_step`. |
+  | Approve Pages discovered the program at role Y in this scan (`from_approve_pages=True`) | Authoritative. Set `current_step = Y`. This is literally what CIM tells the approver is pending. **Do not** override with the workflow div's `class="current"` marker or with a walk of the approval log — both can disagree with Approve Pages when CIM has parallel review branches (Vancouver/regulated campuses pend a program at GP *and* at GRA Regulatory Modifications Submitted; the linear workflow div only renders one branch). |
+  | Approve Pages didn't see the program + workflow div fetched OK with steps | Walk the approval log on `/programadmin/{id}/` chronologically. Each "Approved for X" advances past the matching step at-or-after the current index; each "Rollback to X" rewinds to it. Final position is `current_step`. Walking (vs. just taking class="current") handles duplicate step names (e.g., "Program Review 2" appearing at step 3 *and* step 8 in program 177's workflow). |
+  | Approve Pages didn't see it + workflow div fetched OK + no events in current cycle | Brand-new program: use the workflow div's `class="current"` marker if present, else first step. |
+  | Workflow div empty / fetch failed (`html_error` set or `steps` is `[]`) + Approve Pages saw it | Use the Approve Pages role. |
+  | Workflow div empty / fetch failed + Approve Pages didn't see it | Unverifiable. **Do NOT** mark as complete. **Do NOT** clear `current_step`. Preserve existing DB value. |
 
   **Destructive actions require positive evidence.** Never clear `current_step` based solely on a program being absent from Approve Pages — fetch the workflow div first and confirm "has steps but no current". An empty / failed workflow-div fetch is "unknown", not "complete".
 
-  **Why this is the right policy** (we tried the inverse): trusting Approve Pages over the workflow div led to repeated incidents where the stale-cache bug caused programs to be reassigned to wrong roles or have their `current_step` wiped despite still being in workflow. The workflow div has its own bugs (lag, missing on completion), but it's never WRONG when present — it's the data each reviewer actually sees and acts on.
+  **Why this policy** (we've flip-flopped on this; here's the history):
+  - **First inversion** — trusted Approve Pages over the workflow div. Hit the stale-cache bug where `showPendingList()` doesn't clear the previous role's content; programs got reassigned to wrong roles.
+  - **Second inversion** — trusted the workflow div's `class="current"` marker. Hit the marker-lag bug: after a user approves a program, CIM updates its approval log immediately but the marker can stay on the previous step for hours.
+  - **Third inversion** — trusted the approval-log walk (workflow div as ordered list, latest "Approved for X" tells you the new step). Worked for linear workflows but missed CIM's *parallel* branches: program 1516 (MS-DAAE Vancouver) was correctly listed at Program Graduate Provost Review in Approve Pages (and that's what the user saw in CIM), but the walk landed on "Program GRA Regulatory Modifications Submitted" because that's where the linear branch went. GP wasn't even in the workflow div's step list.
+  - **Current (correct)** — trust Approve Pages first, walk as fallback. The stale-cache bug from the first inversion is mitigated by `cache: 'no-store'` on every CIM fetch and the safety-net 25%-of-DB-active threshold before clearing rows. Approve Pages is by definition what CIM thinks is pending; the workflow div + approval log are derived views of one branch.
 
   **Code locations:** the policy is implemented in:
   - `run_full_scan()` Step 3 (per-program reconciliation when discovered by Approve Pages)
@@ -438,7 +442,7 @@ Both Programs and Courses views have a **Complete** button at the right end of t
   - `heal_stale_program_steps()` / `heal_stale_course_steps()` Step 2 (cross-check live_assignments) and Step 3b (verify before clearing)
   - All four call `batch_fetch_program_details` / `batch_fetch_course_details` in batches of 25 to verify; the per-program workflow fetch adds 2-4 minutes to a heal/full-scan but is essential for correctness.
 
-- **Source of truth for `current_step`** (TL;DR of above): per-program workflow div. Approve Pages is for discovery only.
+- **Source of truth for `current_step`** (TL;DR of above): Approve Pages role discovery when available; walk the approval log as fallback for programs Approve Pages didn't surface.
 - **Heal: mirror DB to live Approve Pages — `heal_stale_program_steps()` / `heal_stale_course_steps()`:** both iterate the **live** dropdown via `get_all_approve_roles()` (~215 entries; falls back to `ALL_ROLES` / `COURSE_TRACKED_ROLES` if the live fetch fails), query each role's pending list via `scrape_approve_pages_role()` / `scrape_courses_from_role()`, build a `pid → role` map, then:
   1. For each `(pid, role)` in the live map: ensure the DB row's `current_step = role`. Brand-new programs (in live, not in DB) are batch-fetched once for full metadata.
   2. For DB rows with a non-empty `current_step` whose ID is NOT in the live map: clear `current_step` (the program has moved off every queue — gone from CIM's reviewer view).
