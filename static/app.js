@@ -2377,7 +2377,14 @@ function renderCourseCell(item, cls) {
     const titleWithHours = item.hours
         ? `${item.title} (${item.hours}SH)`
         : item.title;
-    return `<td class="${cls} cmp-code">${escapeHtml(item.code)}</td>` +
+    // "or COURSE 1234" / "and COURSE 1234" rows are alternatives that
+    // attach to the primary course above. The Reference/curriculum
+    // rendering uses orclass + blockindent CSS for this; the Compare
+    // table builds its own cells, so we add cmp-alt here to drive the
+    // same visual indent on the code column.
+    const isAlt = /^(or|and)\s+/i.test(item.code || '');
+    const codeCls = isAlt ? `${cls} cmp-code cmp-alt` : `${cls} cmp-code`;
+    return `<td class="${codeCls}">${escapeHtml(item.code)}</td>` +
            `<td class="${cls} cmp-title">${escapeHtml(titleWithHours)}</td>`;
 }
 
