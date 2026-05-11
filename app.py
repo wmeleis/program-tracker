@@ -542,6 +542,14 @@ def api_scan_trigger():
                 subprocess.run(['git', 'push'], cwd=cwd)
                 with open(fp_path, 'w') as f:
                     f.write(current_fp)
+                # Record a scan row so the dashboard's "Updated" timestamp
+                # refreshes. Use programs_scanned=-3 as a sentinel for
+                # "this row came from a quick role update mid-scan, not
+                # a full do_scan completion".
+                try:
+                    record_scan(datetime.now().isoformat(), -3, 0, 0)
+                except Exception:
+                    pass
                 print(f">>> {label.upper()} pushed (fp {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)", flush=True)
             else:
                 print(f">>> {label.upper()} no DB changes (fp unchanged)", flush=True)
