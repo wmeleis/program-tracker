@@ -989,6 +989,18 @@ function __staticInit() {
                 updateCompareButton(programId, null);
                 return;
             }
+            // Self-reference fallback: no Boston counterpart, no prior
+            // approved version in CIM history → fetch_reference_curricula
+            // stored a sentinel ref where the "reference" is actually the
+            // program's own current curriculum. A diff would trivially be
+            // identical and labelling it "Boston reference" is wrong.
+            const isSelfRef = ref.version_date &&
+                ref.version_date.toLowerCase().includes('no prior approved');
+            if (isSelfRef) {
+                updateCompareButton(programId, null);
+                contentEl.innerHTML = '<div class="workflow-meta">No prior approved version on file for this program and no Boston counterpart found — nothing to compare against.</div>';
+                return;
+            }
             const {identical, diff} = compareCurricula(currHtml, refHtml);
             updateCompareButton(programId, identical);
             const inWorkflow = ref.version_date && ref.version_date.toLowerCase().includes('in workflow');
