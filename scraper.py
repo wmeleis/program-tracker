@@ -596,6 +596,17 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 while ((apMatch = apPattern.exec(text)) !== null) {{
                     approvalDates.push({{date: apMatch[1], step: apMatch[2].trim()}});
                 }}
+
+                // Rollbacks: "Rollback to X for Y" → workflow goes back to X.
+                // Captures both X and Y; the "for Y" suffix is stripped from X.
+                var rollbackDates = [];
+                var rbMatch;
+                var rbPattern = /([A-Z][a-z]{{2}}, \\d+ [A-Z][a-z]+ \\d{{4}} [\\d:]+ GMT)[\\s\\S]*?Rollback to ([^<\\n]+)/g;
+                while ((rbMatch = rbPattern.exec(text)) !== null) {{
+                    var rbStep = rbMatch[2].replace(/ for .*$/, '').trim();
+                    rollbackDates.push({{date: rbMatch[1], step: rbStep}});
+                }}
+                result.meta.rollbacks = rollbackDates;
                 // Filter to the CURRENT proposal cycle. CIM's workflow div for
                 // a revision/inactivation also shows approvals from the
                 // program's prior workflow runs (when it was first created or
@@ -1294,54 +1305,81 @@ def run_full_scan(force_fetch_only=False):
         verified_via_workflow_div = bool(steps) and not html_error
 
         if verified_via_workflow_div:
-            # Case 1 or 2: workflow div is the primary source.
-            wf_current_name = html_current.get('name', '') if html_current else ''
-            wf_current_emails = html_current.get('emails', '') if html_current else ''
+            # Authoritative source: the approval log on /programadmin/{id}/.
+            # CIM's `class="current"` marker is *derived* and can lag the
+            # actual workflow state for hours (observed 11 May 2026: user
+            # approved 7 programs, the marker stayed on the same step for
+            # 4+ hours despite the approval log clearly recording the
+            # advance). The approval log itself is the audit trail and
+            # cannot be stale.
+            #
+            # Algorithm:
+            #   1. Sort approval + rollback events by timestamp.
+            #   2. Latest event is "Approved for X" → current = step after X
+            #   3. Latest event is "Rollback to X"  → current = X
+            #   4. No events → use first step in workflow (brand-new program)
+            #   5. No "next step" after last approval → workflow complete
+            #
+            # The `class="current"` marker is no longer consulted.
+            from email.utils import parsedate_to_datetime as _pdt
+            events = []
+            for a in (meta.get('approvals') or []):
+                try:
+                    t = _pdt(a.get('date', '')).timestamp()
+                except Exception:
+                    continue
+                events.append({'t': t, 'type': 'approved', 'step': (a.get('step') or '').strip()})
+            for r in (meta.get('rollbacks') or []):
+                try:
+                    t = _pdt(r.get('date', '')).timestamp()
+                except Exception:
+                    continue
+                events.append({'t': t, 'type': 'rollback', 'step': (r.get('step') or '').strip()})
+            events.sort(key=lambda e: e['t'])
+            latest_event = events[-1] if events else None
 
-            # Stale-workflow-div correction: empirically (May 2026) CIM's
-            # workflow div can lag the actual workflow state by hours,
-            # *even after the user has clicked "approve"*. Detection: if
-            # the most recent approval-log entry on the same page says
-            # "Approved for X" and the workflow div STILL marks X as
-            # "current", then the workflow has actually advanced past X
-            # and the workflow div is stale. The real current step is the
-            # next pending step in the workflow array.
-            approvals = meta.get('approvals') or []
-            stale_correction_applied = False
-            if approvals and wf_current_name:
-                latest_approval = None
-                latest_t = None
-                from email.utils import parsedate_to_datetime as _pdt
-                for a in approvals:
-                    try:
-                        t = _pdt(a.get('date', '')).timestamp()
-                    except Exception:
-                        continue
-                    if latest_t is None or t > latest_t:
-                        latest_t = t
-                        latest_approval = a
-                if latest_approval and \
-                   (latest_approval.get('step') or '').strip() == wf_current_name.strip():
-                    # Workflow div is stale: find the next step.
-                    current_order = html_current.get('order') if html_current else None
-                    if current_order is not None:
-                        next_step = next(
-                            (s for s in steps
-                                if s.get('order') == current_order + 1),
-                            None)
-                        if next_step:
-                            current_step = next_step.get('name', '')
-                            current_emails = next_step.get('emails', '')
-                            stale_correction_applied = True
-                            print(f"  Workflow-div lag corrected for {prog_id}: "
-                                  f"latest approval-log entry already approved "
-                                  f"{wf_current_name!r}, advancing to {current_step!r}")
-
-            if not stale_correction_applied:
-                current_step = wf_current_name
-                current_emails = wf_current_emails
+            current_step = ''
+            current_emails = ''
+            if latest_event and latest_event['type'] == 'approved':
+                # Find the approved step in the workflow ordering.
+                approved_name = latest_event['step']
+                approved_step_obj = next(
+                    (s for s in steps if (s.get('name') or '').strip() == approved_name),
+                    None)
+                if approved_step_obj is not None:
+                    next_order = approved_step_obj.get('order', -1) + 1
+                    next_step = next(
+                        (s for s in steps if s.get('order') == next_order),
+                        None)
+                    if next_step:
+                        current_step = (next_step.get('name') or '').strip()
+                        current_emails = next_step.get('emails', '')
+                    # else: no next step → workflow complete; leave current_step empty
+                else:
+                    # Approved step name doesn't match any workflow step
+                    # (could be a step from a prior cycle / renamed). Fall
+                    # back to the class marker.
+                    current_step = (html_current.get('name') or '') if html_current else ''
+                    current_emails = (html_current.get('emails') or '') if html_current else ''
+            elif latest_event and latest_event['type'] == 'rollback':
+                current_step = latest_event['step']
+                matched = next(
+                    (s for s in steps if (s.get('name') or '').strip() == current_step),
+                    None)
+                current_emails = matched.get('emails', '') if matched else ''
+            else:
+                # No approval/rollback events: brand-new program. Use the
+                # workflow div's class marker if present, else first step.
+                if html_current:
+                    current_step = (html_current.get('name') or '').strip()
+                    current_emails = html_current.get('emails', '') or ''
+                elif steps:
+                    first = steps[0]
+                    current_step = (first.get('name') or '').strip()
+                    current_emails = first.get('emails', '') or ''
         else:
-            # Case 3: unverifiable. Fall back to Approve Pages.
+            # Workflow div unverifiable (fetch failed or empty). Fall back
+            # to whatever Approve Pages discovered.
             current_step = approve_pages_step
             current_emails = ''
 
