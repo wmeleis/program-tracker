@@ -535,11 +535,15 @@ def api_scan_trigger():
                     prev_fp = ''
             if current_fp != prev_fp:
                 scan_status['phase'] = f'{label} (publishing)…'
-                subprocess.run(['python3', 'export_static.py'], cwd=cwd)
-                subprocess.run(['git', 'add', 'docs/'], cwd=cwd)
+                # Timeouts on every subprocess call so a hung
+                # network/credential-prompt doesn't freeze the entire
+                # scan. Empirically a normal export takes ~10s, git
+                # push <10s; 180s is well above noise.
+                subprocess.run(['python3', 'export_static.py'], cwd=cwd, timeout=300)
+                subprocess.run(['git', 'add', 'docs/'], cwd=cwd, timeout=30)
                 subprocess.run(['git', 'commit', '-m',
-                                f'Quick role update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd)
-                subprocess.run(['git', 'push'], cwd=cwd)
+                                f'Quick role update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd, timeout=30)
+                subprocess.run(['git', 'push'], cwd=cwd, timeout=180)
                 with open(fp_path, 'w') as f:
                     f.write(current_fp)
                 # Record a scan row so the dashboard's "Updated" timestamp
@@ -764,10 +768,10 @@ def api_scan_trigger():
                     print(f"Export: skipping (fingerprint unchanged: {current_fp[:12]}...)")
                     scan_status['progress'] = 100
                 else:
-                    subprocess.run(['python3', 'export_static.py'], cwd=cwd)
-                    subprocess.run(['git', 'add', 'docs/'], cwd=cwd)
-                    subprocess.run(['git', 'commit', '-m', f'Auto-update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd)
-                    subprocess.run(['git', 'push'], cwd=cwd)
+                    subprocess.run(['python3', 'export_static.py'], cwd=cwd, timeout=300)
+                    subprocess.run(['git', 'add', 'docs/'], cwd=cwd, timeout=30)
+                    subprocess.run(['git', 'commit', '-m', f'Auto-update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd, timeout=30)
+                    subprocess.run(['git', 'push'], cwd=cwd, timeout=180)
                     print(f"Exported and pushed (fingerprint {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)")
                     # Persist new fingerprint after successful export+push.
                     with open(fp_path, 'w') as f:
