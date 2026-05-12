@@ -1182,6 +1182,130 @@ def get_courses_by_approver(email):
         return [dict(row) for row in rows]
 
 
+# ---------------------------------------------------------------------------
+# Portfolio tables
+# ---------------------------------------------------------------------------
+
+def init_portfolio_tables(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS portfolio_programs (
+            id TEXT PRIMARY KEY,
+            program_name TEXT NOT NULL,
+            college TEXT DEFAULT '',
+            campus TEXT DEFAULT '',
+            otp_status TEXT DEFAULT '',
+            otp_sub_status TEXT DEFAULT '',
+            otp_market_potential TEXT DEFAULT '',
+            otp_market_signal TEXT DEFAULT '',
+            otp_internal_performance TEXT DEFAULT '',
+            otp_q3_status TEXT DEFAULT '',
+            otp_effective_term TEXT DEFAULT '',
+            ipd_status TEXT DEFAULT '',
+            ipd_proposal_type TEXT DEFAULT '',
+            ipd_additional_college TEXT DEFAULT '',
+            cim_program_id INTEGER,
+            cim_step TEXT DEFAULT '',
+            cim_completion_date TEXT DEFAULT '',
+            last_refreshed TEXT DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS portfolio_notes (
+            program_id TEXT PRIMARY KEY,
+            note TEXT DEFAULT '',
+            updated_at TEXT DEFAULT ''
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_portfolio_college ON portfolio_programs(college);
+        CREATE INDEX IF NOT EXISTS idx_portfolio_campus  ON portfolio_programs(campus);
+        CREATE INDEX IF NOT EXISTS idx_portfolio_otp_status ON portfolio_programs(otp_status);
+        CREATE INDEX IF NOT EXISTS idx_portfolio_ipd_status ON portfolio_programs(ipd_status);
+    """)
+
+
+def upsert_portfolio_program(row):
+    """Insert or replace a portfolio program row (preserves notes)."""
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO portfolio_programs
+                (id, program_name, college, campus,
+                 otp_status, otp_sub_status, otp_market_potential,
+                 otp_market_signal, otp_internal_performance,
+                 otp_q3_status, otp_effective_term,
+                 ipd_status, ipd_proposal_type, ipd_additional_college,
+                 cim_program_id, cim_step, cim_completion_date, last_refreshed)
+            VALUES
+                (:id, :program_name, :college, :campus,
+                 :otp_status, :otp_sub_status, :otp_market_potential,
+                 :otp_market_signal, :otp_internal_performance,
+                 :otp_q3_status, :otp_effective_term,
+                 :ipd_status, :ipd_proposal_type, :ipd_additional_college,
+                 :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed)
+            ON CONFLICT(id) DO UPDATE SET
+                program_name=excluded.program_name,
+                college=excluded.college,
+                campus=excluded.campus,
+                otp_status=excluded.otp_status,
+                otp_sub_status=excluded.otp_sub_status,
+                otp_market_potential=excluded.otp_market_potential,
+                otp_market_signal=excluded.otp_market_signal,
+                otp_internal_performance=excluded.otp_internal_performance,
+                otp_q3_status=excluded.otp_q3_status,
+                otp_effective_term=excluded.otp_effective_term,
+                ipd_status=excluded.ipd_status,
+                ipd_proposal_type=excluded.ipd_proposal_type,
+                ipd_additional_college=excluded.ipd_additional_college,
+                cim_program_id=excluded.cim_program_id,
+                cim_step=excluded.cim_step,
+                cim_completion_date=excluded.cim_completion_date,
+                last_refreshed=excluded.last_refreshed
+        """, row)
+
+
+def replace_all_portfolio_programs(rows):
+    """Replace the full portfolio_programs table in one transaction."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM portfolio_programs")
+        for row in rows:
+            conn.execute("""
+                INSERT INTO portfolio_programs
+                    (id, program_name, college, campus,
+                     otp_status, otp_sub_status, otp_market_potential,
+                     otp_market_signal, otp_internal_performance,
+                     otp_q3_status, otp_effective_term,
+                     ipd_status, ipd_proposal_type, ipd_additional_college,
+                     cim_program_id, cim_step, cim_completion_date, last_refreshed)
+                VALUES
+                    (:id, :program_name, :college, :campus,
+                     :otp_status, :otp_sub_status, :otp_market_potential,
+                     :otp_market_signal, :otp_internal_performance,
+                     :otp_q3_status, :otp_effective_term,
+                     :ipd_status, :ipd_proposal_type, :ipd_additional_college,
+                     :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed)
+            """, row)
+
+
+def get_all_portfolio_programs():
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT p.*, n.note, n.updated_at as note_updated_at
+            FROM portfolio_programs p
+            LEFT JOIN portfolio_notes n ON n.program_id = p.id
+            ORDER BY p.college, p.program_name, p.campus
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+
+def upsert_portfolio_note(program_id, note):
+    with get_db() as conn:
+        from datetime import datetime
+        conn.execute("""
+            INSERT INTO portfolio_notes (program_id, note, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(program_id) DO UPDATE SET
+                note=excluded.note, updated_at=excluded.updated_at
+        """, (program_id, note, datetime.now().isoformat()))
+
+
 def migrate_db():
     """Add new columns to existing database if needed."""
     with get_db() as conn:
@@ -1250,3 +1374,6 @@ def migrate_db():
                 print("  Added column: custom_reference_id")
             except sqlite3.OperationalError:
                 pass  # already added
+
+        # Portfolio tables (idempotent)
+        init_portfolio_tables(conn)

@@ -20,6 +20,7 @@
                 <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">Programs</button>
                 <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">Courses</button>
                 <button class="toggle-btn" onclick="switchView('catalog')" id="btn-catalog">Catalog</button>
+                <button class="toggle-btn" onclick="switchView('portfolio')" id="btn-portfolio">Portfolio</button>
             </div>
             <div class="header-search">
                 <input type="text" id="filter-search" placeholder="Search programs by name or banner code..." oninput="applyFilters(); updateClearButtons()">
@@ -69,6 +70,52 @@
             </div>
         </div>
     </div>
+
+    <!-- Portfolio filter bar (visible only in portfolio view) -->
+    <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
+        <div class="filter-group">
+            <label>College:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-college" onchange="portfolioCollegeFilter=this.value; renderPortfolioTable()">
+                    <option value="">All</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Campus:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-campus" onchange="portfolioCampusFilter=this.value; renderPortfolioTable()">
+                    <option value="">All</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>OTP Status:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-otp" onchange="portfolioOtpFilter=this.value; renderPortfolioTable()">
+                    <option value="">All</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>IPD Status:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-ipd" onchange="portfolioIpdFilter=this.value; renderPortfolioTable()">
+                    <option value="">All</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-group">
+            <input type="text" id="portfolio-search" placeholder="Search programs…"
+                   oninput="portfolioSearch=this.value; renderPortfolioTable()" style="width:200px">
+        </div>
+        <div class="filter-group">
+            <button onclick="refreshPortfolio()" id="btn-portfolio-refresh" class="refresh-btn">Refresh Data</button>
+        </div>
+        <div class="filter-group">
+            <span id="portfolio-result-count" class="result-count"></span>
+        </div>
+    </section>
 
     <!-- Pipeline Summary -->
     <section id="pipeline" class="pipeline-section">

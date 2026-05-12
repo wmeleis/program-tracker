@@ -4,7 +4,7 @@ let allPrograms = [];
 let allCourses = [];
 let allCatalogPages = [];
 let cachedCatalogPipeline = [];
-let currentView = 'programs'; // 'programs', 'courses', or 'catalog'
+let currentView = 'programs'; // 'programs', 'courses', 'catalog', or 'portfolio'
 let expandedRows = new Set();
 let detailTabState = {}; // programId/courseId -> 'workflow' | 'curriculum'
 let currentSort = { column: 'name', direction: 'asc' };
@@ -111,6 +111,8 @@ function switchView(view) {
     document.getElementById('btn-courses').classList.toggle('active', view === 'courses');
     const btnCat = document.getElementById('btn-catalog');
     if (btnCat) btnCat.classList.toggle('active', view === 'catalog');
+    const btnPort = document.getElementById('btn-portfolio');
+    if (btnPort) btnPort.classList.toggle('active', view === 'portfolio');
 
     // Reset filters when switching views
     pipelineFilter = null;
@@ -135,29 +137,46 @@ function switchView(view) {
     const campusFilter = document.getElementById('filter-campus');
 
     const subjectGroup = document.getElementById('filter-group-subject');
-    if (view === 'courses') {
-        typeSection.style.display = 'flex';
-        proposalSection.style.display = 'flex';
-        campusFilter.parentElement.parentElement.style.display = 'none';
-        if (subjectGroup) subjectGroup.style.display = 'flex';
-    } else if (view === 'catalog') {
-        // Catalog has no degree types, no proposal types, no college/campus
-        // metadata — hide all those filter groups. Just keep the search box
-        // (filters by path/title), College, and Approver. Step is redundant
-        // with the pipeline tile row, so hide it too.
+    // Portfolio view uses its own filter bar; hide all standard filters
+    const portfolioFilters = document.getElementById('portfolio-filters');
+    const pipelineBar = document.getElementById('pipeline-bar');
+    const standardFilters = document.getElementById('filter-bar');
+    const proposalRow = document.getElementById('proposal-row');
+
+    if (view === 'portfolio') {
+        if (portfolioFilters) portfolioFilters.style.display = 'flex';
+        if (pipelineBar) pipelineBar.style.display = 'none';
+        if (standardFilters) standardFilters.style.display = 'none';
+        if (proposalRow) proposalRow.style.display = 'none';
         typeSection.style.display = 'none';
         proposalSection.style.display = 'none';
-        campusFilter.parentElement.parentElement.style.display = 'none';
         if (subjectGroup) subjectGroup.style.display = 'none';
-        const stepFilterGroup = document.getElementById('filter-step')?.parentElement?.parentElement;
-        if (stepFilterGroup) stepFilterGroup.style.display = 'none';
     } else {
-        const stepFilterGroup = document.getElementById('filter-step')?.parentElement?.parentElement;
-        if (stepFilterGroup) stepFilterGroup.style.display = 'flex';
-        typeSection.style.display = 'flex';
-        proposalSection.style.display = 'flex';
-        campusFilter.parentElement.parentElement.style.display = 'flex';
-        if (subjectGroup) subjectGroup.style.display = 'none';
+        if (portfolioFilters) portfolioFilters.style.display = 'none';
+        if (pipelineBar) pipelineBar.style.display = 'flex';
+        if (standardFilters) standardFilters.style.display = 'flex';
+        if (proposalRow) proposalRow.style.display = 'flex';
+
+        if (view === 'courses') {
+            typeSection.style.display = 'flex';
+            proposalSection.style.display = 'flex';
+            campusFilter.parentElement.parentElement.style.display = 'none';
+            if (subjectGroup) subjectGroup.style.display = 'flex';
+        } else if (view === 'catalog') {
+            typeSection.style.display = 'none';
+            proposalSection.style.display = 'none';
+            campusFilter.parentElement.parentElement.style.display = 'none';
+            if (subjectGroup) subjectGroup.style.display = 'none';
+            const stepFilterGroup = document.getElementById('filter-step')?.parentElement?.parentElement;
+            if (stepFilterGroup) stepFilterGroup.style.display = 'none';
+        } else {
+            const stepFilterGroup = document.getElementById('filter-step')?.parentElement?.parentElement;
+            if (stepFilterGroup) stepFilterGroup.style.display = 'flex';
+            typeSection.style.display = 'flex';
+            proposalSection.style.display = 'flex';
+            campusFilter.parentElement.parentElement.style.display = 'flex';
+            if (subjectGroup) subjectGroup.style.display = 'none';
+        }
     }
 
     // Update proposal button labels for Programs vs Courses
@@ -181,6 +200,8 @@ function switchView(view) {
         loadCoursesDashboard();
     } else if (view === 'catalog') {
         loadCatalogDashboard();
+    } else if (view === 'portfolio') {
+        loadPortfolioDashboard();
     }
 }
 
@@ -3073,3 +3094,168 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Auto-refresh every 2 minutes (data display only, not scanning)
 setInterval(loadDashboard, 120000);
+
+// ==================== Portfolio view ====================
+
+let allPortfolioPrograms = [];
+let portfolioCollegeFilter = '';
+let portfolioCampusFilter  = '';
+let portfolioOtpFilter     = '';
+let portfolioIpdFilter     = '';
+let portfolioSearch        = '';
+
+async function loadPortfolioDashboard() {
+    try {
+        const res = await fetch('/api/portfolio');
+        allPortfolioPrograms = (await res.json()).programs || [];
+        populatePortfolioFilters();
+        renderPortfolioTable();
+    } catch(e) {
+        console.error('portfolio load failed', e);
+    }
+}
+
+function populatePortfolioFilters() {
+    const programs = allPortfolioPrograms;
+
+    const colleges = [...new Set(programs.map(p => p.college).filter(Boolean))].sort();
+    const campuses  = [...new Set(programs.map(p => p.campus).filter(Boolean))].sort();
+    const otpStatuses = [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort();
+    const ipdStatuses = [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort();
+
+    function populate(id, values, current) {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        sel.innerHTML = `<option value="">All</option>` +
+            values.map(v => `<option value="${escapeHtml(v)}" ${v === current ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+    }
+    populate('portfolio-filter-college', colleges, portfolioCollegeFilter);
+    populate('portfolio-filter-campus',  campuses,  portfolioCampusFilter);
+    populate('portfolio-filter-otp',     otpStatuses, portfolioOtpFilter);
+    populate('portfolio-filter-ipd',     ipdStatuses, portfolioIpdFilter);
+}
+
+function getPortfolioFiltered() {
+    let rows = allPortfolioPrograms.slice();
+    if (portfolioCollegeFilter) rows = rows.filter(p => p.college === portfolioCollegeFilter);
+    if (portfolioCampusFilter)  rows = rows.filter(p => p.campus  === portfolioCampusFilter);
+    if (portfolioOtpFilter)     rows = rows.filter(p => p.otp_status === portfolioOtpFilter);
+    if (portfolioIpdFilter)     rows = rows.filter(p => p.ipd_status === portfolioIpdFilter);
+    if (portfolioSearch) {
+        const q = portfolioSearch.toLowerCase();
+        rows = rows.filter(p =>
+            (p.program_name || '').toLowerCase().includes(q) ||
+            (p.college      || '').toLowerCase().includes(q) ||
+            (p.campus       || '').toLowerCase().includes(q)
+        );
+    }
+    return rows;
+}
+
+function renderPortfolioTable() {
+    const container = document.getElementById('programs-table-container');
+    if (!container) return;
+    const rows = getPortfolioFiltered();
+
+    const countEl = document.getElementById('portfolio-result-count');
+    if (countEl) countEl.textContent = `${rows.length} programs`;
+
+    if (rows.length === 0) {
+        container.innerHTML = '<p class="empty-state">No programs match your filters.</p>';
+        return;
+    }
+
+    const html = `
+        <table class="program-table">
+            <thead><tr>
+                <th>Program</th>
+                <th>College</th>
+                <th>Campus</th>
+                <th>OTP Status</th>
+                <th>IPD Status</th>
+                <th>CIM Step</th>
+                <th>Notes</th>
+            </tr></thead>
+            <tbody>
+            ${rows.map(p => renderPortfolioRow(p)).join('')}
+            </tbody>
+        </table>`;
+    container.innerHTML = html;
+}
+
+function renderPortfolioRow(p) {
+    const otpBadge = p.otp_status
+        ? `<span class="portfolio-badge otp-badge">${escapeHtml(p.otp_status)}</span>` : '—';
+    const ipdBadge = p.ipd_status
+        ? `<span class="portfolio-badge ipd-badge">${escapeHtml(p.ipd_status)}</span>` : '—';
+    const cimStep  = p.cim_completion_date
+        ? `<span class="days-at-step complete">Approved</span>`
+        : (p.cim_step ? escapeHtml(p.cim_step) : '—');
+    const note = escapeHtml(p.note || '');
+    const isStatic = typeof window._staticMode !== 'undefined';
+    const noteCell = isStatic
+        ? `<span class="portfolio-note-text">${note || '<span class="muted">—</span>'}</span>`
+        : `<span class="portfolio-note-text" onclick="editPortfolioNote(this, '${escapeHtml(p.id)}')">${note || '<span class="muted add-note">+ add note</span>'}</span>`;
+
+    const subStatus = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
+    const marketSignal = p.otp_market_signal ? `<br><span class="muted" style="font-size:0.78em">${escapeHtml(p.otp_market_signal)} / ${escapeHtml(p.otp_internal_performance)}</span>` : '';
+
+    return `<tr class="portfolio-row" title="${escapeHtml(p.program_name)}">
+        <td class="program-name-cell">${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
+        <td>${escapeHtml(p.college) || '—'}</td>
+        <td>${escapeHtml(p.campus)  || '—'}</td>
+        <td>${otpBadge}</td>
+        <td>${ipdBadge}</td>
+        <td class="step-cell">${cimStep}</td>
+        <td class="portfolio-note-cell">${noteCell}</td>
+    </tr>`;
+}
+
+async function editPortfolioNote(el, programId) {
+    const current = el.querySelector('.add-note') ? '' : el.innerText.trim();
+    const textarea = document.createElement('textarea');
+    textarea.className = 'portfolio-note-input';
+    textarea.value = current;
+    textarea.rows = 2;
+    el.replaceWith(textarea);
+    textarea.focus();
+
+    async function save() {
+        const note = textarea.value.trim();
+        try {
+            await fetch(`/api/portfolio/note/${encodeURIComponent(programId)}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({note}),
+            });
+            // Update in-memory so re-render reflects new note
+            const prog = allPortfolioPrograms.find(p => p.id === programId);
+            if (prog) prog.note = note;
+        } catch(e) { console.error('note save failed', e); }
+        renderPortfolioTable();
+    }
+
+    textarea.addEventListener('blur', save);
+    textarea.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { textarea.blur(); }
+    });
+}
+
+async function refreshPortfolio() {
+    const btn = document.getElementById('btn-portfolio-refresh');
+    if (btn) { btn.textContent = 'Refreshing…'; btn.disabled = true; }
+    try {
+        const res = await fetch('/api/portfolio/refresh', {method: 'POST'});
+        const data = await res.json();
+        if (data.error) {
+            alert('Refresh failed: ' + data.error);
+        } else {
+            await loadPortfolioDashboard();
+        }
+    } catch(e) {
+        alert('Could not reach server: ' + e.message);
+    } finally {
+        if (btn) { btn.textContent = 'Refresh Data'; btn.disabled = false; }
+    }
+}
