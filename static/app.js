@@ -2379,7 +2379,14 @@ function diffLines(oldLines, newLines) {
 
 // Render a single side's cell content. Two columns per side: code + title
 // (with hours inlined into title as "(NSH)" by html_cleaner).
-function renderCourseCell(item, cls) {
+// Render one side's cells of a Compare row. `otherAlts` is the alts list
+// from the OPPOSITE side's diff entry (if any), so we can highlight any
+// alt that appears on this side but not the other — i.e., a partial
+// difference inside a matched primary. `mySide` ('left'|'right'|undefined)
+// drives the asymmetric color: a right-only alt reads as "added relative
+// to proposal" (green); a left-only alt reads as "in proposal but not
+// reference" (red).
+function renderCourseCell(item, cls, otherAlts, mySide) {
     if (!item) return `<td class="${cls}" colspan="2"></td>`;
     if (item.isHeader) {
         return `<td class="${cls} cmp-header" colspan="2">${escapeHtml(item.title)}</td>`;
@@ -2392,16 +2399,37 @@ function renderCourseCell(item, cls) {
     const isAlt = /^(or|and)\s+/i.test(item.code || '');
     const codeCls = isAlt ? `${cls} cmp-code cmp-alt` : `${cls} cmp-code`;
 
+    // Build a normalized lookup of the opposite side's alt codes so we
+    // can flag asymmetric alts (present here, missing there).
+    const otherSet = new Set();
+    if (otherAlts && otherAlts.length) {
+        for (const a of otherAlts) otherSet.add(normForCompare(a.code || ''));
+    }
+
     // Render the primary + any alternatives in the same cell so they
     // can never be visually separated by the LCS diff layout. Each
     // alternative becomes a sub-line with indent + lighter weight.
+    // Asymmetric alts (not on the other side) get cmp-alt-asym which
+    // tints them green/red to match the row's added/removed color so
+    // partial differences inside a "same" row remain visible.
     let codeHtml = escapeHtml(item.code);
     let titleHtml = escapeHtml(titleWithHours);
     if (item.alts && item.alts.length) {
         for (const a of item.alts) {
             const altTitleWithHours = a.hours ? `${a.title} (${a.hours}SH)` : a.title;
-            codeHtml += `<div class="cmp-alt-line">${escapeHtml(a.code)}</div>`;
-            titleHtml += `<div class="cmp-alt-line">${escapeHtml(altTitleWithHours)}</div>`;
+            const isShared = otherAlts !== undefined &&
+                otherSet.has(normForCompare(a.code || ''));
+            let lineCls = 'cmp-alt-line';
+            if (otherAlts !== undefined && !isShared) {
+                // Asymmetric — color based on which side this is.
+                // mySide=right → "added relative to proposal" (green)
+                // mySide=left  → "in proposal but not reference" (red)
+                lineCls += mySide === 'left'
+                    ? ' cmp-alt-asym-left'
+                    : ' cmp-alt-asym-right';
+            }
+            codeHtml += `<div class="${lineCls}">${escapeHtml(a.code)}</div>`;
+            titleHtml += `<div class="${lineCls}">${escapeHtml(altTitleWithHours)}</div>`;
         }
     }
     return `<td class="${codeCls}">${codeHtml}</td>` +
@@ -2411,14 +2439,21 @@ function renderCourseCell(item, cls) {
 // Render a side-by-side comparison table
 function renderSideBySide(diff, leftLabel, rightLabel) {
     let rows = diff.map(d => {
+        // For 'same' and 'moved' (both sides present), pass each side's
+        // alts to the OPPOSITE cell so asymmetric alts can be visually
+        // highlighted within an otherwise matching row.
         if (d.type === 'same') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-same')}` +
+            const lAlts = d.left && d.left.alts || [];
+            const rAlts = d.right && d.right.alts || [];
+            return `<tr>${renderCourseCell(d.left, 'cmp-same', rAlts, 'left')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-same')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-same', lAlts, 'right')}</tr>`;
         } else if (d.type === 'moved') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-moved')}` +
+            const lAlts = d.left && d.left.alts || [];
+            const rAlts = d.right && d.right.alts || [];
+            return `<tr>${renderCourseCell(d.left, 'cmp-moved', rAlts, 'left')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-moved')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-moved', lAlts, 'right')}</tr>`;
         } else if (d.type === 'removed') {
             return `<tr>${renderCourseCell(d.left, 'cmp-removed')}` +
                    `<td class="cmp-divider"></td>` +
@@ -2474,7 +2509,21 @@ function compareCurricula(refHtml, currHtml) {
     const refLines = mergeAlts(extractCourseLines(refHtml));
     const currLines = mergeAlts(extractCourseLines(currHtml));
     const diff = diffLines(refLines, currLines);
-    const identical = !diff.some(d => d.type !== 'same');
+    // identical only if every diff entry is 'same' AND no 'same' entry has
+    // an asymmetric alt list (e.g., left has MISM 6402 alone, right has
+    // MISM 6402 + or DADS 6400 — same primary, different alts → NOT
+    // identical). mergeAlts moved the alts inside their primary's entry
+    // so the LCS itself can't see them; we have to check explicitly here.
+    function altsKey(arr) {
+        return (arr || [])
+            .map(a => normForCompare(a.code || ''))
+            .sort()
+            .join('|');
+    }
+    const identical = diff.every(d => {
+        if (d.type !== 'same') return false;
+        return altsKey(d.left && d.left.alts) === altsKey(d.right && d.right.alts);
+    });
     return {identical, diff};
 }
 

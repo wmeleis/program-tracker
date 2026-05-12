@@ -1426,6 +1426,24 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     margin-top: 2px;
 }
 
+/* Asymmetric alt: present on this side but not the opposite side. In a
+   row that LCS calls "same" overall (primaries match), this is the
+   visual cue that the cell still differs. The right side's only-alts
+   are "added relative to the proposal" → green tint; the left side's
+   only-alts are "in the proposal but not the reference" → red tint. */
+.compare-table .cmp-alt-line.cmp-alt-asym-right {
+    background: #dcfce7;
+    color: #166534;
+    border-radius: 3px;
+    padding-right: 4px;
+}
+.compare-table .cmp-alt-line.cmp-alt-asym-left {
+    background: #fee2e2;
+    color: #991b1b;
+    border-radius: 3px;
+    padding-right: 4px;
+}
+
 .compare-table td.cmp-title {
     /* flexible width */
 }
