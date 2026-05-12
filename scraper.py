@@ -683,6 +683,18 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 var bodyEl = xmlDoc.querySelector("body");
                 result.meta.curriculum_html = bodyEl ? bodyEl.innerHTML : "";
                 result.meta.req_degree_credits = getXml("req_degree_credits");
+                // statustype is the XML-native proposal type field — more reliable
+                // than scraping it from the raw HTML (which is a JS shell).
+                var st = getXml("statustype");
+                if (st) {{
+                    if (/new/i.test(st)) {{
+                        result.meta.proposal_type = "New Program Proposal";
+                    }} else if (/inactivat/i.test(st)) {{
+                        result.meta.proposal_type = "Inactivation Proposal";
+                    }} else {{
+                        result.meta.proposal_type = "Program Revision Proposal";
+                    }}
+                }}
                 var dj = getXml("deletejustification");
                 if (dj) {{
                     result.meta.proposal_type = "Inactivation Proposal";
@@ -1243,6 +1255,7 @@ def run_full_scan(force_fetch_only=False):
         meta = detail.get('meta', {})
         print(f"\n  XML debug for program {pid}:", flush=True)
         print(f"    xml_status: {meta.get('xml_status', 'N/A')}", flush=True)
+        print(f"    statustype (proposal): '{meta.get('proposal_type', '')}'", flush=True)
         print(f"    college: '{meta.get('college', '')}'", flush=True)
         print(f"    department: '{meta.get('department', '')}'", flush=True)
         print(f"    banner_code: '{meta.get('banner_code', '')}'", flush=True)
@@ -1283,15 +1296,24 @@ def run_full_scan(force_fetch_only=False):
         if meta.get('program_title'):
             prog_name = meta['program_title']
 
-        # Determine proposal status
+        # Determine proposal status.
+        # Prefer XML-sourced proposal_type (set from statustype in xmlPromise).
+        # Fall back to preserving the existing DB status when the fetch clearly
+        # failed (no steps returned AND an html_error or 400 xml_status) —
+        # this prevents a transient 400 from resetting a correct "Added" or
+        # "Deactivated" tag back to "Edited".
         banner_code = meta.get('banner_code', '')
         proposal_type = meta.get('proposal_type', '')
+        fetch_failed = (not steps and
+                        (detail.get('html_error') or
+                         meta.get('xml_status') not in (None, '', 200, '200')))
+        old_status = existing_programs.get(prog_id, {}).get('status', '') if fetch_failed else ''
         if 'New Program' in proposal_type:
             status = 'Added'
         elif 'Inactivation' in proposal_type:
             status = 'Deactivated'
-        elif proposal_type:
-            status = 'Edited'
+        elif fetch_failed and old_status:
+            status = old_status   # preserve existing rather than guess "Edited"
         else:
             status = 'Edited'
 
@@ -1729,10 +1751,16 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
         college = COLLEGE_NAMES.get(college_code, college_code)
 
         proposal_type = meta.get('proposal_type', '')
+        fetch_failed_sw = (total == 0 and not is_complete and
+                           (detail.get('html_error') or
+                            meta.get('xml_status') not in (None, '', 200, '200')))
+        old_status_sw = existing.get(prog_id, {}).get('status', '') if fetch_failed_sw else ''
         if 'New Program' in proposal_type:
             status = 'Added'
         elif 'Inactivation' in proposal_type:
             status = 'Deactivated'
+        elif fetch_failed_sw and old_status_sw:
+            status = old_status_sw
         else:
             status = 'Edited'
 
