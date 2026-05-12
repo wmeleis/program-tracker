@@ -283,11 +283,12 @@ _DEGREE_TOKENS = re.compile(
     r'msene|mssbs|dnp|dpt|dmsc|edd|phd|jd|llm|dlp|bs|ba|bfa|barch|bsn|bsba|bscf|'
     r'certg?|mat|mbe)\b', re.I)
 
-# Degree tokens that appear as a prefix in OTP names ("MS Computer Science")
+# Degree tokens that appear as a prefix in OTP/IPD names ("MS Computer Science",
+# "MS in Artificial Intelligence", "Master of Science in Data Science")
 _DEGREE_PREFIX = re.compile(
     r'^(ms|ma|mps|mpa|mph|mba|mfa|med|mem|march|mdes|mscs|msis|msor|msfmba|msece|'
     r'msene|mssbs|dnp|dpt|dmsc|edd|phd|jd|llm|dlp|bs|ba|bfa|barch|bsn|bsba|bscf|'
-    r'certg?|mat|mbe)\s+(.+)$', re.I)
+    r'certg?|mat|mbe)\s+(?:in\s+|of\s+)?(.+)$', re.I)
 
 _CAMPUS_NAMES = {
     'BOS': 'Boston', 'OAK': 'Oakland', 'TOR': 'Toronto', 'POR': 'Portland',
@@ -478,8 +479,9 @@ def _normalize_non_cim_name(name):
     if m:
         rest = _strip_trailing_campus(m.group(1).strip())
         return rest + ', Graduate Certificate'
-    # For any other name, still strip a trailing campus suffix if present
-    return _strip_trailing_campus(s)
+    # Normalize "MS in X" / "MS X" / "BS in X" → "X, MS" / "X, BS" etc.
+    s = _normalize_degree_prefix(_strip_trailing_campus(s))
+    return s
 
 
 def _load_all_cim_programs():
