@@ -33,9 +33,10 @@ def _find_db_path():
 import database as _db_module
 _db_module.DB_PATH = _find_db_path()
 
-XLSX_PATH = os.path.expanduser("~/Downloads/portfolio_sharepoint.xlsx")
-TSV_PATH  = os.path.expanduser("~/Downloads/portfolio_smartsheet.tsv")
-OTP_SHEET = "OTP Program Tracking"
+XLSX_PATH   = os.path.expanduser("~/Downloads/portfolio_sharepoint.xlsx")
+TSV_PATH    = os.path.expanduser("~/Downloads/portfolio_smartsheet.tsv")
+ROSTER_PATH = os.path.expanduser("~/Downloads/portfolio_roster.tsv")
+OTP_SHEET   = "OTP Program Tracking"
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +194,71 @@ def parse_smartsheet(path=TSV_PATH):
 
 
 # ---------------------------------------------------------------------------
+# Parse GLS Roster of Record TSV
+# ---------------------------------------------------------------------------
+
+def parse_roster(path=ROSTER_PATH):
+    """Parse the roster TSV produced by fetch_portfolio_data.fetch_roster_dashboards().
+
+    Each line: source_name \\t source_type \\t program_name \\t col5_value \\t
+               col5_label \\t status \\t sub_status \\t proposal_type \\t launch_date
+    """
+    if not os.path.exists(path):
+        return []
+
+    programs = []
+    seen = set()
+
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            parts = line.rstrip('\n').split('\t')
+            if len(parts) < 9:
+                continue
+
+            source_name  = parts[0]   # e.g., 'Arlington', 'Bouve'
+            source_type  = parts[1]   # 'campus' or 'college'
+            prog_name    = parts[2].strip()
+            col5_value   = parts[3].strip()
+            # col5_label   = parts[4]  # 'Campus' or 'College' (informational)
+            status       = parts[5].strip()
+            sub_status   = parts[6].strip()
+            proposal     = parts[7].strip()
+            launch_date  = parts[8].strip()
+
+            if not prog_name or prog_name == 'Primary':
+                continue
+
+            # Determine campus and college from source context
+            if source_type == 'campus':
+                campus  = source_name
+                college = col5_value
+            else:  # college
+                campus  = col5_value
+                college = source_name
+
+            # Normalise placeholder campus values
+            if campus in ('Not Applicable', 'N/A', 'Online', ''):
+                campus = campus if campus == 'Online' else ''
+
+            key = (_norm(prog_name), _norm(campus))
+            if key in seen:
+                continue
+            seen.add(key)
+
+            programs.append({
+                'program_name':       prog_name,
+                'campus':             campus,
+                'college':            college,
+                'roster_status':      status,
+                'roster_sub_status':  sub_status,
+                'roster_proposal_type': proposal,
+                'roster_launch_date': launch_date,
+            })
+
+    return programs
+
+
+# ---------------------------------------------------------------------------
 # Link to CIM
 # ---------------------------------------------------------------------------
 
@@ -223,26 +289,38 @@ def _load_cim_programs():
 # Merge and ingest
 # ---------------------------------------------------------------------------
 
-def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH):
-    """Parse both sources, merge, link to CIM, replace portfolio_programs table."""
+def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
+    """Parse all sources, merge, link to CIM, replace portfolio_programs table."""
     from database import replace_all_portfolio_programs
 
     if not os.path.exists(xlsx_path):
         raise FileNotFoundError(f"OTP Excel not found: {xlsx_path}")
 
-    otp_rows   = parse_otp(xlsx_path)
-    ipd_rows   = parse_smartsheet(tsv_path)
-    cim_index  = _load_cim_programs()
+    otp_rows    = parse_otp(xlsx_path)
+    ipd_rows    = parse_smartsheet(tsv_path)
+    roster_rows = parse_roster(roster_path)
+    cim_index   = _load_cim_programs()
 
     now = datetime.now().isoformat()
 
-    # Build unified dict keyed by (norm_name, norm_campus)
-    unified = {}  # id -> row dict
+    _EMPTY_ROW = {
+        'otp_status': '', 'otp_sub_status': '', 'otp_market_potential': '',
+        'otp_market_signal': '', 'otp_internal_performance': '',
+        'otp_q3_status': '', 'otp_effective_term': '',
+        'ipd_status': '', 'ipd_proposal_type': '', 'ipd_additional_college': '',
+        'roster_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
+        'roster_launch_date': '',
+        'cim_program_id': None, 'cim_step': '', 'cim_completion_date': '',
+        'last_refreshed': now,
+    }
+
+    # Build unified dict keyed by id = norm_name__norm_campus
+    unified = {}
 
     # 1. Seed from OTP (authoritative for college/campus/status)
     for p in otp_rows:
         pid = _make_id(p['program_name'], p['campus'])
-        unified[pid] = {
+        unified[pid] = dict(_EMPTY_ROW, **{
             'id':           pid,
             'program_name': p['program_name'],
             'college':      p['college'],
@@ -254,24 +332,16 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH):
             'otp_internal_performance': p['otp_internal_performance'],
             'otp_q3_status':           p['otp_q3_status'],
             'otp_effective_term':      p['otp_effective_term'],
-            'ipd_status':          '',
-            'ipd_proposal_type':   '',
-            'ipd_additional_college': '',
-            'cim_program_id':    None,
-            'cim_step':          '',
-            'cim_completion_date': '',
-            'last_refreshed':    now,
-        }
+        })
 
-    # 2. Merge IPD data by normalized name (campus-agnostic match: update all
-    #    OTP rows whose name matches; if none found, add a new campus-less row)
-    ipd_index = {}  # norm_name -> first matching ipd row
+    # 2. Merge IPD data by normalized name (campus-agnostic)
+    ipd_index = {}
     for p in ipd_rows:
         key = _norm(p['program_name'])
         if key not in ipd_index:
             ipd_index[key] = p
 
-    for pid, row in unified.items():
+    for row in unified.values():
         key = _norm(row['program_name'])
         if key in ipd_index:
             ipd = ipd_index[key]
@@ -279,36 +349,62 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH):
             row['ipd_proposal_type']      = ipd['ipd_proposal_type']
             row['ipd_additional_college'] = ipd['ipd_additional_college']
 
-    # Add IPD-only programs (not in OTP at all)
+    # Add IPD-only programs (not in OTP)
     otp_norm_names = {_norm(r['program_name']) for r in otp_rows}
     for p in ipd_rows:
-        key = _norm(p['program_name'])
-        if key in otp_norm_names:
+        if _norm(p['program_name']) in otp_norm_names:
             continue
         pid = _make_id(p['program_name'], '')
         if pid not in unified:
-            unified[pid] = {
+            unified[pid] = dict(_EMPTY_ROW, **{
                 'id':           pid,
                 'program_name': p['program_name'],
                 'college':      p['ipd_college'],
                 'campus':       '',
-                'otp_status':              '',
-                'otp_sub_status':          '',
-                'otp_market_potential':    '',
-                'otp_market_signal':       '',
-                'otp_internal_performance': '',
-                'otp_q3_status':           '',
-                'otp_effective_term':      '',
                 'ipd_status':             p['ipd_status'],
                 'ipd_proposal_type':      p['ipd_proposal_type'],
                 'ipd_additional_college': p['ipd_additional_college'],
-                'cim_program_id':    None,
-                'cim_step':          '',
-                'cim_completion_date': '',
-                'last_refreshed':    now,
-            }
+            })
 
-    # 3. Link each row to CIM by name
+    # 3. Merge Roster data by (norm_name, norm_campus)
+    for p in roster_rows:
+        key_name   = _norm(p['program_name'])
+        key_campus = _norm(p['campus'])
+        pid        = _make_id(p['program_name'], p['campus'])
+
+        if pid in unified:
+            row = unified[pid]
+        else:
+            # Try name-only match against existing rows
+            matched = None
+            for existing_pid, existing_row in unified.items():
+                if (_norm(existing_row['program_name']) == key_name and
+                        _norm(existing_row['campus']) == key_campus):
+                    matched = existing_row
+                    break
+            if matched:
+                row = matched
+            else:
+                # Roster-only program
+                unified[pid] = dict(_EMPTY_ROW, **{
+                    'id':           pid,
+                    'program_name': p['program_name'],
+                    'college':      p['college'],
+                    'campus':       p['campus'],
+                })
+                row = unified[pid]
+
+        row['roster_status']        = p['roster_status']
+        row['roster_sub_status']    = p['roster_sub_status']
+        row['roster_proposal_type'] = p['roster_proposal_type']
+        row['roster_launch_date']   = p['roster_launch_date']
+        # Fill college/campus from roster if blank in OTP/IPD
+        if not row.get('college') and p['college']:
+            row['college'] = p['college']
+        if not row.get('campus') and p['campus']:
+            row['campus'] = p['campus']
+
+    # 4. Link each row to CIM by name
     for row in unified.values():
         key = _norm(row['program_name'])
         if key in cim_index:
@@ -319,9 +415,11 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH):
 
     rows = list(unified.values())
     replace_all_portfolio_programs(rows)
+    roster_linked = sum(1 for r in rows if r.get('roster_status'))
     print(f"Portfolio ingest: {len(rows)} programs "
-          f"({len(otp_rows)} OTP, {len(ipd_rows)} IPD, "
-          f"{sum(1 for r in rows if r['cim_program_id'])} linked to CIM)")
+          f"({len(otp_rows)} OTP, {len(ipd_rows)} IPD, {len(roster_rows)} Roster, "
+          f"{sum(1 for r in rows if r['cim_program_id'])} linked to CIM, "
+          f"{roster_linked} with roster data)")
     return len(rows)
 
 

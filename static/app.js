@@ -3102,6 +3102,7 @@ let portfolioCollegeFilter = '';
 let portfolioCampusFilter  = '';
 let portfolioOtpFilter     = '';
 let portfolioIpdFilter     = '';
+let portfolioRosterFilter  = '';
 let portfolioSearch        = '';
 
 async function loadPortfolioDashboard() {
@@ -3118,10 +3119,11 @@ async function loadPortfolioDashboard() {
 function populatePortfolioFilters() {
     const programs = allPortfolioPrograms;
 
-    const colleges = [...new Set(programs.map(p => p.college).filter(Boolean))].sort();
-    const campuses  = [...new Set(programs.map(p => p.campus).filter(Boolean))].sort();
-    const otpStatuses = [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort();
-    const ipdStatuses = [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort();
+    const colleges      = [...new Set(programs.map(p => p.college).filter(Boolean))].sort();
+    const campuses      = [...new Set(programs.map(p => p.campus).filter(Boolean))].sort();
+    const otpStatuses   = [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort();
+    const ipdStatuses   = [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort();
+    const rosterStatuses = [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort();
 
     function populate(id, values, current) {
         const sel = document.getElementById(id);
@@ -3129,18 +3131,20 @@ function populatePortfolioFilters() {
         sel.innerHTML = `<option value="">All</option>` +
             values.map(v => `<option value="${escapeHtml(v)}" ${v === current ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
     }
-    populate('portfolio-filter-college', colleges, portfolioCollegeFilter);
-    populate('portfolio-filter-campus',  campuses,  portfolioCampusFilter);
-    populate('portfolio-filter-otp',     otpStatuses, portfolioOtpFilter);
-    populate('portfolio-filter-ipd',     ipdStatuses, portfolioIpdFilter);
+    populate('portfolio-filter-college', colleges,      portfolioCollegeFilter);
+    populate('portfolio-filter-campus',  campuses,      portfolioCampusFilter);
+    populate('portfolio-filter-otp',     otpStatuses,   portfolioOtpFilter);
+    populate('portfolio-filter-ipd',     ipdStatuses,   portfolioIpdFilter);
+    populate('portfolio-filter-roster',  rosterStatuses, portfolioRosterFilter);
 }
 
 function getPortfolioFiltered() {
     let rows = allPortfolioPrograms.slice();
     if (portfolioCollegeFilter) rows = rows.filter(p => p.college === portfolioCollegeFilter);
     if (portfolioCampusFilter)  rows = rows.filter(p => p.campus  === portfolioCampusFilter);
-    if (portfolioOtpFilter)     rows = rows.filter(p => p.otp_status === portfolioOtpFilter);
-    if (portfolioIpdFilter)     rows = rows.filter(p => p.ipd_status === portfolioIpdFilter);
+    if (portfolioOtpFilter)     rows = rows.filter(p => p.otp_status    === portfolioOtpFilter);
+    if (portfolioIpdFilter)     rows = rows.filter(p => p.ipd_status    === portfolioIpdFilter);
+    if (portfolioRosterFilter)  rows = rows.filter(p => p.roster_status === portfolioRosterFilter);
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
         rows = rows.filter(p =>
@@ -3173,6 +3177,7 @@ function renderPortfolioTable() {
                 <th>Campus</th>
                 <th>OTP Status</th>
                 <th>IPD Status</th>
+                <th>Roster Status</th>
                 <th>CIM Step</th>
                 <th>Notes</th>
             </tr></thead>
@@ -3184,10 +3189,13 @@ function renderPortfolioTable() {
 }
 
 function renderPortfolioRow(p) {
-    const otpBadge = p.otp_status
+    const otpBadge    = p.otp_status
         ? `<span class="portfolio-badge otp-badge">${escapeHtml(p.otp_status)}</span>` : '—';
-    const ipdBadge = p.ipd_status
+    const ipdBadge    = p.ipd_status
         ? `<span class="portfolio-badge ipd-badge">${escapeHtml(p.ipd_status)}</span>` : '—';
+    const rosterBadge = p.roster_status
+        ? `<span class="portfolio-badge roster-badge">${escapeHtml(p.roster_status)}</span>
+           ${p.roster_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.roster_sub_status)}</span>` : ''}` : '—';
     const cimStep  = p.cim_completion_date
         ? `<span class="days-at-step complete">Approved</span>`
         : (p.cim_step ? escapeHtml(p.cim_step) : '—');
@@ -3197,7 +3205,7 @@ function renderPortfolioRow(p) {
         ? `<span class="portfolio-note-text">${note || '<span class="muted">—</span>'}</span>`
         : `<span class="portfolio-note-text" onclick="editPortfolioNote(this, '${escapeHtml(p.id)}')">${note || '<span class="muted add-note">+ add note</span>'}</span>`;
 
-    const subStatus = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
+    const subStatus    = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
     const marketSignal = p.otp_market_signal ? `<br><span class="muted" style="font-size:0.78em">${escapeHtml(p.otp_market_signal)} / ${escapeHtml(p.otp_internal_performance)}</span>` : '';
 
     return `<tr class="portfolio-row" title="${escapeHtml(p.program_name)}">
@@ -3206,6 +3214,7 @@ function renderPortfolioRow(p) {
         <td>${escapeHtml(p.campus)  || '—'}</td>
         <td>${otpBadge}</td>
         <td>${ipdBadge}</td>
+        <td>${rosterBadge}</td>
         <td class="step-cell">${cimStep}</td>
         <td class="portfolio-note-cell">${noteCell}</td>
     </tr>`;

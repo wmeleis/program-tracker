@@ -106,6 +106,14 @@
             </div>
         </div>
         <div class="filter-group">
+            <label>Roster Status:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-roster" onchange="portfolioRosterFilter=this.value; renderPortfolioTable()">
+                    <option value="">All</option>
+                </select>
+            </div>
+        </div>
+        <div class="filter-group">
             <input type="text" id="portfolio-search" placeholder="Search programs…"
                    oninput="portfolioSearch=this.value; renderPortfolioTable()" style="width:200px">
         </div>
