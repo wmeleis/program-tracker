@@ -137,25 +137,30 @@ function switchView(view) {
     const campusFilter = document.getElementById('filter-campus');
 
     const subjectGroup = document.getElementById('filter-group-subject');
-    // Portfolio view uses its own filter bar; hide all standard filters
     const portfolioFilters = document.getElementById('portfolio-filters');
-    const pipelineBar = document.getElementById('pipeline-bar');
-    const standardFilters = document.getElementById('filter-bar');
-    const proposalRow = document.getElementById('proposal-row');
+
+    // Sections to hide entirely in portfolio view
+    const pipelineSection   = document.getElementById('pipeline');
+    const smartViewsSection = document.querySelector('.smart-views-section');
+    const kindFilterRow     = document.getElementById('kind-filter-row');
+    const smartActionsSection = document.querySelector('.smart-actions-section');
+    const filtersSection    = document.querySelector('.filters-section');
 
     if (view === 'portfolio') {
-        if (portfolioFilters) portfolioFilters.style.display = 'flex';
-        if (pipelineBar) pipelineBar.style.display = 'none';
-        if (standardFilters) standardFilters.style.display = 'none';
-        if (proposalRow) proposalRow.style.display = 'none';
-        typeSection.style.display = 'none';
-        proposalSection.style.display = 'none';
-        if (subjectGroup) subjectGroup.style.display = 'none';
+        if (portfolioFilters)    portfolioFilters.style.display = 'flex';
+        if (pipelineSection)     pipelineSection.style.display = 'none';
+        if (smartViewsSection)   smartViewsSection.style.display = 'none';
+        if (kindFilterRow)       kindFilterRow.style.display = 'none';
+        if (smartActionsSection) smartActionsSection.style.display = 'none';
+        if (filtersSection)      filtersSection.style.display = 'none';
+        if (subjectGroup)        subjectGroup.style.display = 'none';
     } else {
-        if (portfolioFilters) portfolioFilters.style.display = 'none';
-        if (pipelineBar) pipelineBar.style.display = 'flex';
-        if (standardFilters) standardFilters.style.display = 'flex';
-        if (proposalRow) proposalRow.style.display = 'flex';
+        if (portfolioFilters)    portfolioFilters.style.display = 'none';
+        if (pipelineSection)     pipelineSection.style.display = 'block';
+        if (smartViewsSection)   smartViewsSection.style.display = 'flex';
+        if (kindFilterRow)       kindFilterRow.style.display = view === 'programs' ? 'flex' : 'none';
+        if (smartActionsSection) smartActionsSection.style.display = view === 'catalog' ? 'none' : 'flex';
+        if (filtersSection)      filtersSection.style.display = 'flex';
 
         if (view === 'courses') {
             typeSection.style.display = 'flex';
@@ -3097,13 +3102,52 @@ setInterval(loadDashboard, 120000);
 
 // ==================== Portfolio view ====================
 
-let allPortfolioPrograms = [];
+let allPortfolioPrograms   = [];
 let portfolioCollegeFilter = '';
 let portfolioCampusFilter  = '';
 let portfolioOtpFilter     = '';
 let portfolioIpdFilter     = '';
 let portfolioRosterFilter  = '';
+let portfolioCimFilter     = '';
+let portfolioLevelFilter   = '';
+let portfolioDegreeFilter  = '';
 let portfolioSearch        = '';
+
+function classifyPortfolioLevel(name) {
+    const n = name || '';
+    if (/\b(MS|MA|MBA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSFMBA|MSEnvE|MSSBS|DNP|DPT|DMSC|EdD|PhD|LLM|JD|CERTG)\b/.test(n) ||
+        /\b(Master|Doctor|Graduate)\b/i.test(n)) return 'Graduate';
+    if (/\b(BS|BA|BFA|BArch|BSN|BSBA|BSCF)\b/.test(n) ||
+        /\b(Bachelor|Undergrad|Minor)\b/i.test(n)) return 'Undergraduate';
+    return null;
+}
+
+function classifyPortfolioDegree(name) {
+    const n = name || '';
+    if (/\bDual.?Degree\b/i.test(n) ||
+        /\b(MS|MPH|MA|MBA|PharmD)\b.{1,20}&.{1,20}\b(MS|MPH|MA|MBA|PharmD|DNP)\b/.test(n)) return 'Dual Degree';
+    if (/\b(PhD|Ph\.D|EdD|DPT|DNP|DMSC)\b/.test(n) || /\bDoctor(ate)?\b/i.test(n)) return 'Doctorate';
+    if (/\b(BS|BA|BFA|BArch|BSN|BSBA|BSCF)\b/.test(n) || /\bBachelor/i.test(n)) return "Bachelor's";
+    if (/\b(MS|MA|MBA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSFMBA|MSEnvE|MSSBS)\b/.test(n) ||
+        /\bMaster/i.test(n)) return "Master's";
+    if (/\b(CERT|CERTG)\b/i.test(n) || /\bCertificate\b/i.test(n)) return 'Certificate';
+    if (/\bMinor\b/i.test(n)) return 'Minor';
+    if (/\bPlus.?One\b|\b4\+1\b/i.test(n)) return 'Plus One';
+    if (/\bConcentration\b/i.test(n)) return 'Concentration';
+    return null;
+}
+
+function setPortfolioLevel(btn, val) {
+    portfolioLevelFilter = val;
+    document.querySelectorAll('.portfolio-lvl-btn').forEach(b => b.classList.toggle('active', b === btn));
+    renderPortfolioTable();
+}
+
+function setPortfolioDegree(btn, val) {
+    portfolioDegreeFilter = val;
+    document.querySelectorAll('.portfolio-deg-btn').forEach(b => b.classList.toggle('active', b === btn));
+    renderPortfolioTable();
+}
 
 async function loadPortfolioDashboard() {
     try {
@@ -3124,27 +3168,50 @@ function populatePortfolioFilters() {
     const otpStatuses   = [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort();
     const ipdStatuses   = [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort();
     const rosterStatuses = [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort();
+    const cimSteps       = [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort();
 
     function populate(id, values, current) {
         const sel = document.getElementById(id);
         if (!sel) return;
-        sel.innerHTML = `<option value="">All</option>` +
+        sel.innerHTML = `<option value="" disabled${current ? '' : ' selected'}> — select — </option>` +
             values.map(v => `<option value="${escapeHtml(v)}" ${v === current ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+        sel.closest('.filter-select-wrap').classList.toggle('has-value', !!current);
     }
     populate('portfolio-filter-college', colleges,      portfolioCollegeFilter);
     populate('portfolio-filter-campus',  campuses,      portfolioCampusFilter);
     populate('portfolio-filter-otp',     otpStatuses,   portfolioOtpFilter);
     populate('portfolio-filter-ipd',     ipdStatuses,   portfolioIpdFilter);
     populate('portfolio-filter-roster',  rosterStatuses, portfolioRosterFilter);
+    populate('portfolio-filter-cim',     cimSteps,       portfolioCimFilter);
+}
+
+const _portfolioFilterVars = {
+    'portfolio-filter-college': () => { portfolioCollegeFilter = ''; },
+    'portfolio-filter-campus':  () => { portfolioCampusFilter  = ''; },
+    'portfolio-filter-otp':     () => { portfolioOtpFilter     = ''; },
+    'portfolio-filter-ipd':     () => { portfolioIpdFilter     = ''; },
+    'portfolio-filter-roster':  () => { portfolioRosterFilter  = ''; },
+    'portfolio-filter-cim':     () => { portfolioCimFilter     = ''; },
+};
+
+function clearPortfolioFilter(id) {
+    const sel = document.getElementById(id);
+    if (sel) sel.value = '';
+    if (_portfolioFilterVars[id]) _portfolioFilterVars[id]();
+    updateClearButtons();
+    renderPortfolioTable();
 }
 
 function getPortfolioFiltered() {
     let rows = allPortfolioPrograms.slice();
+    if (portfolioLevelFilter)   rows = rows.filter(p => classifyPortfolioLevel(p.program_name)  === portfolioLevelFilter);
+    if (portfolioDegreeFilter)  rows = rows.filter(p => classifyPortfolioDegree(p.program_name) === portfolioDegreeFilter);
     if (portfolioCollegeFilter) rows = rows.filter(p => p.college === portfolioCollegeFilter);
     if (portfolioCampusFilter)  rows = rows.filter(p => p.campus  === portfolioCampusFilter);
     if (portfolioOtpFilter)     rows = rows.filter(p => p.otp_status    === portfolioOtpFilter);
     if (portfolioIpdFilter)     rows = rows.filter(p => p.ipd_status    === portfolioIpdFilter);
     if (portfolioRosterFilter)  rows = rows.filter(p => p.roster_status === portfolioRosterFilter);
+    if (portfolioCimFilter)     rows = rows.filter(p => p.cim_step      === portfolioCimFilter);
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
         rows = rows.filter(p =>
@@ -3177,7 +3244,8 @@ function renderPortfolioTable() {
                 <th>Campus</th>
                 <th>OTP Status</th>
                 <th>IPD Status</th>
-                <th>Roster Status</th>
+                <th>GLS Status</th>
+                <th>Launch Date</th>
                 <th>CIM Step</th>
                 <th>Notes</th>
             </tr></thead>
@@ -3198,7 +3266,7 @@ function renderPortfolioRow(p) {
            ${p.roster_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.roster_sub_status)}</span>` : ''}` : '—';
     const cimStep  = p.cim_completion_date
         ? `<span class="days-at-step complete">Approved</span>`
-        : (p.cim_step ? escapeHtml(p.cim_step) : '—');
+        : (p.cim_step ? escapeHtml(p.cim_step) : '');
     const note = escapeHtml(p.note || '');
     const isStatic = typeof window._staticMode !== 'undefined';
     const noteCell = isStatic
@@ -3215,6 +3283,7 @@ function renderPortfolioRow(p) {
         <td>${otpBadge}</td>
         <td>${ipdBadge}</td>
         <td>${rosterBadge}</td>
+        <td>${escapeHtml(p.roster_launch_date || '')}</td>
         <td class="step-cell">${cimStep}</td>
         <td class="portfolio-note-cell">${noteCell}</td>
     </tr>`;

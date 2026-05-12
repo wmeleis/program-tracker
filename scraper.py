@@ -2638,6 +2638,14 @@ def _search_cim_for_boston_ids(banner_codes):
     return code_map
 
 
+# Manual overrides: non-Boston program_id -> Boston counterpart program_id.
+# Used when name-matching picks the wrong Boston program (e.g. a completed
+# variant when the correct reference is the regular in-workflow Boston version).
+REFERENCE_COUNTERPART_OVERRIDES = {
+    1907: 392,  # MPH—Accelerated (Online) -> Public Health, MPH (Boston)
+}
+
+
 def _build_boston_counterpart_map(program_ids):
     """For non-Boston programs, find the Boston counterpart's CIM ID.
 
@@ -2704,6 +2712,14 @@ def _build_boston_counterpart_map(program_ids):
             if code not in cim_results:
                 for pid in pids:
                     print(f"  No Boston counterpart for: {all_programs[pid]} (ID {pid}) — using own history")
+
+    # Apply manual overrides (last, so they always win over name-matching)
+    for pid, boston_id in REFERENCE_COUNTERPART_OVERRIDES.items():
+        if pid in non_boston_ids:
+            old = counterpart_map.get(pid)
+            counterpart_map[pid] = boston_id
+            if old != boston_id:
+                print(f"  Override: {all_programs.get(pid, pid)} (ID {pid}) -> Boston ID {boston_id} (was {old})")
 
     return counterpart_map, non_boston_ids
 

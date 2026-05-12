@@ -13,7 +13,7 @@
     </div>
     <header>
         <div class="header-left">
-            <h1>CourseLeaf CIM Dashboard</h1>
+            <h1>Program Dashboard</h1>
         </div>
         <div class="header-middle">
             <div class="view-toggle">
@@ -73,49 +73,72 @@
 
     <!-- Portfolio filter bar (visible only in portfolio view) -->
     <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <button class="portfolio-lvl-btn active" data-lvl="" onclick="setPortfolioLevel(this,'')">All</button>
+            <button class="portfolio-lvl-btn" data-lvl="Undergraduate" onclick="setPortfolioLevel(this,'Undergraduate')">Undergraduate</button>
+            <button class="portfolio-lvl-btn" data-lvl="Graduate" onclick="setPortfolioLevel(this,'Graduate')">Graduate</button>
+        </div>
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <button class="portfolio-deg-btn active" data-deg="" onclick="setPortfolioDegree(this,'')">All</button>
+            <button class="portfolio-deg-btn" data-deg="Bachelor's" onclick="setPortfolioDegree(this,&quot;Bachelor's&quot;)">Bachelor's</button>
+            <button class="portfolio-deg-btn" data-deg="Master's" onclick="setPortfolioDegree(this,&quot;Master's&quot;)">Master's</button>
+            <button class="portfolio-deg-btn" data-deg="Doctorate" onclick="setPortfolioDegree(this,'Doctorate')">Doctorate</button>
+            <button class="portfolio-deg-btn" data-deg="Certificate" onclick="setPortfolioDegree(this,'Certificate')">Certificate</button>
+            <button class="portfolio-deg-btn" data-deg="Minor" onclick="setPortfolioDegree(this,'Minor')">Minor</button>
+            <button class="portfolio-deg-btn" data-deg="Plus One" onclick="setPortfolioDegree(this,'Plus One')">Plus One</button>
+            <button class="portfolio-deg-btn" data-deg="Concentration" onclick="setPortfolioDegree(this,'Concentration')">Concentration</button>
+            <button class="portfolio-deg-btn" data-deg="Dual Degree" onclick="setPortfolioDegree(this,'Dual Degree')">Dual Degree</button>
+        </div>
+        <div class="filter-group" style="flex-basis:100%; margin:0; padding:4px 0 0"></div>
         <div class="filter-group">
             <label>College:</label>
             <div class="filter-select-wrap">
-                <select id="portfolio-filter-college" onchange="portfolioCollegeFilter=this.value; renderPortfolioTable()">
-                    <option value="">All</option>
-                </select>
+                <select id="portfolio-filter-college" onchange="portfolioCollegeFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-college')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">
             <label>Campus:</label>
             <div class="filter-select-wrap">
-                <select id="portfolio-filter-campus" onchange="portfolioCampusFilter=this.value; renderPortfolioTable()">
-                    <option value="">All</option>
-                </select>
+                <select id="portfolio-filter-campus" onchange="portfolioCampusFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-campus')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">
-            <label>OTP Status:</label>
             <div class="filter-select-wrap">
-                <select id="portfolio-filter-otp" onchange="portfolioOtpFilter=this.value; renderPortfolioTable()">
-                    <option value="">All</option>
-                </select>
+                <input type="text" id="portfolio-search" placeholder="Search programs…"
+                       oninput="portfolioSearch=this.value; updateClearButtons(); renderPortfolioTable()" style="width:200px">
+                <span class="filter-clear" onclick="portfolioSearch=''; document.getElementById('portfolio-search').value=''; updateClearButtons(); renderPortfolioTable()" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>GLS Status:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-roster" onchange="portfolioRosterFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-roster')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">
             <label>IPD Status:</label>
             <div class="filter-select-wrap">
-                <select id="portfolio-filter-ipd" onchange="portfolioIpdFilter=this.value; renderPortfolioTable()">
-                    <option value="">All</option>
-                </select>
+                <select id="portfolio-filter-ipd" onchange="portfolioIpdFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-ipd')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">
-            <label>Roster Status:</label>
+            <label>OTP Status:</label>
             <div class="filter-select-wrap">
-                <select id="portfolio-filter-roster" onchange="portfolioRosterFilter=this.value; renderPortfolioTable()">
-                    <option value="">All</option>
-                </select>
+                <select id="portfolio-filter-otp" onchange="portfolioOtpFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-otp')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">
-            <input type="text" id="portfolio-search" placeholder="Search programs…"
-                   oninput="portfolioSearch=this.value; renderPortfolioTable()" style="width:200px">
+            <label>CIM Step:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-cim" onchange="portfolioCimFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-cim')" title="Clear">&times;</span>
+            </div>
         </div>
         <div class="filter-group">
             <button onclick="refreshPortfolio()" id="btn-portfolio-refresh" class="refresh-btn">Refresh Data</button>

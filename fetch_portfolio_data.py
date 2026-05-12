@@ -79,8 +79,6 @@ def run_js(url_fragment, js, timeout=60):
             end if
         end repeat
         if tabIdx = 0 then return "TAB_NOT_FOUND"
-        set active tab index of window 1 to tabIdx
-        delay 0.3
         tell tab tabIdx of window 1 to execute javascript jsCode
         return result
     end tell
@@ -105,8 +103,6 @@ def run_js_by_idx(tab_idx, js, timeout=60):
     script = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
     tell application "{BROWSER_APP}"
-        set active tab index of window 1 to {tab_idx}
-        delay 0.3
         tell tab {tab_idx} of window 1 to execute javascript jsCode
         return result
     end tell
@@ -204,13 +200,16 @@ def wait_for_grid(tab_idx, min_rows=5, timeout=30):
 
 def fetch_sharepoint():
     print("\n--- SharePoint Excel ---")
-    open_tab_if_missing(SHAREPOINT_URL, "northeastern-my.sharepoint.com")
+    # Use the owner's personal URL path as fragment — more specific than the
+    # sharepoint.com domain alone, which can match the OneDrive home tab.
+    _sp_fragment = "g_wahhab_northeastern_edu"
+    open_tab_if_missing(SHAREPOINT_URL, _sp_fragment)
     print("  Waiting for page to load...")
-    wait_for_load("northeastern-my.sharepoint.com", timeout=30)
+    wait_for_load(_sp_fragment, timeout=30)
     time.sleep(2)
 
     # Extract the authenticated download URL from the page's embedded JS
-    dl_url = run_js("northeastern-my.sharepoint.com", """
+    dl_url = run_js(_sp_fragment, """
     (function() {
         for (var s of document.querySelectorAll('script')) {
             var m = s.textContent.match(/"FileGetUrl"\\s*:\\s*"([^"]+)"/);
@@ -227,7 +226,7 @@ def fetch_sharepoint():
 
     # Fetch the file as binary via XHR in the browser, encode as base64, store in divs
     CHUNK = 200000
-    run_js("northeastern-my.sharepoint.com", f"""
+    run_js(_sp_fragment, f"""
     (function() {{
         fetch("{dl_url}", {{credentials: 'include'}})
             .then(r => r.arrayBuffer())
@@ -260,7 +259,7 @@ def fetch_sharepoint():
     """, timeout=10)
 
     print("  Downloading file...")
-    meta_raw = poll_div("northeastern-my.sharepoint.com", "__xlmeta", timeout=90)
+    meta_raw = poll_div(_sp_fragment, "__xlmeta", timeout=90)
     if not meta_raw:
         print("  Timeout waiting for download")
         return
@@ -272,7 +271,7 @@ def fetch_sharepoint():
 
     parts = []
     for c in range(meta['chunks']):
-        chunk = run_js("northeastern-my.sharepoint.com",
+        chunk = run_js(_sp_fragment,
                        f"(document.getElementById('__xlchunk_{c}')||{{innerText:''}}).innerText",
                        timeout=15)
         parts.append(chunk or '')
@@ -286,7 +285,7 @@ def fetch_sharepoint():
     print(f"  Saved: {out}  ({len(xlsx_bytes):,} bytes)")
 
     # Clean up holder divs
-    run_js("northeastern-my.sharepoint.com",
+    run_js(_sp_fragment,
            "document.querySelectorAll('[id^=__xl]').forEach(d => d.remove())", timeout=5)
 
 
@@ -296,12 +295,15 @@ def fetch_sharepoint():
 
 def fetch_smartsheet():
     print("\n--- Smartsheet IPD Dashboard ---")
-    open_tab_if_missing(SMARTSHEET_URL, "app.smartsheet.com")
+    # Match by the specific EQBCT token so we don't accidentally reuse a
+    # roster tab that fetch_roster_dashboards() left on a different dashboard.
+    _ipd_token = SMARTSHEET_URL.split("EQBCT=")[-1]
+    open_tab_if_missing(SMARTSHEET_URL, _ipd_token)
     print("  Waiting for page to load...")
-    wait_for_load("app.smartsheet.com", timeout=30)
+    wait_for_load(_ipd_token, timeout=30)
     time.sleep(4)  # extra time for JS grid to render
 
-    raw = run_js("app.smartsheet.com", """
+    raw = run_js(_ipd_token, """
     (function() {
         var rows = Array.from(document.querySelectorAll('tr'));
         var data = rows.map(function(row) {

@@ -1554,6 +1554,27 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 
 /* ==================== Portfolio view ==================== */
 
+.portfolio-lvl-btn, .portfolio-deg-btn {
+    padding: 5px 13px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.portfolio-lvl-btn:hover, .portfolio-deg-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.portfolio-lvl-btn.active, .portfolio-deg-btn.active {
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
 .portfolio-filters-section {
     display: flex;
     flex-wrap: wrap;
