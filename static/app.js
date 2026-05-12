@@ -2202,13 +2202,23 @@ function diffLines(oldLines, newLines) {
     // list under a single subheading), sort courses by code. Elective lists
     // are semantically sets — the same courses in a different order is not a
     // real curriculum change — so canonicalizing order lets LCS match 1-to-1.
+    //
+    // BUT: don't sort buffers that contain "or COURSE" / "and COURSE"
+    // alternative rows. Those buffers are ordered primary→alternative
+    // pairs (e.g., "MISM 6402" then "or DADS 6400") that read as a
+    // single requirement; sorting them alphabetically moves DADS before
+    // MISM and breaks the visual pairing in the rendered diff.
     function canonicalize(lines) {
+        const ALT_RE = /^(or|and)\s+/i;
         const out = [];
         let buffer = [];
         const flush = () => {
             if (buffer.length) {
-                buffer.sort((a, b) =>
-                    (a.key || a.code || '').localeCompare(b.key || b.code || ''));
+                const hasAlt = buffer.some(l => ALT_RE.test(l.code || ''));
+                if (!hasAlt) {
+                    buffer.sort((a, b) =>
+                        (a.key || a.code || '').localeCompare(b.key || b.code || ''));
+                }
                 out.push(...buffer);
                 buffer = [];
             }
@@ -2377,15 +2387,25 @@ function renderCourseCell(item, cls) {
     const titleWithHours = item.hours
         ? `${item.title} (${item.hours}SH)`
         : item.title;
-    // "or COURSE 1234" / "and COURSE 1234" rows are alternatives that
-    // attach to the primary course above. The Reference/curriculum
-    // rendering uses orclass + blockindent CSS for this; the Compare
-    // table builds its own cells, so we add cmp-alt here to drive the
-    // same visual indent on the code column.
+    // Standalone "or COURSE 1234" rows (no preceding primary, or
+    // mergeAlts missed it) keep the cmp-alt indent fallback.
     const isAlt = /^(or|and)\s+/i.test(item.code || '');
     const codeCls = isAlt ? `${cls} cmp-code cmp-alt` : `${cls} cmp-code`;
-    return `<td class="${codeCls}">${escapeHtml(item.code)}</td>` +
-           `<td class="${cls} cmp-title">${escapeHtml(titleWithHours)}</td>`;
+
+    // Render the primary + any alternatives in the same cell so they
+    // can never be visually separated by the LCS diff layout. Each
+    // alternative becomes a sub-line with indent + lighter weight.
+    let codeHtml = escapeHtml(item.code);
+    let titleHtml = escapeHtml(titleWithHours);
+    if (item.alts && item.alts.length) {
+        for (const a of item.alts) {
+            const altTitleWithHours = a.hours ? `${a.title} (${a.hours}SH)` : a.title;
+            codeHtml += `<div class="cmp-alt-line">${escapeHtml(a.code)}</div>`;
+            titleHtml += `<div class="cmp-alt-line">${escapeHtml(altTitleWithHours)}</div>`;
+        }
+    }
+    return `<td class="${codeCls}">${codeHtml}</td>` +
+           `<td class="${cls} cmp-title">${titleHtml}</td>`;
 }
 
 // Render a side-by-side comparison table
@@ -2420,10 +2440,39 @@ function renderSideBySide(diff, leftLabel, rightLabel) {
     </table>`;
 }
 
+// Merge "or COURSE 1234" / "and COURSE 1234" rows into their primary's
+// `alts` array so each primary+alt(s) group becomes a single diff entry.
+// Without this, LCS can interleave unrelated left-only or right-only
+// rows between a primary and its alternative, breaking the visual
+// pairing in the rendered side-by-side table.
+//
+// Only applied to Compare's diff input — extractCourseLines itself keeps
+// or-rows as standalone entries so the Regulatory tab can still flag
+// each alternative course individually.
+function mergeAlts(lines) {
+    const ALT_RE = /^(or|and)\s+/i;
+    const out = [];
+    for (const l of lines) {
+        if (!l.isHeader && ALT_RE.test(l.code || '')) {
+            // Attach to the most recent non-header entry in `out`.
+            for (let i = out.length - 1; i >= 0; i--) {
+                if (!out[i].isHeader) {
+                    if (!out[i].alts) out[i] = {...out[i], alts: []};
+                    out[i].alts.push({code: l.code, title: l.title, hours: l.hours});
+                    break;
+                }
+            }
+            continue;  // do not push the alt as its own diff entry
+        }
+        out.push(l);
+    }
+    return out;
+}
+
 // Compare two curricula, return {identical, diff}
 function compareCurricula(refHtml, currHtml) {
-    const refLines = extractCourseLines(refHtml);
-    const currLines = extractCourseLines(currHtml);
+    const refLines = mergeAlts(extractCourseLines(refHtml));
+    const currLines = mergeAlts(extractCourseLines(currHtml));
     const diff = diffLines(refLines, currLines);
     const identical = !diff.some(d => d.type !== 'same');
     return {identical, diff};

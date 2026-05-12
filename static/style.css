@@ -1408,15 +1408,22 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     font-weight: 500;
 }
 
-/* "or COURSE 1234" / "and COURSE 1234" alternative rows. The Reference
-   tab renders these with orclass + blockindent (no top border, code
-   indented 20px); the Compare table builds its own cells, so we mimic
-   the indent here. We don't try to drop the top border because LCS
-   pairing may put a non-matching row on the opposite side, and
-   suppressing the border across both halves would falsely link them. */
+/* "or COURSE 1234" / "and COURSE 1234" alternative rows that mergeAlts
+   couldn't fold into a primary (orphans). Fallback styling so they at
+   least read as alternatives. */
 .compare-table td.cmp-code.cmp-alt {
     padding-left: 28px;
     font-weight: 400;
+}
+
+/* Alternatives that DID get merged into a primary's cell render as
+   sub-lines (one <div> per alt) inside the same td as the primary,
+   so they can never be visually separated by the LCS diff layout. */
+.compare-table .cmp-alt-line {
+    padding-left: 20px;
+    font-weight: 400;
+    font-style: normal;
+    margin-top: 2px;
 }
 
 .compare-table td.cmp-title {
