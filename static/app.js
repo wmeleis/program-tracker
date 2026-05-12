@@ -2315,6 +2315,55 @@ function diffLines(oldLines, newLines) {
             }
         }
     }
+
+    // Second post-LCS pass: pair removed/added entries by SET key
+    // (primary code + all alt codes, normalized + sorted). This handles
+    // mirror "or" pairings — e.g., proposal's "DADS 6400 or MISM 6402"
+    // (DADS primary, MISM alt) vs reference's "MISM 6402 or DADS 6400"
+    // (MISM primary, DADS alt). The primaries differ so the first pass
+    // doesn't match them, but the set of choices ("take either course")
+    // is identical and the user reads them as the same requirement.
+    function entrySetKey(entry) {
+        if (!entry) return '';
+        const codes = [normForCompare(entry.code || '')];
+        for (const a of (entry.alts || [])) {
+            const stripped = (a.code || '').replace(/^(or|and)\s+/i, '');
+            codes.push(normForCompare(stripped));
+        }
+        return codes.filter(Boolean).sort().join('|');
+    }
+    const removedBySetKey = {};
+    courseDiff.forEach((e, idx) => {
+        if (e && e.type === 'removed') {
+            const k = entrySetKey(e.left);
+            // Only consider multi-code sets — single-code entries would
+            // have matched via the primary-key pass above.
+            if (k.indexOf('|') >= 0) {
+                (removedBySetKey[k] = removedBySetKey[k] || []).push(idx);
+            }
+        }
+    });
+    for (let idx = 0; idx < courseDiff.length; idx++) {
+        const e = courseDiff[idx];
+        if (e && e.type === 'added') {
+            const k = entrySetKey(e.right);
+            if (k.indexOf('|') >= 0) {
+                const candidates = removedBySetKey[k];
+                if (candidates && candidates.length) {
+                    const rIdx = candidates.shift();
+                    courseDiff[rIdx] = {
+                        type: 'same',
+                        leftIdx: courseDiff[rIdx].leftIdx,
+                        rightIdx: e.rightIdx,
+                        left: courseDiff[rIdx].left,
+                        right: e.right,
+                    };
+                    courseDiff[idx] = null;
+                }
+            }
+        }
+    }
+
     // Filter out the nulls
     for (let idx = courseDiff.length - 1; idx >= 0; idx--) {
         if (courseDiff[idx] === null) courseDiff.splice(idx, 1);
@@ -2379,14 +2428,14 @@ function diffLines(oldLines, newLines) {
 
 // Render a single side's cell content. Two columns per side: code + title
 // (with hours inlined into title as "(NSH)" by html_cleaner).
-// Render one side's cells of a Compare row. `otherAlts` is the alts list
-// from the OPPOSITE side's diff entry (if any), so we can highlight any
-// alt that appears on this side but not the other — i.e., a partial
-// difference inside a matched primary. `mySide` ('left'|'right'|undefined)
-// drives the asymmetric color: a right-only alt reads as "added relative
-// to proposal" (green); a left-only alt reads as "in proposal but not
-// reference" (red).
-function renderCourseCell(item, cls, otherAlts, mySide) {
+// Render one side's cells of a Compare row. `otherItem` is the diff entry
+// from the OPPOSITE side (if any) — we use its primary code AND its alts
+// list to detect any alt on this side that doesn't appear anywhere on
+// the other (matched as either primary or alt). `mySide`
+// ('left'|'right'|undefined) drives the asymmetric color: a right-only
+// alt reads as "added relative to proposal" (green); a left-only alt
+// reads as "in proposal but not reference" (red).
+function renderCourseCell(item, cls, otherItem, mySide) {
     if (!item) return `<td class="${cls}" colspan="2"></td>`;
     if (item.isHeader) {
         return `<td class="${cls} cmp-header" colspan="2">${escapeHtml(item.title)}</td>`;
@@ -2399,11 +2448,16 @@ function renderCourseCell(item, cls, otherAlts, mySide) {
     const isAlt = /^(or|and)\s+/i.test(item.code || '');
     const codeCls = isAlt ? `${cls} cmp-code cmp-alt` : `${cls} cmp-code`;
 
-    // Build a normalized lookup of the opposite side's alt codes so we
-    // can flag asymmetric alts (present here, missing there).
+    // Build a normalized lookup of every code (primary + alts) on the
+    // OTHER side, so we can flag asymmetric alts (codes that don't
+    // appear anywhere on the opposite side). The "or "/"and " prefix
+    // is stripped before comparison.
     const otherSet = new Set();
-    if (otherAlts && otherAlts.length) {
-        for (const a of otherAlts) otherSet.add(normForCompare(a.code || ''));
+    if (otherItem) {
+        otherSet.add(normForCompare((otherItem.code || '').replace(/^(or|and)\s+/i, '')));
+        for (const a of (otherItem.alts || [])) {
+            otherSet.add(normForCompare((a.code || '').replace(/^(or|and)\s+/i, '')));
+        }
     }
 
     // Render the primary + any alternatives in the same cell so they
@@ -2417,10 +2471,11 @@ function renderCourseCell(item, cls, otherAlts, mySide) {
     if (item.alts && item.alts.length) {
         for (const a of item.alts) {
             const altTitleWithHours = a.hours ? `${a.title} (${a.hours}SH)` : a.title;
-            const isShared = otherAlts !== undefined &&
-                otherSet.has(normForCompare(a.code || ''));
+            const myAltCode = (a.code || '').replace(/^(or|and)\s+/i, '');
+            const isShared = otherItem !== undefined &&
+                otherSet.has(normForCompare(myAltCode));
             let lineCls = 'cmp-alt-line';
-            if (otherAlts !== undefined && !isShared) {
+            if (otherItem !== undefined && !isShared) {
                 // Asymmetric — color based on which side this is.
                 // mySide=right → "added relative to proposal" (green)
                 // mySide=left  → "in proposal but not reference" (red)
@@ -2443,17 +2498,13 @@ function renderSideBySide(diff, leftLabel, rightLabel) {
         // alts to the OPPOSITE cell so asymmetric alts can be visually
         // highlighted within an otherwise matching row.
         if (d.type === 'same') {
-            const lAlts = d.left && d.left.alts || [];
-            const rAlts = d.right && d.right.alts || [];
-            return `<tr>${renderCourseCell(d.left, 'cmp-same', rAlts, 'left')}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-same', d.right, 'left')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-same', lAlts, 'right')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-same', d.left, 'right')}</tr>`;
         } else if (d.type === 'moved') {
-            const lAlts = d.left && d.left.alts || [];
-            const rAlts = d.right && d.right.alts || [];
-            return `<tr>${renderCourseCell(d.left, 'cmp-moved', rAlts, 'left')}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-moved', d.right, 'left')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-moved', lAlts, 'right')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-moved', d.left, 'right')}</tr>`;
         } else if (d.type === 'removed') {
             return `<tr>${renderCourseCell(d.left, 'cmp-removed')}` +
                    `<td class="cmp-divider"></td>` +
@@ -2509,20 +2560,23 @@ function compareCurricula(refHtml, currHtml) {
     const refLines = mergeAlts(extractCourseLines(refHtml));
     const currLines = mergeAlts(extractCourseLines(currHtml));
     const diff = diffLines(refLines, currLines);
-    // identical only if every diff entry is 'same' AND no 'same' entry has
-    // an asymmetric alt list (e.g., left has MISM 6402 alone, right has
-    // MISM 6402 + or DADS 6400 — same primary, different alts → NOT
-    // identical). mergeAlts moved the alts inside their primary's entry
-    // so the LCS itself can't see them; we have to check explicitly here.
-    function altsKey(arr) {
-        return (arr || [])
-            .map(a => normForCompare(a.code || ''))
-            .sort()
-            .join('|');
+    // identical only if every diff entry is 'same' AND each 'same' entry's
+    // combined code set (primary + alts) matches on both sides. The set-key
+    // post-pass in diffLines may have matched mirror-or pairs (proposal
+    // "DADS 6400 or MISM 6402" ≡ reference "MISM 6402 or DADS 6400") —
+    // those genuinely are identical even though the primary codes differ,
+    // so we compare the full set rather than primary-then-alts separately.
+    function entrySet(entry) {
+        if (!entry) return '';
+        const codes = [normForCompare(entry.code || '')];
+        for (const a of (entry.alts || [])) {
+            codes.push(normForCompare((a.code || '').replace(/^(or|and)\s+/i, '')));
+        }
+        return codes.filter(Boolean).sort().join('|');
     }
     const identical = diff.every(d => {
         if (d.type !== 'same') return false;
-        return altsKey(d.left && d.left.alts) === altsKey(d.right && d.right.alts);
+        return entrySet(d.left) === entrySet(d.right);
     });
     return {identical, diff};
 }
