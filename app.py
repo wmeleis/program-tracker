@@ -934,6 +934,38 @@ def api_step_courses(step_name):
     return jsonify({'courses': courses, 'step': step_name})
 
 
+@app.route('/api/portfolio')
+def api_portfolio():
+    from database import get_all_portfolio_programs
+    return jsonify({'programs': get_all_portfolio_programs()})
+
+
+@app.route('/api/portfolio/refresh', methods=['POST'])
+def api_portfolio_refresh():
+    """Re-download data via Chrome and re-ingest into the portfolio tables."""
+    import subprocess, sys
+    try:
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fetch_portfolio_data.py')
+        subprocess.run([sys.executable, script], check=True, timeout=300)
+    except Exception as e:
+        return jsonify({'error': f'fetch failed: {e}'}), 500
+    try:
+        from portfolio_ingest import ingest
+        count = ingest()
+        return jsonify({'ok': True, 'programs': count})
+    except Exception as e:
+        return jsonify({'error': f'ingest failed: {e}'}), 500
+
+
+@app.route('/api/portfolio/note/<path:program_id>', methods=['POST'])
+def api_portfolio_note(program_id):
+    from database import upsert_portfolio_note
+    data = request.get_json(force=True)
+    note = data.get('note', '')
+    upsert_portfolio_note(program_id, note)
+    return jsonify({'ok': True})
+
+
 if __name__ == '__main__':
     init_db()
     migrate_db()

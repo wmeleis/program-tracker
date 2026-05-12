@@ -191,6 +191,9 @@ def export_data():
         'count': catalog_counts.get(role, 0),
     } for role in CATALOG_TRACKED_ROLES]
 
+    from database import get_all_portfolio_programs
+    portfolio_programs = get_all_portfolio_programs()
+
     return {
         'exported_at': datetime.now().isoformat(),
         'programs': programs,
@@ -207,6 +210,7 @@ def export_data():
         'course_approvers': course_approvers,
         'catalog_pages': catalog_pages,
         'catalog_pipeline': catalog_pipeline,
+        'portfolio_programs': portfolio_programs,
     }
 
 
@@ -717,6 +721,18 @@ function __staticInit() {
         renderCatalogPipeline();
         renderCatalogTable();
     };
+
+    // Portfolio dashboard: read from embedded data; disable refresh + notes.
+    window.loadPortfolioDashboard = async function() {
+        const D = await _getData();
+        allPortfolioPrograms = D.portfolio_programs || [];
+        if (typeof populatePortfolioFilters === 'function') populatePortfolioFilters();
+        renderPortfolioTable();
+    };
+    window.refreshPortfolio = function() {
+        alert('Refresh is only available on the local server.');
+    };
+    window.editPortfolioNote = function() { /* read-only on static site */ };
 
     // Patch workflow detail loading (handles both programs and courses).
     window._origLoadWorkflowDetail = loadWorkflowDetail;

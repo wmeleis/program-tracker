@@ -1504,6 +1504,86 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     border-color: var(--accent);
 }
 
+/* ==================== Portfolio view ==================== */
+
+.portfolio-filters-section {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+
+.portfolio-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.78em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.otp-badge {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.ipd-badge {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+}
+
+.portfolio-row td {
+    vertical-align: top;
+    padding: 8px 10px;
+}
+
+.portfolio-note-cell {
+    min-width: 160px;
+    max-width: 260px;
+}
+
+.portfolio-note-text {
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.portfolio-note-text:hover { background: #f0f9ff; border-radius: 3px; }
+
+.add-note { color: #94a3b8; font-style: italic; }
+
+.portfolio-note-input {
+    width: 100%;
+    font-size: 0.85em;
+    padding: 4px 6px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.refresh-btn {
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.muted { color: #94a3b8; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .pipeline-bar { flex-wrap: wrap; }
