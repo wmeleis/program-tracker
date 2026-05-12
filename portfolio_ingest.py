@@ -137,50 +137,55 @@ def parse_otp(path=XLSX_PATH):
 def parse_smartsheet(path=TSV_PATH):
     """Return list of IPD program dicts from the exported Smartsheet TSV.
 
-    Column layout (0-indexed, data rows have a leading empty col[0]):
-      [1]  program name (Primary)
-      [5]  proposal type (How Can We Help You)
-      [6]  college
-      [7]  additional college impact
-      [8]  status
+    The Smartsheet export contains multiple sections, each preceded by a header
+    row starting with blank col[0] and 'Primary' in col[1].  Data rows have
+    three extra leading blank cols vs. the header (the +3 shift rule), so the
+    data column index for any header field is: header_index + 3.
+
+    We detect section boundaries dynamically and remap columns per section.
     """
     if not os.path.exists(path):
         return []
 
-    # Known status values from the Smartsheet
-    KNOWN_STATUSES = {
-        'Approved for Development by IPD',
-        'Approved for Development by College',
-        'Approved for Development by Mobility',
-        'EDGE - Development',
-        'EDGE - Development & Delivery',
-        'Launch in Progress',
-        'Intake',
-        'In Discovery',
-        'Discovery',
-        'On Hold',
-        'Not Moving Forward',
-        'Regulatory Validation In Progress',
-    }
+    # Column remapping state (updated on each 'Primary' header row)
+    status_col      = -1
+    proposal_col    = -1
+    college_col     = -1
+    add_college_col = -1
 
     programs = []
     with open(path) as f:
         for line in f:
             cols = line.rstrip('\n').split('\t')
-            if len(cols) < 6:
+            if len(cols) < 3:
                 continue
+
+            # Section header row: blank col[0], 'Primary' col[1]
+            if cols[0] == '' and cols[1].strip() == 'Primary':
+                header = [c.strip() for c in cols]
+                def _hcol(label):
+                    try: return header.index(label) + 3
+                    except ValueError: return -1
+                status_col        = _hcol('Status')
+                proposal_col      = _hcol('How Can We Help You')
+                college_col       = _hcol('College')
+                add_college_col   = _hcol('Additional College Impact')
+                continue
+
             name = cols[1].strip()
-            # Skip header, group headers, totals, blanks
             if (not name or name in ('Primary', 'Total')
                     or name.startswith('Status ')
-                    or name.startswith('Count ')):
+                    or name.startswith('Count ')
+                    or name.startswith('- *') or ('* - *' in name)):
                 continue
-            proposal_type      = cols[5].strip() if len(cols) > 5 else ''
-            college            = cols[6].strip() if len(cols) > 6 else ''
-            additional_college = cols[7].strip() if len(cols) > 7 else ''
-            status             = cols[8].strip() if len(cols) > 8 else ''
 
-            # Skip rows with no recognisable status (summary/header rows)
+            def _col(idx):
+                return cols[idx].strip() if idx >= 0 and len(cols) > idx else ''
+            status             = _col(status_col)
+            proposal_type      = _col(proposal_col)
+            college            = _col(college_col)
+            additional_college = _col(add_college_col)
+
             if not status:
                 continue
             programs.append({
@@ -212,7 +217,7 @@ def parse_roster(path=ROSTER_PATH):
     with open(path, encoding='utf-8') as f:
         for line in f:
             parts = line.rstrip('\n').split('\t')
-            if len(parts) < 9:
+            if len(parts) < 6:
                 continue
 
             source_name  = parts[0]   # e.g., 'Arlington', 'Bouve'
@@ -221,11 +226,22 @@ def parse_roster(path=ROSTER_PATH):
             col5_value   = parts[3].strip()
             # col5_label   = parts[4]  # 'Campus' or 'College' (informational)
             status       = parts[5].strip()
-            sub_status   = parts[6].strip()
-            proposal     = parts[7].strip()
-            launch_date  = parts[8].strip()
+            sub_status   = parts[6].strip() if len(parts) > 6 else ''
+            proposal     = parts[7].strip() if len(parts) > 7 else ''
+            launch_date  = parts[8].strip() if len(parts) > 8 else ''
 
             if not prog_name or prog_name == 'Primary':
+                continue
+
+            # Skip multi-program bundle rows (Smartsheet groups, e.g. "- *Program A* - *Program B*")
+            if prog_name.startswith('- *') or ('* - *' in prog_name):
+                continue
+
+            # Skip market-research / non-degree entries
+            _prop_lower = proposal.lower()
+            if any(kw in _prop_lower for kw in (
+                    'market research', 'general market', 'market study',
+                    'market analysis', 'feasibility')):
                 continue
 
             # Determine campus and college from source context
@@ -262,27 +278,273 @@ def parse_roster(path=ROSTER_PATH):
 # Link to CIM
 # ---------------------------------------------------------------------------
 
-def _load_cim_programs():
-    """Return {norm_name: {cim_program_id, cim_step, cim_completion_date}}."""
+_DEGREE_TOKENS = re.compile(
+    r'\b(ms|ma|mps|mpa|mph|mba|mfa|med|mem|march|mdes|mscs|msis|msor|msfmba|msece|'
+    r'msene|mssbs|dnp|dpt|dmsc|edd|phd|jd|llm|dlp|bs|ba|bfa|barch|bsn|bsba|bscf|'
+    r'certg?|mat|mbe)\b', re.I)
+
+# Degree tokens that appear as a prefix in OTP names ("MS Computer Science")
+_DEGREE_PREFIX = re.compile(
+    r'^(ms|ma|mps|mpa|mph|mba|mfa|med|mem|march|mdes|mscs|msis|msor|msfmba|msece|'
+    r'msene|mssbs|dnp|dpt|dmsc|edd|phd|jd|llm|dlp|bs|ba|bfa|barch|bsn|bsba|bscf|'
+    r'certg?|mat|mbe)\s+(.+)$', re.I)
+
+_CAMPUS_NAMES = {
+    'BOS': 'Boston', 'OAK': 'Oakland', 'TOR': 'Toronto', 'POR': 'Portland',
+    'SV': 'Silicon Valley', 'SJ': 'Silicon Valley', 'SEA': 'Seattle',
+    'MIA': 'Miami', 'ARL': 'Arlington', 'VAN': 'Vancouver',
+    'CHA': 'Charlotte', 'LON': 'London',
+    'Primarily Online - Vancouver Requirements': 'Primarily Online',
+}
+
+# Campus values that are clearly junk or overly verbose — discard them
+_BAD_CAMPUSES = re.compile(
+    r'copy this template|propose a new|combined health science', re.I)
+
+# Canonical college names (maps abbreviations and variants → full name)
+_COLLEGE_NAMES = {
+    'bouve':                        'Bouve College of Hlth Sciences',
+    'camd':                         'Coll of Arts, Media & Design',
+    'coe':                          'College of Engineering',
+    'cos':                          'College of Science',
+    'cps':                          'Coll of Professional Studies',
+    'cssh':                         'Coll of Soc Sci & Humanities',
+    'dmsb':                         "D'Amore-McKim School Business",
+    'khoury':                       'Khoury Coll of Comp Sciences',
+    'mills college':                'Mills College at NU',
+    'sol':                          'School of Law',
+    # Values that are not colleges — blank them out
+    'nch':                          '',
+    'nu-london':                    '',
+    'university interdisciplinary program (uip)': '',
+}
+
+_NOT_COLLEGES = {
+    'not applicable', 'all', 'n/a', 'none',
+    'new program', 'redesign an existing program', 'deploy program to network',
+    'digital badge credential proposal', 'net new product', 'revamp an existing program',
+    'launch term change request', 'course development consultation',
+    'international opportunity', 'new product (e.g. student experience program)',
+}
+
+
+# Trailing campus suffix: strips from the first known campus name to the end.
+# Handles single campus (",Oakland"), multi-campus (",Boston, Arlington and Oakland"),
+# and slash-separated (",Oakland/Portland").
+_CAMPUS_SUFFIX_RE = re.compile(
+    r',\s*(Boston|Oakland|Portland|Toronto|Seattle|Miami|Arlington|Vancouver|'
+    r'Charlotte|London|Silicon Valley|Online|Primarily Online).*$',
+    re.I)
+
+_ABBREV_MAP = [
+    (r'\s*&\s*',      ' and '),
+    (r'\bmgmt\b',     'management'),
+    (r'\bsci\b',      'science'),
+    (r'\bsciences\b', 'science'),    # plural→singular for matching
+    (r'\bsvcs\b',     'services'),
+    (r'\badmin\b',    'administration'),
+    (r'\benvrnt\b',   'environment'),
+    (r'\benv\b',      'environment'),
+    (r'\bsustain\b',  'sustainable'),
+    (r'\bapp\b',      'applied'),
+    (r'\brehab\b',    'rehabilitation'),
+    (r'\binfo\b',     'information'),
+    (r'\bintl\b',     'international'),
+    (r'\bsoc\b',      'social'),
+    (r'\beduc\b',     'education'),
+    (r'\bquant\b',    'quantitative'),
+    (r'\binnov\b',    'innovation'),
+    (r'\bcomm\b',     'communication'),
+    (r'\bchem\b',     'chemistry'),
+    (r'\bsystems\b',  'system'),      # plural→singular for matching
+]
+# Compiled once at module load
+_ABBREV_RE = [(re.compile(pat, re.I), repl) for pat, repl in _ABBREV_MAP]
+
+# Deployment-variant suffixes to strip before core comparison
+# Matches: "—Align", ", Align", " - Align", ", Connect", etc.
+_DEPLOY_SUFFIX = re.compile(
+    r'[\s,]*[-—]?\s*(align|connect|bridge|accelerated|part.?time)\b.*$', re.I)
+
+
+def _expand_abbrevs(s):
+    """Apply abbreviation expansions and & → and."""
+    for pat, repl in _ABBREV_RE:
+        s = pat.sub(repl, s)
+    return s
+
+
+def _cim_core(name):
+    """Degree-agnostic core: strip campus, degree tokens, deployment suffixes,
+    expand abbreviations.  Used as a last-resort fuzzy fallback only."""
+    s = _norm(name).replace('—', '-').replace('–', '-')
+    s = re.sub(r'\([^)]*\)', '', s)
+    s = _DEPLOY_SUFFIX.sub('', s)
+    s = re.sub(r'\bgraduate\s+certificate\b', '', s, re.I)
+    s = re.sub(r'\bmaster\s+of\s+\w+(\s+(in|of))?\b', '', s, re.I)
+    s = _DEGREE_TOKENS.sub('', s)
+    s = _expand_abbrevs(s)
+    s = re.sub(r'[\s,/\-]+$', '', s.strip())
+    s = re.sub(r'^[\s,/\-]+', '', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _degree_core(name):
+    """Degree-aware normalized key: keeps the degree token but strips campus and
+    deployment suffixes, expands abbreviations, and moves a leading degree prefix
+    to suffix so 'MS Computer Science' and 'Computer Science, MS (Boston)' share
+    the same key 'computer science, ms'."""
+    s = _norm(name).replace('—', '-').replace('–', '-')
+    s = re.sub(r'\([^)]*\)', '', s)    # strip (Campus)
+    s = _DEPLOY_SUFFIX.sub('', s)      # strip deployment suffix
+    s = re.sub(r'\bgraduate\s+certificate\b', 'certg', s, flags=re.I)
+    s = re.sub(r'\bmaster\s+of\s+\w+(\s+(in|of))?\s*', 'ms ', s, flags=re.I)
+    s = _expand_abbrevs(s)
+    # Move degree prefix to suffix: "ms computer science" → "computer science, ms"
+    m = _DEGREE_PREFIX.match(s.strip())
+    if m:
+        degree = m.group(1).lower()
+        rest   = m.group(2).strip().rstrip(',')
+        s = f'{rest}, {degree}'
+    s = re.sub(r'[\s,/\-]+$', '', s.strip())
+    s = re.sub(r'^[\s,/\-]+', '', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _normalize_campus(campus):
+    """Resolve campus code abbreviations to full names."""
+    return _CAMPUS_NAMES.get((campus or '').strip(), (campus or '').strip())
+
+
+def _campus_from_cim_name(name):
+    """Extract campus from CIM parenthetical: 'Name, Degree (Boston)' → 'Boston'."""
+    m = re.search(r'\(([^)]+)\)\s*$', (name or '').strip())
+    return m.group(1).strip() if m else ''
+
+
+def _normalize_degree_prefix(name):
+    """Convert OTP-style 'DEGREE Name' → 'Name, DEGREE'.
+
+    Examples: 'MS Computer Science' → 'Computer Science, MS'
+              'DNP Nursing' → 'Nursing, DNP'
+    Names already in CIM format are returned unchanged.
+    """
+    m = _DEGREE_PREFIX.match(name.strip())
+    if m:
+        degree = m.group(1).upper()
+        rest   = m.group(2).strip().rstrip(',')
+        return f'{rest}, {degree}'
+    return name
+
+
+def _strip_trailing_campus(name):
+    """Remove a trailing ', CampusName' from a program name string."""
+    return _CAMPUS_SUFFIX_RE.sub('', name.strip()).strip().rstrip(',').strip()
+
+
+def _extract_embedded_campus(name):
+    """Return the campus name embedded as a trailing suffix, or empty string."""
+    m = _CAMPUS_SUFFIX_RE.search(name)
+    return m.group(1) if m else ''
+
+
+def _normalize_non_cim_name(name):
+    """Normalize IPD/Roster program names toward CIM canonical format.
+
+    Handles:
+      'CERTG Product Management, Silicon Valley' → 'Product Management, Graduate Certificate'
+      'CERT AI Applications, Arlington'          → 'AI Applications, Graduate Certificate'
+      'Graduate Certificate in X, Oakland'       → 'X, Graduate Certificate'
+      'Certificate in X'                         → 'X, Graduate Certificate'
+      'Certificate, X'                           → 'X, Graduate Certificate'
+      'CERTG-CODE : X, Graduate Certificate (Y)' → 'X, Graduate Certificate (Y)'
+    Campus suffix is stripped in all cases (it belongs in the campus field).
+    """
+    s = name.strip()
+    # Strip leading "CODE-CODE : " prefix (e.g. "CERTG-ENGM : ")
+    s = re.sub(r'^[A-Z]+-[A-Z]+\s*:\s*', '', s)
+    # "Graduate Certificate in X" with optional trailing campus
+    m = re.match(r'^Graduate\s+Certificate\s+in\s+(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', Graduate Certificate'
+    # "Certificate in X" or "Certificate, X" or "Certificate X" (no "Graduate" prefix)
+    m = re.match(r'^Certificate(?:\s+in|,)?\s+(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', Graduate Certificate'
+    # "CERTG X" or "CERT X" with optional trailing campus
+    m = re.match(r'^CERTG?\s+(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', Graduate Certificate'
+    # For any other name, still strip a trailing campus suffix if present
+    return _strip_trailing_campus(s)
+
+
+def _load_all_cim_programs():
+    """Return list of all active CIM programs as dicts with canonical names."""
     from database import get_db
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT id, name, current_step, completion_date
+            SELECT id, name, college, current_step, completion_date
             FROM programs
-            WHERE (current_step IS NOT NULL AND current_step != '')
-               OR (completion_date IS NOT NULL AND completion_date != '')
+            WHERE current_step IS NOT NULL AND current_step != ''
         """).fetchall()
-    result = {}
+    result = []
     for r in rows:
-        for field in ('name',):
-            key = _norm(r[field] or '')
-            if key and key not in result:
-                result[key] = {
-                    'cim_program_id':      r['id'],
-                    'cim_step':            r['current_step'] or '',
-                    'cim_completion_date': r['completion_date'] or '',
-                }
+        campus = _campus_from_cim_name(r['name'] or '')
+        result.append({
+            'cim_id':              r['id'],
+            'cim_name':            r['name'] or '',
+            'college':             r['college'] or '',
+            'campus':              campus,
+            'cim_step':            r['current_step'] or '',
+            'cim_completion_date': r['completion_date'] or '',
+        })
     return result
+
+
+def _build_cim_index(cim_programs):
+    """Return {match_key: cim_entry} indexed under two keys per program:
+      1. Exact normalized name (full, with campus)
+      2. Degree-aware core: abbreviations expanded, campus stripped, prefix→suffix
+    Degree-agnostic core (_cim_core) is NOT indexed here because it causes
+    false-positive collisions when _degree_core produces the same root string.
+    """
+    index = {}
+    for entry in cim_programs:
+        for key in (
+            _norm(entry['cim_name']),
+            _degree_core(entry['cim_name']),
+        ):
+            if key and key not in index:
+                index[key] = entry
+    return index
+
+
+def _find_cim(name, campus, cim_index):
+    """Find a CIM entry for a given name+campus.
+
+    Priority (most to least specific):
+      1. Exact norm with campus appended
+      2. Exact norm of name alone
+      3. Degree-aware core with campus
+      4. Degree-aware core of name alone
+    Degree-agnostic core is intentionally NOT used as a fallback because it
+    strips degree tokens and causes false matches (e.g. 'MS Biology' → 'Biology, BS').
+    """
+    campus_norm = _normalize_campus(campus)
+    name_with_campus = f'{name} ({campus_norm})' if campus_norm else name
+    for key in (
+        _norm(name_with_campus),
+        _norm(name),
+        _degree_core(name_with_campus),
+        _degree_core(name),
+    ):
+        if key and key in cim_index:
+            return cim_index[key]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -290,136 +552,202 @@ def _load_cim_programs():
 # ---------------------------------------------------------------------------
 
 def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
-    """Parse all sources, merge, link to CIM, replace portfolio_programs table."""
+    """Seed from CIM active programs, overlay OTP/IPD/Roster tracking data."""
     from database import replace_all_portfolio_programs
 
     if not os.path.exists(xlsx_path):
         raise FileNotFoundError(f"OTP Excel not found: {xlsx_path}")
 
-    otp_rows    = parse_otp(xlsx_path)
-    ipd_rows    = parse_smartsheet(tsv_path)
-    roster_rows = parse_roster(roster_path)
-    cim_index   = _load_cim_programs()
+    cim_programs = _load_all_cim_programs()
+    otp_rows     = parse_otp(xlsx_path)
+    ipd_rows     = parse_smartsheet(tsv_path)
+    roster_rows  = parse_roster(roster_path)
+    cim_index    = _build_cim_index(cim_programs)
 
     now = datetime.now().isoformat()
 
-    _EMPTY_ROW = {
+    _EMPTY_TRACKING = {
         'otp_status': '', 'otp_sub_status': '', 'otp_market_potential': '',
         'otp_market_signal': '', 'otp_internal_performance': '',
         'otp_q3_status': '', 'otp_effective_term': '',
         'ipd_status': '', 'ipd_proposal_type': '', 'ipd_additional_college': '',
         'roster_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
         'roster_launch_date': '',
-        'cim_program_id': None, 'cim_step': '', 'cim_completion_date': '',
         'last_refreshed': now,
     }
 
-    # Build unified dict keyed by id = norm_name__norm_campus
+    # unified dict keyed by stable id
     unified = {}
 
-    # 1. Seed from OTP (authoritative for college/campus/status)
-    for p in otp_rows:
-        pid = _make_id(p['program_name'], p['campus'])
-        unified[pid] = dict(_EMPTY_ROW, **{
-            'id':           pid,
-            'program_name': p['program_name'],
-            'college':      p['college'],
-            'campus':       p['campus'],
-            'otp_status':              p['otp_status'],
-            'otp_sub_status':          p['otp_sub_status'],
-            'otp_market_potential':    p['otp_market_potential'],
-            'otp_market_signal':       p['otp_market_signal'],
-            'otp_internal_performance': p['otp_internal_performance'],
-            'otp_q3_status':           p['otp_q3_status'],
-            'otp_effective_term':      p['otp_effective_term'],
+    # ── Step 1: Seed from CIM (canonical names and workflow status) ──────────
+    for c in cim_programs:
+        campus = c['campus'] or 'Boston'
+        pid = f"cim_{c['cim_id']}"
+        unified[pid] = dict(_EMPTY_TRACKING, **{
+            'id':                  pid,
+            'program_name':        c['cim_name'],
+            'college':             c['college'],
+            'campus':              campus,
+            'cim_program_id':      c['cim_id'],
+            'cim_step':            c['cim_step'],
+            'cim_completion_date': c['cim_completion_date'],
         })
 
-    # 2. Merge IPD data by normalized name (campus-agnostic)
-    ipd_index = {}
-    for p in ipd_rows:
-        key = _norm(p['program_name'])
-        if key not in ipd_index:
-            ipd_index[key] = p
+    # ── Step 2: Overlay OTP data ─────────────────────────────────────────────
+    # Normalize OTP campus codes and degree-prefix names before matching.
+    for p in otp_rows:
+        p['campus'] = _normalize_campus(p['campus']) or 'Boston'
+        p['_norm_name'] = _normalize_degree_prefix(p['program_name'])
 
-    for row in unified.values():
-        key = _norm(row['program_name'])
-        if key in ipd_index:
-            ipd = ipd_index[key]
-            row['ipd_status']             = ipd['ipd_status']
-            row['ipd_proposal_type']      = ipd['ipd_proposal_type']
-            row['ipd_additional_college'] = ipd['ipd_additional_college']
-
-    # Add IPD-only programs (not in OTP)
-    otp_norm_names = {_norm(r['program_name']) for r in otp_rows}
-    for p in ipd_rows:
-        if _norm(p['program_name']) in otp_norm_names:
-            continue
-        pid = _make_id(p['program_name'], '')
-        if pid not in unified:
-            unified[pid] = dict(_EMPTY_ROW, **{
-                'id':           pid,
-                'program_name': p['program_name'],
-                'college':      p['ipd_college'],
-                'campus':       '',
-                'ipd_status':             p['ipd_status'],
-                'ipd_proposal_type':      p['ipd_proposal_type'],
-                'ipd_additional_college': p['ipd_additional_college'],
-            })
-
-    # 3. Merge Roster data by (norm_name, norm_campus)
-    for p in roster_rows:
-        key_name   = _norm(p['program_name'])
-        key_campus = _norm(p['campus'])
-        pid        = _make_id(p['program_name'], p['campus'])
-
-        if pid in unified:
+    for p in otp_rows:
+        cim = _find_cim(p['_norm_name'], p['campus'], cim_index)
+        if cim:
+            pid = f"cim_{cim['cim_id']}"
             row = unified[pid]
         else:
-            # Try name-only match against existing rows
-            matched = None
-            for existing_pid, existing_row in unified.items():
-                if (_norm(existing_row['program_name']) == key_name and
-                        _norm(existing_row['campus']) == key_campus):
-                    matched = existing_row
-                    break
-            if matched:
-                row = matched
-            else:
-                # Roster-only program
-                unified[pid] = dict(_EMPTY_ROW, **{
-                    'id':           pid,
-                    'program_name': p['program_name'],
-                    'college':      p['college'],
-                    'campus':       p['campus'],
+            # OTP-only: add with normalized name
+            norm_name = p['_norm_name']
+            pid = _make_id(norm_name, p['campus'])
+            if pid not in unified:
+                unified[pid] = dict(_EMPTY_TRACKING, **{
+                    'id':             pid,
+                    'program_name':   norm_name,
+                    'college':        p['college'],
+                    'campus':         p['campus'],
+                    'cim_program_id': None,
+                    'cim_step':       '',
+                    'cim_completion_date': '',
                 })
-                row = unified[pid]
+            row = unified[pid]
+        row['otp_status']              = p['otp_status']
+        row['otp_sub_status']          = p['otp_sub_status']
+        row['otp_market_potential']    = p['otp_market_potential']
+        row['otp_market_signal']       = p['otp_market_signal']
+        row['otp_internal_performance']= p['otp_internal_performance']
+        row['otp_q3_status']           = p['otp_q3_status']
+        row['otp_effective_term']      = p['otp_effective_term']
+        # Fill college from OTP when CIM didn't have one
+        if not row.get('college') and p['college']:
+            row['college'] = p['college']
 
-        row['roster_status']        = p['roster_status']
-        row['roster_sub_status']    = p['roster_sub_status']
-        row['roster_proposal_type'] = p['roster_proposal_type']
-        row['roster_launch_date']   = p['roster_launch_date']
-        # Fill college/campus from roster if blank in OTP/IPD
+    # ── Step 3: Overlay IPD data ─────────────────────────────────────────────
+    for p in ipd_rows:
+        # Extract embedded campus and normalize name (CERT/Graduate Certificate format)
+        embedded_campus = _extract_embedded_campus(p['program_name'])
+        norm_name = _normalize_non_cim_name(p['program_name'])
+
+        # Try CIM match: original name first, then normalized+embedded campus
+        cim = _find_cim(p['program_name'], '', cim_index)
+        if not cim and (embedded_campus or norm_name != p['program_name']):
+            cim = _find_cim(norm_name, embedded_campus, cim_index)
+
+        if cim:
+            pid = f"cim_{cim['cim_id']}"
+            row = unified[pid]
+        else:
+            store_campus = embedded_campus or 'Boston'
+            pid = _make_id(norm_name, store_campus)
+            if pid not in unified:
+                unified[pid] = dict(_EMPTY_TRACKING, **{
+                    'id':             pid,
+                    'program_name':   norm_name,
+                    'college':        p['ipd_college'],
+                    'campus':         store_campus,
+                    'cim_program_id': None,
+                    'cim_step':       '',
+                    'cim_completion_date': '',
+                })
+            row = unified[pid]
+        if not row.get('ipd_status'):
+            row['ipd_status']             = p['ipd_status']
+            row['ipd_proposal_type']      = p['ipd_proposal_type']
+            row['ipd_additional_college'] = p['ipd_additional_college']
+        if not row.get('college') and p['ipd_college']:
+            row['college'] = p['ipd_college']
+
+    # Build a name-only index over all non-CIM rows added so far (OTP/IPD-only).
+    # Used in Step 4 so Roster entries merge into the existing IPD row rather
+    # than creating a duplicate.
+    non_cim_name_index = {}  # _norm(program_name) → pid
+    for pid, row in unified.items():
+        if not pid.startswith('cim_'):
+            key = _norm(row['program_name'])
+            if key and key not in non_cim_name_index:
+                non_cim_name_index[key] = pid
+
+    # ── Step 4: Overlay Roster data ──────────────────────────────────────────
+    for p in roster_rows:
+        p['campus'] = _normalize_campus(p['campus'])
+        norm_name = _normalize_non_cim_name(p['program_name'])
+
+        # Try CIM match with normalized name
+        cim = _find_cim(norm_name, p['campus'], cim_index)
+        if not cim and norm_name != p['program_name']:
+            cim = _find_cim(p['program_name'], p['campus'], cim_index)
+
+        if cim:
+            pid = f"cim_{cim['cim_id']}"
+            row = unified[pid]
+        else:
+            pid = _make_id(norm_name, p['campus'])
+            if pid not in unified:
+                # Try name-only match against existing non-CIM rows (merges IPD+Roster)
+                existing_pid = non_cim_name_index.get(_norm(norm_name))
+                if not existing_pid:
+                    existing_pid = non_cim_name_index.get(_norm(p['program_name']))
+                if existing_pid and existing_pid in unified:
+                    pid = existing_pid
+                else:
+                    unified[pid] = dict(_EMPTY_TRACKING, **{
+                        'id':             pid,
+                        'program_name':   norm_name,
+                        'college':        p['college'],
+                        'campus':         p['campus'] or 'Boston',
+                        'cim_program_id': None,
+                        'cim_step':       '',
+                        'cim_completion_date': '',
+                    })
+            row = unified[pid]
+        if not row.get('roster_status'):
+            row['roster_status']        = p['roster_status']
+            row['roster_sub_status']    = p['roster_sub_status']
+            row['roster_proposal_type'] = p['roster_proposal_type']
+            row['roster_launch_date']   = p['roster_launch_date']
         if not row.get('college') and p['college']:
             row['college'] = p['college']
         if not row.get('campus') and p['campus']:
             row['campus'] = p['campus']
 
-    # 4. Link each row to CIM by name
+    # ── Step 5: Clean up college and campus values ───────────────────────────
     for row in unified.values():
-        key = _norm(row['program_name'])
-        if key in cim_index:
-            cim = cim_index[key]
-            row['cim_program_id']      = cim['cim_program_id']
-            row['cim_step']            = cim['cim_step']
-            row['cim_completion_date'] = cim['cim_completion_date']
+        college = (row.get('college') or '').strip()
+        college_low = college.lower()
+        if college_low in _NOT_COLLEGES:
+            row['college'] = ''
+        elif college_low in _COLLEGE_NAMES:
+            row['college'] = _COLLEGE_NAMES[college_low]
+
+        campus = (row.get('campus') or '').strip()
+        if _BAD_CAMPUSES.search(campus):
+            row['campus'] = 'Boston'
+        else:
+            row['campus'] = _CAMPUS_NAMES.get(campus, campus)
 
     rows = list(unified.values())
     replace_all_portfolio_programs(rows)
-    roster_linked = sum(1 for r in rows if r.get('roster_status'))
-    print(f"Portfolio ingest: {len(rows)} programs "
-          f"({len(otp_rows)} OTP, {len(ipd_rows)} IPD, {len(roster_rows)} Roster, "
-          f"{sum(1 for r in rows if r['cim_program_id'])} linked to CIM, "
-          f"{roster_linked} with roster data)")
+
+    n_cim    = len(cim_programs)
+    n_otp    = len(otp_rows)
+    n_ipd    = len(ipd_rows)
+    n_roster = len(roster_rows)
+    n_otp_matched    = sum(1 for p in otp_rows    if _find_cim(p['_norm_name'], p['campus'], cim_index))
+    n_ipd_matched    = sum(1 for p in ipd_rows    if _find_cim(p['program_name'], '', cim_index))
+    n_roster_matched = sum(1 for p in roster_rows if _find_cim(p['program_name'], p['campus'], cim_index))
+    print(f"Portfolio ingest: {len(rows)} programs total")
+    print(f"  CIM active: {n_cim}")
+    print(f"  OTP: {n_otp} ({n_otp_matched} matched to CIM, {n_otp - n_otp_matched} unmatched)")
+    print(f"  IPD: {n_ipd} ({n_ipd_matched} matched to CIM, {n_ipd - n_ipd_matched} unmatched)")
+    print(f"  Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
     return len(rows)
 
 
