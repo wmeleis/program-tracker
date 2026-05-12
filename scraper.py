@@ -1404,11 +1404,29 @@ def run_full_scan(force_fetch_only=False):
                 for event in events:
                     name = event['step']
                     if event['type'] == 'approved':
+                        # Forward match: step at-or-after current position.
+                        # Handles duplicate step names by taking the NEXT
+                        # occurrence (e.g. "Review 2" at steps 3 and 8).
                         match = next(
                             (s for s in steps
                                 if s.get('order', -1) >= current_idx
                                    and (s.get('name') or '').strip() == name),
                             None)
+                        if match is None:
+                            # Implicit rollback: CIM records a return to an
+                            # earlier step as "Approved for <earlier-step>"
+                            # (not as an explicit "Rollback to" event).
+                            # The forward search found nothing, so look
+                            # backward — take the highest-order step before
+                            # current_idx whose name matches.
+                            match = next(
+                                (s for s in sorted(
+                                    steps,
+                                    key=lambda s: s.get('order', -1),
+                                    reverse=True)
+                                    if s.get('order', -1) < current_idx
+                                       and (s.get('name') or '').strip() == name),
+                                None)
                         if match is not None:
                             current_idx = match.get('order', current_idx) + 1
                     else:  # rollback
