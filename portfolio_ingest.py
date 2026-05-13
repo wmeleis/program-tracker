@@ -391,6 +391,15 @@ _PORTFOLIO_REMOVE = frozenset({
     'INPR 0399 : Leadership for Sustainability',
     'ALY 6983 Special Topics: AI for Cybersecurity',
     'RGA 0500 : Artificial Intelligence (AI) in Regulatory Sciences',
+    # Badges / non-degree
+    'Cybersecurity Microcredential Badges (non-credit levels 1-3)',
+    'Future You: Leveraging AI for Success - EM EDGE Badge',
+    'Entrepreneurship Boot Camp',
+    # Not programs
+    'Global Pathways in Portland (Khoury, CPS)',
+    'Pre-College Online Program',
+    'SummerIn Portland: Innovating to Address Complex Health Challenges',
+    'University of Philippines Global Campus partnership',
 })
 
 # Exact name → (corrected_name, college_override, campus_override).
@@ -408,6 +417,14 @@ _PORTFOLIO_RENAME = {
         ('Education, EdD', '', 'Portland'),
     'and MSIS Bridge In Miami, MSIS':
         ('Information Systems, MSIS (Bridge)', '', 'Miami'),
+    # Fix missing degree suffix
+    'Applied Quantum Information Science and Engineering':
+        ('Applied Quantum Information Science and Engineering, MS', '', ''),
+    # Clean up concentration names before parent-linking
+    'Artificial Intelligence - Omics Concentration (COS), MS':
+        ('Omics', 'College of Science', 'Boston'),
+    'AI (new concentration) Bouve, MS':
+        ('Bouve Health AI', 'Bouve College of Hlth Sciences', 'Boston'),
 }
 
 # Strip "at Roux" / "for Maine" from program names; these indicate Portland campus.
@@ -429,6 +446,12 @@ _EXPLICIT_CONC_PARENTS = [
      'Bioengineering, MS', None),
     (re.compile(r'^UG Concentration in ', re.I),
      'Regulatory Affairs, BS', 'Boston'),
+    # "Omics" (renamed from AI Omics Concentration) → AI, MS (Boston, COS)
+    (re.compile(r'^Omics$', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
+    # "Bouve Health AI" (renamed from AI new concentration Bouve) → AI, MS (Boston)
+    (re.compile(r'^Bouve Health AI$', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
 ]
 
 

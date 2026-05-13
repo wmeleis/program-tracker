@@ -3231,14 +3231,14 @@ function classifyPortfolioDegree(name) {
 }
 
 function setPortfolioLevel(btn, val) {
-    portfolioLevelFilter = val;
-    document.querySelectorAll('.portfolio-lvl-btn').forEach(b => b.classList.toggle('active', b === btn));
+    portfolioLevelFilter = (portfolioLevelFilter === val) ? '' : val;
+    document.querySelectorAll('.portfolio-lvl-btn').forEach(b => b.classList.toggle('active', b.dataset.lvl === portfolioLevelFilter && portfolioLevelFilter !== ''));
     renderPortfolioTable();
 }
 
 function setPortfolioDegree(btn, val) {
-    portfolioDegreeFilter = val;
-    document.querySelectorAll('.portfolio-deg-btn').forEach(b => b.classList.toggle('active', b === btn));
+    portfolioDegreeFilter = (portfolioDegreeFilter === val) ? '' : val;
+    document.querySelectorAll('.portfolio-deg-btn').forEach(b => b.classList.toggle('active', b.dataset.deg === portfolioDegreeFilter && portfolioDegreeFilter !== ''));
     renderPortfolioTable();
 }
 
