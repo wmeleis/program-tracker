@@ -3226,6 +3226,8 @@ let portfolioRosterFilter  = '';
 let portfolioCimFilter     = '';
 let portfolioLevelFilter   = '';
 let portfolioDegreeFilter  = '';
+let portfolioSortKey = '';   // '' = default (college/name), or a PORTFOLIO_COLUMNS key or 'name'
+let portfolioSortDir = 1;    // 1 = asc, -1 = desc
 let portfolioSearch        = '';
 
 function classifyPortfolioLevel(name) {
@@ -3280,6 +3282,16 @@ function setPortfolioLevel(btn, val) {
 function setPortfolioDegree(btn, val) {
     portfolioDegreeFilter = (portfolioDegreeFilter === val) ? '' : val;
     document.querySelectorAll('.portfolio-deg-btn').forEach(b => b.classList.toggle('active', b.dataset.deg === portfolioDegreeFilter && portfolioDegreeFilter !== ''));
+    renderPortfolioTable();
+}
+
+function sortPortfolioBy(key) {
+    if (portfolioSortKey === key) {
+        portfolioSortDir *= -1;
+    } else {
+        portfolioSortKey = key;
+        portfolioSortDir = 1;
+    }
     renderPortfolioTable();
 }
 
@@ -3414,9 +3426,31 @@ function renderPortfolioTable() {
         }
     });
 
-    topLevel.sort((a, b) =>
-        (a.college || '').localeCompare(b.college || '') ||
-        (a.program_name || '').localeCompare(b.program_name || ''));
+    topLevel.sort((a, b) => {
+        let av = '', bv = '';
+        if (!portfolioSortKey || portfolioSortKey === 'name') {
+            return ((a.college || '').localeCompare(b.college || '') ||
+                    (a.program_name || '').localeCompare(b.program_name || '')) * portfolioSortDir;
+        }
+        switch (portfolioSortKey) {
+            case 'degree':    av = extractPortfolioDegree(a.program_name); bv = extractPortfolioDegree(b.program_name); break;
+            case 'college':   av = a.college || '';  bv = b.college || '';  break;
+            case 'campus':    av = a.campus  || '';  bv = b.campus  || '';  break;
+            case 'otp':       av = a.otp_status || ''; bv = b.otp_status || ''; break;
+            case 'ipd':       av = a.ipd_status || ''; bv = b.ipd_status || ''; break;
+            case 'gls':       av = a.roster_status || ''; bv = b.roster_status || ''; break;
+            case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
+            case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
+            case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
+            case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
+            case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
+                return (av - bv) * portfolioSortDir;
+            case 'perfscore2025':   av = parseFloat(a.performance_score_2025) || 0; bv = parseFloat(b.performance_score_2025) || 0;
+                return (av - bv) * portfolioSortDir;
+            default: av = a.program_name || ''; bv = b.program_name || '';
+        }
+        return av.localeCompare(bv) * portfolioSortDir;
+    });
 
     const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter ||
         portfolioCollegeFilter || portfolioCampusFilter ||
@@ -3468,10 +3502,19 @@ function renderPortfolioTable() {
 
     const visibleHeaders = PORTFOLIO_COLUMNS
         .filter(c => portfolioVisibleCols.has(c.key))
-        .map(c => `<th>${c.label}</th>`).join('');
+        .map(c => {
+            const active = portfolioSortKey === c.key;
+            const arrow = active ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
+            return `<th class="sortable-header${active ? ' sort-active' : ''}" onclick="sortPortfolioBy('${c.key}')">${c.label}${arrow}</th>`;
+        }).join('');
+    const nameArrow = (!portfolioSortKey || portfolioSortKey === 'name') ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
+    const nameActive = !portfolioSortKey || portfolioSortKey === 'name';
     container.innerHTML = `
         <table class="program-table">
-            <thead><tr><th>Program</th>${visibleHeaders}</tr></thead>
+            <thead><tr>
+                <th class="sortable-header${nameActive ? ' sort-active' : ''}" onclick="sortPortfolioBy('name')">Program${nameArrow}</th>
+                ${visibleHeaders}
+            </tr></thead>
             <tbody>${rowHtml.join('')}</tbody>
         </table>`;
 }
