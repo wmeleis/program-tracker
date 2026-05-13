@@ -105,6 +105,7 @@ function setProgramKindFilter(kind) {
 
 function switchView(view) {
     currentView = view;
+    try { localStorage.setItem('cim-active-view', view); } catch(e) {}
 
     // Update button states
     document.getElementById('btn-programs').classList.toggle('active', view === 'programs');
@@ -3142,7 +3143,16 @@ function formatTime(isoString) {
 // ==================== Init ====================
 
 document.addEventListener('DOMContentLoaded', () => {
-    loadDashboard();
+    // Restore last active view (so navigating away and back keeps your context).
+    let savedView = 'programs';
+    try { savedView = localStorage.getItem('cim-active-view') || 'programs'; } catch(e) {}
+    const validViews = ['programs', 'courses', 'catalog', 'portfolio'];
+    if (!validViews.includes(savedView)) savedView = 'programs';
+    if (savedView === 'programs') {
+        loadDashboard();
+    } else {
+        switchView(savedView);
+    }
     // Fast CourseLeaf session health probe so user sees "please log in" quickly,
     // not after a 10-minute scan that silently does nothing.
     // Only do this when the server is the Flask local server (not the static site).
@@ -3170,6 +3180,7 @@ const PORTFOLIO_COLUMNS = [
     {key: 'launch',       label: 'Launch Date'},
     {key: 'cim',          label: 'CIM Step'},
     {key: 'cimchange',    label: 'CIM Change'},
+    {key: 'cimactive',    label: 'CIM Active'},
     {key: 'notes',        label: 'Notes'},
 ];
 
@@ -3443,6 +3454,9 @@ function renderPortfolioTable() {
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimchange': av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
+            case 'cimactive': av = a.cim_program_id ? (a.cim_change_type === 'Inactivation' ? 'Inactive' : 'Active') : '';
+                              bv = b.cim_program_id ? (b.cim_change_type === 'Inactivation' ? 'Inactive' : 'Active') : '';
+                              break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
             case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
             case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
@@ -3589,6 +3603,11 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
         ${_pc('cimchange', p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
+        ${_pc('cimactive', (() => {
+            if (!p.cim_program_id) return '';
+            const isInact = p.cim_change_type === 'Inactivation';
+            return `<span class="portfolio-badge ${isInact ? 'badge-bad' : 'badge-good'}">${isInact ? 'Inactive' : 'Active'}</span>`;
+        })())}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
     </tr>`;
 }

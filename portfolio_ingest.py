@@ -1073,6 +1073,10 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             name_to_rows.setdefault(key, []).append(row)
 
         for row in unified.values():
+            # 2025 scoring is Boston-only data — skip non-Boston campuses
+            campus = (row.get('campus') or '').strip().lower()
+            if campus not in ('', 'boston'):
+                continue
             name = row.get('program_name') or ''
             key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
             entry = _match_scoring_2025(scoring_entries, key)
