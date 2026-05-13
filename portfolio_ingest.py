@@ -377,6 +377,60 @@ _CONC_DASH = re.compile(
     r'^(.+?)\s*[-—]\s*[^-—,]+?\s+Concentration,?\s+([A-Z][^\s(,]+(?:\s*\([^)]+\))?)\s*$',
     re.I)
 
+# ── Portfolio data-quality overrides ─────────────────────────────────────────
+
+# Program names to exclude entirely (descriptive notes, course codes, fragments).
+_PORTFOLIO_REMOVE = frozenset({
+    'AI (New COE Concentration in High Performance and Edge AI), MS',
+    'Healthcare program expansion to Saudi Arabia',
+    'Half-Major in Sustainability Studies',
+    'Jewish Community Chaplaincy on Campus',
+    'Queens University Gift City India Expansion',
+    'Research-aligned MSs at Roux: MS Robotics',
+    'and Concentration, Medical Science Liaison, Graduate Certificate',
+    'INPR 0399 : Leadership for Sustainability',
+    'ALY 6983 Special Topics: AI for Cybersecurity',
+    'RGA 0500 : Artificial Intelligence (AI) in Regulatory Sciences',
+})
+
+# Exact name → (corrected_name, college_override, campus_override).
+# Empty string '' means keep the existing value.
+_PORTFOLIO_RENAME = {
+    'Data Science, MS - new CAMD concentration':
+        ('Data Science, MS', 'Office of the Provost', ''),
+    'AI (New COE Concentration in Human-AI Collaboration), MS':
+        ('Artificial Intelligence, MS', 'College of Engineering', ''),
+    'Computational Creativity Concentration for UIP Masters in AI':
+        ('Computational Creativity, MS', 'Office of the Provost', ''),
+    'Doctor of Professional Studies at Roux':
+        ('Professional Studies, DPS', 'Coll of Professional Studies', 'Portland'),
+    'at Roux, EDD':
+        ('Education, EdD', '', 'Portland'),
+    'and MSIS Bridge In Miami, MSIS':
+        ('Information Systems, MSIS (Bridge)', '', 'Miami'),
+}
+
+# Strip "at Roux" / "for Maine" from program names; these indicate Portland campus.
+_ROUX_RE = re.compile(r'\s+at\s+Roux\b|\s*,?\s*\(for\s+Maine\)\s*', re.I)
+
+# Explicit concentration-of parent mappings by regex.
+# Each entry: (pattern, parent_program_name, campus_override_or_None).
+# campus_override=None means use the concentration row's own campus.
+_EXPLICIT_CONC_PARENTS = [
+    (re.compile(r'^Business Concentration in ', re.I),
+     'Business Administration, BSBA', 'Boston'),
+    (re.compile(r'^Electrical and Computer Engineering with Concentration in .+MSECE', re.I),
+     'Electrical and Computer Engineering, MSECE', None),
+    (re.compile(r'^Mechanical Engineering with Concentration in .+MSME', re.I),
+     'Mechanical Engineering, MSME', None),
+    (re.compile(r'^Electrical Engineering and Music with Concentration in .+BSEE', re.I),
+     'Electrical Engineering and Music, BSEE', 'Boston'),
+    (re.compile(r'^Master of Science in Bioengineering,?\s+concentration in ', re.I),
+     'Bioengineering, MS', None),
+    (re.compile(r'^UG Concentration in ', re.I),
+     'Regulatory Affairs, BS', 'Boston'),
+]
+
 
 def _extract_parent_name(name):
     """Try to extract a parent program name from a concentration name.
@@ -842,6 +896,37 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
                     n_with_concs += 1
         print(f"  Curriculum concentrations: {n_with_concs} programs have named concentrations")
 
+    # ── Step 5.6: Data-quality overrides (remove, rename, strip Roux) ──────────
+    # Remove excluded rows first.
+    for pid in [p for p, r in unified.items() if r.get('program_name') in _PORTFOLIO_REMOVE]:
+        del unified[pid]
+
+    # Rename and fix college/campus. For non-CIM rows, also re-key by new name.
+    for pid in list(unified):
+        if pid not in unified:
+            continue
+        row = unified[pid]
+        name = row.get('program_name') or ''
+        if name in _PORTFOLIO_RENAME:
+            new_name, new_college, new_campus = _PORTFOLIO_RENAME[name]
+            row['program_name'] = new_name
+            if new_college:
+                row['college'] = new_college
+            if new_campus:
+                row['campus'] = new_campus
+        elif _ROUX_RE.search(name):
+            row['program_name'] = _ROUX_RE.sub('', name).strip().rstrip(',').strip()
+            if not row.get('campus') or row['campus'] in ('', 'Boston'):
+                row['campus'] = 'Portland'
+        else:
+            continue  # nothing changed, skip re-key
+        # Re-key non-CIM/synth rows so IDs stay consistent with their new name.
+        if not pid.startswith('cim_') and not pid.startswith('synth_'):
+            new_pid = _make_id(row['program_name'], row['campus'])
+            row['id'] = new_pid
+            del unified[pid]
+            unified[new_pid] = row
+
     # ── Step 6: Link concentrations to parent programs ───────────────────────
     # Build a name→id index over all unified rows for parent lookup.
     name_to_pid = {}
@@ -849,6 +934,52 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         for key in (_norm(row['program_name']), _degree_core(row['program_name'])):
             if key and key not in name_to_pid:
                 name_to_pid[key] = pid
+
+    # Apply explicit concentration-of overrides before regex-based detection.
+    n_explicit = 0
+    _synth_explicit = {}  # parent_name+campus → synthetic pid, created on demand
+    for pid, row in list(unified.items()):
+        if row.get('concentration_of'):
+            continue  # already linked
+        name = row.get('program_name') or ''
+        for pattern, parent_name, campus_override in _EXPLICIT_CONC_PARENTS:
+            if not pattern.search(name):
+                continue
+            lookup_campus = campus_override if campus_override else row.get('campus', '')
+            # Try campus-qualified _norm first (exact campus match),
+            # then bare name/degree_core only when no campus constraint.
+            found_pid = None
+            if lookup_campus:
+                # _norm only here — _degree_core strips the campus and would match wrong campus
+                key = _norm(f'{parent_name} ({lookup_campus})')
+                if key in name_to_pid and name_to_pid[key] != pid:
+                    found_pid = name_to_pid[key]
+            if not found_pid and not campus_override:
+                for key in (_norm(parent_name), _degree_core(parent_name)):
+                    if key and key in name_to_pid and name_to_pid[key] != pid:
+                        found_pid = name_to_pid[key]
+                        break
+            if not found_pid:
+                # Create a synthetic parent so concentrations aren't orphaned.
+                synth_key = f'{parent_name}|{lookup_campus}'
+                if synth_key not in _synth_explicit:
+                    new_synth_pid = 'synth_' + re.sub(r'[^a-z0-9]+', '_', _norm(f'{parent_name} {lookup_campus}'))[:60]
+                    conc_college = next(
+                        (r.get('college', '') for r in unified.values()
+                         if pattern.search(r.get('program_name', ''))), '')
+                    unified[new_synth_pid] = dict(_EMPTY_TRACKING, **{
+                        'id': new_synth_pid, 'program_name': parent_name,
+                        'college': conc_college, 'campus': lookup_campus or row.get('campus', ''),
+                        'cim_program_id': None, 'cim_step': '', 'cim_completion_date': '',
+                    })
+                    for key in (_norm(parent_name), _degree_core(parent_name)):
+                        if key and key not in name_to_pid:
+                            name_to_pid[key] = new_synth_pid
+                    _synth_explicit[synth_key] = new_synth_pid
+                found_pid = _synth_explicit[synth_key]
+            row['concentration_of'] = found_pid
+            n_explicit += 1
+            break  # only apply first matching pattern
 
     # First pass: collect concentrations with extractable parent names that
     # don't already have a matching row, then create synthetic parent entries.
@@ -918,7 +1049,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     print(f"  OTP: {n_otp} ({n_otp_matched} matched to CIM, {n_otp - n_otp_matched} unmatched)")
     print(f"  IPD: {n_ipd} ({n_ipd_matched} matched to CIM, {n_ipd - n_ipd_matched} unmatched)")
     print(f"  Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
-    print(f"  Concentrations: {n_conc_total} detected, {n_linked} linked to parent ({n_synthetic} synthetic parents created)")
+    print(f"  Concentrations: {n_conc_total} detected, {n_explicit} explicit + {n_linked} regex-linked to parent ({n_synthetic} synthetic parents created)")
     return len(rows)
 
 
