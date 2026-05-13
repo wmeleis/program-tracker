@@ -137,6 +137,20 @@
             </div>
         </div>
         <div class="filter-group">
+            <label>CIM Change:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-cimchange" onchange="portfolioCimChangeFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-cimchange')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>CIM Active:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-cimactive" onchange="portfolioCimActiveFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-cimactive')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
             <div class="portfolio-col-picker" id="portfolio-col-picker">
                 <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">Columns ▾</button>
                 <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
