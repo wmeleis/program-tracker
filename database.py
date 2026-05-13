@@ -1216,7 +1216,8 @@ def init_portfolio_tables(conn):
             market_2025 TEXT DEFAULT '',
             performance_2025 TEXT DEFAULT '',
             market_score_2025 TEXT DEFAULT '',
-            performance_score_2025 TEXT DEFAULT ''
+            performance_score_2025 TEXT DEFAULT '',
+            cim_change_type TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS portfolio_notes (
@@ -1232,7 +1233,7 @@ def init_portfolio_tables(conn):
     """)
     for col in ('roster_status', 'roster_sub_status', 'roster_proposal_type', 'roster_launch_date',
                 'concentration_of', 'concentrations_json', 'market_2025', 'performance_2025',
-                'market_score_2025', 'performance_score_2025'):
+                'market_score_2025', 'performance_score_2025', 'cim_change_type'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1257,7 +1258,8 @@ def upsert_portfolio_program(row):
                  cim_program_id, cim_step, cim_completion_date, last_refreshed,
                  concentration_of, concentrations_json,
                  market_2025, performance_2025,
-                 market_score_2025, performance_score_2025)
+                 market_score_2025, performance_score_2025,
+                 cim_change_type)
             VALUES
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1268,7 +1270,8 @@ def upsert_portfolio_program(row):
                  :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
                  :concentration_of, :concentrations_json,
                  :market_2025, :performance_2025,
-                 :market_score_2025, :performance_score_2025)
+                 :market_score_2025, :performance_score_2025,
+                 :cim_change_type)
             ON CONFLICT(id) DO UPDATE SET
                 program_name=excluded.program_name,
                 college=excluded.college,
@@ -1296,7 +1299,8 @@ def upsert_portfolio_program(row):
                 market_2025=excluded.market_2025,
                 performance_2025=excluded.performance_2025,
                 market_score_2025=excluded.market_score_2025,
-                performance_score_2025=excluded.performance_score_2025
+                performance_score_2025=excluded.performance_score_2025,
+                cim_change_type=excluded.cim_change_type
         """, row)
 
 
@@ -1316,7 +1320,8 @@ def replace_all_portfolio_programs(rows):
                      cim_program_id, cim_step, cim_completion_date, last_refreshed,
                      concentration_of, concentrations_json,
                      market_2025, performance_2025,
-                     market_score_2025, performance_score_2025)
+                     market_score_2025, performance_score_2025,
+                     cim_change_type)
                 VALUES
                     (:id, :program_name, :college, :campus,
                      :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1327,7 +1332,8 @@ def replace_all_portfolio_programs(rows):
                      :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
                      :concentration_of, :concentrations_json,
                      :market_2025, :performance_2025,
-                     :market_score_2025, :performance_score_2025)
+                     :market_score_2025, :performance_score_2025,
+                     :cim_change_type)
             """, row)
 
 

@@ -816,13 +816,15 @@ def _load_all_cim_programs():
     from database import get_db
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT id, name, college, current_step, completion_date
+            SELECT id, name, college, current_step, completion_date, status
             FROM programs
             WHERE current_step IS NOT NULL AND current_step != ''
         """).fetchall()
+    _STATUS_LABEL = {'Added': 'New', 'Edited': 'Change', 'Deactivated': 'Inactivation'}
     result = []
     for r in rows:
         campus = _campus_from_cim_name(r['name'] or '')
+        raw_status = r['status'] or ''
         result.append({
             'cim_id':              r['id'],
             'cim_name':            r['name'] or '',
@@ -830,6 +832,7 @@ def _load_all_cim_programs():
             'campus':              campus,
             'cim_step':            r['current_step'] or '',
             'cim_completion_date': r['completion_date'] or '',
+            'cim_change_type':     _STATUS_LABEL.get(raw_status, raw_status),
         })
     return result
 
@@ -908,6 +911,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         'performance_2025': '',
         'market_score_2025': '',
         'performance_score_2025': '',
+        'cim_change_type': '',
         'last_refreshed': now,
     }
 
@@ -926,6 +930,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             'cim_program_id':      c['cim_id'],
             'cim_step':            c['cim_step'],
             'cim_completion_date': c['cim_completion_date'],
+            'cim_change_type':     c['cim_change_type'],
         })
 
     # ── Step 2: Overlay OTP data ─────────────────────────────────────────────
