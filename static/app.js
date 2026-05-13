@@ -3085,6 +3085,23 @@ function abbreviateCampus(campus) {
 // Strip trailing campus parenthetical from a portfolio program name for display.
 // e.g. "Analytics, MS (Oakland)" → "Analytics, MS"
 // Keeps non-campus parentheticals like "(non-degree)" intact.
+// "Bachelor of Science in Nursing" → "Nursing, BS"
+// "Bachelor of Science in Nursing, New York" → "Nursing, BS, New York"
+// "Bachelor of Science - Transfer Track, New York" → "BS—Transfer Track, New York"
+const _DEGREE_EXPAND = [
+    [/^(?:Accelerated\s+)?Bachelor of Science in (.+)$/i,  (_, s) => `${s.trim()}, BS`],
+    [/^(?:Accelerated\s+)?Bachelor of Arts in (.+)$/i,     (_, s) => `${s.trim()}, BA`],
+    [/^Bachelor of Science\s*[-–]\s*(.+)$/i,               (_, s) => `BS—${s.trim()}`],
+    [/^Bachelor['']?s Degree\b(.*)$/i,                     (_, s) => `BS${s}`],
+];
+function normalizePortfolioName(name) {
+    if (!name) return name;
+    for (const [re, fn] of _DEGREE_EXPAND) {
+        if (re.test(name)) return name.replace(re, fn);
+    }
+    return name;
+}
+
 const _CAMPUS_PARENS = new Set(Object.keys(CAMPUS_ABBREVS).map(s => s.toLowerCase()));
 function stripCampusFromName(name) {
     if (!name) return name;
@@ -3222,6 +3239,9 @@ function extractPortfolioDegree(name) {
     if (/\bDual\s+Degree\b/i.test(n)) return 'Dual Degree';
     if (/\bGraduate\s+Certificate\b/i.test(n)) return 'Grad Cert';
     if (/\bUndergraduate\s+Certificate\b/i.test(n)) return 'UG Cert';
+    if (/\bBachelor of Science\b/i.test(n)) return 'BS';
+    if (/\bBachelor of Arts\b/i.test(n)) return 'BA';
+    if (/\bBachelor['']?s\b/i.test(n)) return 'BS';
     // Degree abbreviation after last comma
     const m = n.match(/,\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*$/);
     if (m) return m[1].trim();
@@ -3499,7 +3519,7 @@ function renderPortfolioRow(p, opts = {}) {
                title="${isExpanded ? 'Collapse' : 'Show'} concentrations">${isExpanded ? '▼' : '▶'}</button>`
         : '';
 
-    const displayName = stripCampusFromName(p.program_name);
+    const displayName = normalizePortfolioName(stripCampusFromName(p.program_name));
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
         <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}${marketSignal}</td>
         ${_pc('degree',  extractPortfolioDegree(p.program_name))}
