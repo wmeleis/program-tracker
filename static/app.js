@@ -3078,6 +3078,17 @@ function abbreviateCampus(campus) {
     return CAMPUS_ABBREVS[campus] || campus;
 }
 
+// Strip trailing campus parenthetical from a portfolio program name for display.
+// e.g. "Analytics, MS (Oakland)" → "Analytics, MS"
+// Keeps non-campus parentheticals like "(non-degree)" intact.
+const _CAMPUS_PARENS = new Set(Object.keys(CAMPUS_ABBREVS).map(s => s.toLowerCase()));
+function stripCampusFromName(name) {
+    if (!name) return name;
+    return name.replace(/\s*\(([^)]+)\)\s*$/, (match, inner) =>
+        _CAMPUS_PARENS.has(inner.toLowerCase()) ? '' : match
+    ).trim();
+}
+
 function extractCampus(name) {
     const match = name.match(/\(([^)]+)\)\s*$/);
     if (!match) return '';
@@ -3416,8 +3427,9 @@ function renderPortfolioRow(p, opts = {}) {
                title="${isExpanded ? 'Collapse' : 'Show'} concentrations">${isExpanded ? '▼' : '▶'}</button>`
         : '';
 
+    const displayName = stripCampusFromName(p.program_name);
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
-        <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
+        <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}${marketSignal}</td>
         <td>${abbreviateCollege(p.college)}</td>
         <td>${abbreviateCampus(p.campus)}</td>
         <td>${otpBadge}</td>

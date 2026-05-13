@@ -395,9 +395,11 @@ _CONC_SKIP = re.compile(
     r'^concentrations?$'
     r'|^concentrations?\s+(or|and|for\s+all|options?|courses?|list)\b'
     r'|\bconcentration\s+(courses?|list|options?|requirements?)\b'
+    r'|\bconcentration\s+or\s+'           # "Concentration or Electives Option"
     r'|\b(without|no)\s+concentration\b'
     r'|\(without\s+concentration\)'
-    r'|^excluded\s+courses',
+    r'|^excluded\s+courses'
+    r'|^coursework\s+option\b',           # "Coursework Option\nConcentration or ..."
     re.I
 )
 
