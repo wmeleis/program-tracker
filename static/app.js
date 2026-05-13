@@ -3578,7 +3578,7 @@ function renderPortfolioRow(p, opts = {}) {
         ? `<span class="portfolio-badge roster-badge">${escapeHtml(p.roster_status)}</span>
            ${p.roster_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.roster_sub_status)}</span>` : ''}` : '—';
     const cimStep  = p.cim_completion_date
-        ? `<span class="days-at-step complete">Approved</span>`
+        ? `<span class="days-at-step complete" title="${escapeHtml(p.cim_completion_date)}">${p.cim_change_type === 'Inactivation' ? 'Inactivated' : 'Approved'}</span>`
         : (p.cim_step ? escapeHtml(p.cim_step) : '');
     const note = escapeHtml(p.note || '');
     const isStatic = typeof window._staticMode !== 'undefined';
