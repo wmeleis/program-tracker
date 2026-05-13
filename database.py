@@ -1307,7 +1307,8 @@ def replace_all_portfolio_programs(rows):
                      ipd_status, ipd_proposal_type, ipd_additional_college,
                      roster_status, roster_sub_status, roster_proposal_type, roster_launch_date,
                      cim_program_id, cim_step, cim_completion_date, last_refreshed,
-                     concentration_of, concentrations_json)
+                     concentration_of, concentrations_json,
+                     market_2025, performance_2025)
                 VALUES
                     (:id, :program_name, :college, :campus,
                      :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1316,7 +1317,8 @@ def replace_all_portfolio_programs(rows):
                      :ipd_status, :ipd_proposal_type, :ipd_additional_college,
                      :roster_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
                      :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
-                     :concentration_of, :concentrations_json)
+                     :concentration_of, :concentrations_json,
+                     :market_2025, :performance_2025)
             """, row)
 
 
