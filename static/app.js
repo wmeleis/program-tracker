@@ -3135,6 +3135,61 @@ setInterval(loadDashboard, 120000);
 
 // ==================== Portfolio view ====================
 
+const PORTFOLIO_COLUMNS = [
+    {key: 'college', label: 'College'},
+    {key: 'campus',  label: 'Campus'},
+    {key: 'otp',     label: 'OTP Status'},
+    {key: 'ipd',     label: 'IPD Status'},
+    {key: 'gls',     label: 'GLS Status'},
+    {key: 'launch',  label: 'Launch Date'},
+    {key: 'cim',     label: 'CIM Step'},
+    {key: 'notes',   label: 'Notes'},
+];
+
+function _loadPortfolioCols() {
+    try {
+        const stored = JSON.parse(localStorage.getItem('cim-portfolio-cols') || 'null');
+        if (Array.isArray(stored)) return new Set(stored);
+    } catch(e) {}
+    return new Set(PORTFOLIO_COLUMNS.map(c => c.key));
+}
+let portfolioVisibleCols = _loadPortfolioCols();
+
+function togglePortfolioColPicker(e) {
+    e.stopPropagation();
+    const dd = document.getElementById('portfolio-col-dropdown');
+    if (!dd) return;
+    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+    dd.innerHTML = PORTFOLIO_COLUMNS.map(c => `
+        <label class="portfolio-col-check">
+            <input type="checkbox" ${portfolioVisibleCols.has(c.key) ? 'checked' : ''}
+                   onchange="togglePortfolioCol('${c.key}',this.checked)">
+            ${c.label}
+        </label>`).join('');
+    dd.classList.add('open');
+}
+
+function togglePortfolioCol(key, visible) {
+    if (visible) portfolioVisibleCols.add(key);
+    else portfolioVisibleCols.delete(key);
+    localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols]));
+    renderPortfolioTable();
+}
+
+document.addEventListener('click', e => {
+    const picker = document.getElementById('portfolio-col-picker');
+    if (picker && !picker.contains(e.target)) {
+        const dd = document.getElementById('portfolio-col-dropdown');
+        if (dd) dd.classList.remove('open');
+    }
+});
+
+// Returns <td> for a portfolio column, or '' if hidden.
+function _pc(key, content, cls) {
+    if (!portfolioVisibleCols.has(key)) return '';
+    return cls ? `<td class="${cls}">${content}</td>` : `<td>${content}</td>`;
+}
+
 let allPortfolioPrograms   = [];
 let portfolioExpandedIds   = new Set();
 let portfolioCollegeFilter = '';
@@ -3364,19 +3419,12 @@ function renderPortfolioTable() {
         portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
     });
 
+    const visibleHeaders = PORTFOLIO_COLUMNS
+        .filter(c => portfolioVisibleCols.has(c.key))
+        .map(c => `<th>${c.label}</th>`).join('');
     container.innerHTML = `
         <table class="program-table">
-            <thead><tr>
-                <th>Program</th>
-                <th>College</th>
-                <th>Campus</th>
-                <th>OTP Status</th>
-                <th>IPD Status</th>
-                <th>GLS Status</th>
-                <th>Launch Date</th>
-                <th>CIM Step</th>
-                <th>Notes</th>
-            </tr></thead>
+            <thead><tr><th>Program</th>${visibleHeaders}</tr></thead>
             <tbody>${rowHtml.join('')}</tbody>
         </table>`;
 }
@@ -3386,9 +3434,12 @@ function renderPortfolioConcRow(name, search) {
         ? escapeHtml(name).replace(new RegExp(`(${escapeHtml(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
             '<mark>$1</mark>')
         : escapeHtml(name);
+    const blankCells = PORTFOLIO_COLUMNS
+        .filter(c => portfolioVisibleCols.has(c.key))
+        .map(() => '<td>—</td>').join('');
     return `<tr class="portfolio-row portfolio-curriculum-conc-row">
         <td class="program-name-cell"><span class="portfolio-curriculum-conc-indent">↳</span>${hl}</td>
-        <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+        ${blankCells}
     </tr>`;
 }
 
@@ -3430,14 +3481,14 @@ function renderPortfolioRow(p, opts = {}) {
     const displayName = stripCampusFromName(p.program_name);
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
         <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}${marketSignal}</td>
-        <td>${abbreviateCollege(p.college)}</td>
-        <td>${abbreviateCampus(p.campus)}</td>
-        <td>${otpBadge}</td>
-        <td>${ipdBadge}</td>
-        <td>${rosterBadge}</td>
-        <td>${escapeHtml(p.roster_launch_date || '')}</td>
-        <td class="step-cell">${cimStep}</td>
-        <td class="portfolio-note-cell">${noteCell}</td>
+        ${_pc('college', abbreviateCollege(p.college))}
+        ${_pc('campus',  abbreviateCampus(p.campus))}
+        ${_pc('otp',     otpBadge)}
+        ${_pc('ipd',     ipdBadge)}
+        ${_pc('gls',     rosterBadge)}
+        ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
+        ${_pc('cim',     cimStep, 'step-cell')}
+        ${_pc('notes',   noteCell, 'portfolio-note-cell')}
     </tr>`;
 }
 
