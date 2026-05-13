@@ -367,6 +367,28 @@ _ABBREV_RE = [(re.compile(pat, re.I), repl) for pat, repl in _ABBREV_MAP]
 _DEPLOY_SUFFIX = re.compile(
     r'[\s,]*[-—]?\s*(align|connect|bridge|accelerated|part.?time)\b.*$', re.I)
 
+# Concentration patterns for parent-name extraction:
+#   Pattern A: "BASE with Concentration in CONC, DEGREE (Campus)"
+_CONC_WITH = re.compile(
+    r'^(.+?)\s+with\s+Concentration\s+in\s+[^,]+,\s+([A-Z][^\s(,]+(?:\s*\([^)]+\))?)\s*$',
+    re.I)
+#   Pattern B: "BASE - CONC Concentration, DEGREE (Campus)"
+_CONC_DASH = re.compile(
+    r'^(.+?)\s*[-—]\s*[^-—,]+?\s+Concentration,?\s+([A-Z][^\s(,]+(?:\s*\([^)]+\))?)\s*$',
+    re.I)
+
+
+def _extract_parent_name(name):
+    """Try to extract a parent program name from a concentration name.
+    Returns a candidate name string or None if no pattern matched."""
+    m = _CONC_WITH.match(name)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    m = _CONC_DASH.match(name)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    return None
+
 
 def _expand_abbrevs(s):
     """Apply abbreviation expansions and & → and."""
@@ -575,6 +597,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         'ipd_status': '', 'ipd_proposal_type': '', 'ipd_additional_college': '',
         'roster_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
         'roster_launch_date': '',
+        'concentration_of': '',
         'last_refreshed': now,
     }
 
@@ -735,6 +758,27 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         else:
             row['campus'] = _CAMPUS_NAMES.get(campus, campus)
 
+    # ── Step 6: Link concentrations to parent programs ───────────────────────
+    # Build a name→id index over all unified rows for parent lookup.
+    name_to_pid = {}
+    for pid, row in unified.items():
+        for key in (_norm(row['program_name']), _degree_core(row['program_name'])):
+            if key and key not in name_to_pid:
+                name_to_pid[key] = pid
+
+    n_linked = 0
+    for pid, row in unified.items():
+        if 'concentration' not in (row['program_name'] or '').lower():
+            continue
+        parent_raw = _extract_parent_name(row['program_name'])
+        if not parent_raw:
+            continue
+        for key in (_norm(parent_raw), _degree_core(parent_raw)):
+            if key and key in name_to_pid and name_to_pid[key] != pid:
+                row['concentration_of'] = name_to_pid[key]
+                n_linked += 1
+                break
+
     rows = list(unified.values())
     replace_all_portfolio_programs(rows)
 
@@ -745,11 +789,13 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     n_otp_matched    = sum(1 for p in otp_rows    if _find_cim(p['_norm_name'], p['campus'], cim_index))
     n_ipd_matched    = sum(1 for p in ipd_rows    if _find_cim(p['program_name'], '', cim_index))
     n_roster_matched = sum(1 for p in roster_rows if _find_cim(p['program_name'], p['campus'], cim_index))
+    n_conc_total = sum(1 for r in rows if 'concentration' in (r['program_name'] or '').lower())
     print(f"Portfolio ingest: {len(rows)} programs total")
     print(f"  CIM active: {n_cim}")
     print(f"  OTP: {n_otp} ({n_otp_matched} matched to CIM, {n_otp - n_otp_matched} unmatched)")
     print(f"  IPD: {n_ipd} ({n_ipd_matched} matched to CIM, {n_ipd - n_ipd_matched} unmatched)")
     print(f"  Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
+    print(f"  Concentrations: {n_conc_total} detected, {n_linked} linked to parent")
     return len(rows)
 
 

@@ -1617,6 +1617,28 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     padding: 8px 10px;
 }
 
+.portfolio-concentration-row {
+    background: #fafbfd;
+}
+
+.portfolio-concentration-row td:first-child {
+    padding-left: 28px;
+    border-left: 3px solid #cbd5e1;
+}
+
+.portfolio-conc-badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.72em;
+    font-weight: 600;
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
 .portfolio-note-cell {
     min-width: 160px;
     max-width: 260px;

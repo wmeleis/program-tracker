@@ -3226,17 +3226,88 @@ function getPortfolioFiltered() {
 function renderPortfolioTable() {
     const container = document.getElementById('programs-table-container');
     if (!container) return;
-    const rows = getPortfolioFiltered();
+
+    const filtered = getPortfolioFiltered();
+    const filteredIds = new Set(filtered.map(p => p.id));
+
+    // Index all programs by id for parent lookups
+    const allById = {};
+    allPortfolioPrograms.forEach(p => { allById[p.id] = p; });
+
+    // Index ALL concentrations by parent id (for showing all children of a visible parent)
+    const allConcsByParent = {};
+    allPortfolioPrograms.forEach(p => {
+        if (p.concentration_of) {
+            if (!allConcsByParent[p.concentration_of]) allConcsByParent[p.concentration_of] = [];
+            allConcsByParent[p.concentration_of].push(p);
+        }
+    });
+
+    // Split filtered rows into top-level and linked concentrations
+    const topLevel = [];
+    const topLevelIds = new Set();
+    const matchingConcsByParent = {}; // parent_id → concentrations that matched the filter
+
+    filtered.forEach(p => {
+        if (p.concentration_of && allById[p.concentration_of]) {
+            // Linked concentration that passed the filter
+            if (!matchingConcsByParent[p.concentration_of]) matchingConcsByParent[p.concentration_of] = [];
+            matchingConcsByParent[p.concentration_of].push(p);
+        } else {
+            topLevel.push(p);
+            topLevelIds.add(p.id);
+        }
+    });
+
+    // For concentrations whose parent didn't pass the filter: force-include parent
+    Object.keys(matchingConcsByParent).forEach(parentId => {
+        if (!topLevelIds.has(parentId) && allById[parentId]) {
+            topLevel.push(allById[parentId]);
+            topLevelIds.add(parentId);
+        }
+    });
+
+    topLevel.sort((a, b) =>
+        (a.college || '').localeCompare(b.college || '') ||
+        (a.program_name || '').localeCompare(b.program_name || ''));
+
+    const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter ||
+        portfolioCollegeFilter || portfolioCampusFilter ||
+        portfolioOtpFilter || portfolioIpdFilter ||
+        portfolioRosterFilter || portfolioCimFilter || portfolioSearch;
+
+    // Count: top-level programs + all visible concentrations
+    let concCount = 0;
+    topLevel.forEach(p => {
+        const concs = anyFilterActive
+            ? (matchingConcsByParent[p.id] || [])
+            : (allConcsByParent[p.id] || []);
+        concCount += concs.length;
+    });
 
     const countEl = document.getElementById('portfolio-result-count');
-    if (countEl) countEl.textContent = `${rows.length} programs`;
+    if (countEl) {
+        countEl.textContent = concCount > 0
+            ? `${topLevel.length} programs, ${concCount} concentrations`
+            : `${topLevel.length} programs`;
+    }
 
-    if (rows.length === 0) {
+    if (topLevel.length === 0 && Object.keys(matchingConcsByParent).length === 0) {
         container.innerHTML = '<p class="empty-state">No programs match your filters.</p>';
         return;
     }
 
-    const html = `
+    const rowHtml = [];
+    topLevel.forEach(p => {
+        // Determine which concentrations to show under this parent
+        const concsToShow = anyFilterActive
+            ? (matchingConcsByParent[p.id] || [])
+            : (allConcsByParent[p.id] || []);
+        rowHtml.push(renderPortfolioRow(p, concsToShow.length > 0));
+        concsToShow.forEach(c => rowHtml.push(renderPortfolioRow(c, false, true)));
+    });
+
+    container.innerHTML = `
         <table class="program-table">
             <thead><tr>
                 <th>Program</th>
@@ -3249,14 +3320,11 @@ function renderPortfolioTable() {
                 <th>CIM Step</th>
                 <th>Notes</th>
             </tr></thead>
-            <tbody>
-            ${rows.map(p => renderPortfolioRow(p)).join('')}
-            </tbody>
+            <tbody>${rowHtml.join('')}</tbody>
         </table>`;
-    container.innerHTML = html;
 }
 
-function renderPortfolioRow(p) {
+function renderPortfolioRow(p, hasConcentrations = false, isConcentration = false) {
     const otpBadge    = p.otp_status
         ? `<span class="portfolio-badge otp-badge">${escapeHtml(p.otp_status)}</span>` : '—';
     const ipdBadge    = p.ipd_status
@@ -3276,8 +3344,12 @@ function renderPortfolioRow(p) {
     const subStatus    = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
     const marketSignal = p.otp_market_signal ? `<br><span class="muted" style="font-size:0.78em">${escapeHtml(p.otp_market_signal)} / ${escapeHtml(p.otp_internal_performance)}</span>` : '';
 
-    return `<tr class="portfolio-row" title="${escapeHtml(p.program_name)}">
-        <td class="program-name-cell">${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
+    const concBadge = isConcentration
+        ? `<span class="portfolio-conc-badge">Conc.</span> ` : '';
+    const rowClass = isConcentration ? 'portfolio-row portfolio-concentration-row' : 'portfolio-row';
+
+    return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
+        <td class="program-name-cell">${concBadge}${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
         <td>${escapeHtml(p.college) || '—'}</td>
         <td>${escapeHtml(p.campus)  || '—'}</td>
         <td>${otpBadge}</td>
