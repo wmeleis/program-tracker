@@ -3142,7 +3142,7 @@ function formatTime(isoString) {
 
 // ==================== Init ====================
 
-document.addEventListener('DOMContentLoaded', () => {
+function _initDashboard() {
     // Restore last active view (so navigating away and back keeps your context).
     let savedView = 'programs';
     try { savedView = localStorage.getItem('cim-active-view') || 'programs'; } catch(e) {}
@@ -3159,7 +3159,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof window._staticMode === 'undefined') {
         checkSessionHealth();
     }
-});
+}
+
+document.addEventListener('DOMContentLoaded', _initDashboard);
 
 // Auto-refresh every 2 minutes (data display only, not scanning)
 setInterval(loadDashboard, 120000);
@@ -3238,6 +3240,15 @@ let portfolioRosterFilter    = '';
 let portfolioCimFilter       = '';
 let portfolioCimChangeFilter = '';
 let portfolioCimActiveFilter = '';
+
+// A program is only "Inactive" once its inactivation workflow has fully completed.
+// While an inactivation proposal is still moving through CIM (cim_step is set),
+// the program is still running (teach-out phase) and should show as "Active".
+function portfolioCimActiveLabel(p) {
+    if (!p.cim_program_id) return '';
+    const inactivated = p.cim_change_type === 'Inactivation' && !p.cim_step && p.cim_completion_date;
+    return inactivated ? 'Inactive' : 'Active';
+}
 let portfolioLevelFilter   = '';
 let portfolioDegreeFilter  = '';
 let portfolioSortKey = '';   // '' = default (college/name), or a PORTFOLIO_COLUMNS key or 'name'
@@ -3345,10 +3356,7 @@ function populatePortfolioFilters() {
     const rosterStatuses = [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort();
     const cimSteps       = [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort();
     const cimChangeVals  = [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort();
-    const cimActiveVals  = [...new Set(programs.map(p => {
-        if (!p.cim_program_id) return '';
-        return p.cim_change_type === 'Inactivation' ? 'Inactive' : 'Active';
-    }).filter(Boolean))].sort();
+    const cimActiveVals  = [...new Set(programs.map(portfolioCimActiveLabel).filter(Boolean))].sort();
 
     function populate(id, values, current) {
         const sel = document.getElementById(id);
@@ -3397,11 +3405,7 @@ function getPortfolioFiltered() {
     if (portfolioRosterFilter)    rows = rows.filter(p => p.roster_status  === portfolioRosterFilter);
     if (portfolioCimFilter)       rows = rows.filter(p => p.cim_step       === portfolioCimFilter);
     if (portfolioCimChangeFilter) rows = rows.filter(p => p.cim_change_type === portfolioCimChangeFilter);
-    if (portfolioCimActiveFilter) rows = rows.filter(p => {
-        if (!p.cim_program_id) return false;
-        const active = p.cim_change_type === 'Inactivation' ? 'Inactive' : 'Active';
-        return active === portfolioCimActiveFilter;
-    });
+    if (portfolioCimActiveFilter) rows = rows.filter(p => portfolioCimActiveLabel(p) === portfolioCimActiveFilter);
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
         rows = rows.filter(p =>
@@ -3471,9 +3475,7 @@ function renderPortfolioTable() {
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimchange': av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
-            case 'cimactive': av = a.cim_program_id ? (a.cim_change_type === 'Inactivation' ? 'Inactive' : 'Active') : '';
-                              bv = b.cim_program_id ? (b.cim_change_type === 'Inactivation' ? 'Inactive' : 'Active') : '';
-                              break;
+            case 'cimactive': av = portfolioCimActiveLabel(a); bv = portfolioCimActiveLabel(b); break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
             case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
             case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
@@ -3620,9 +3622,9 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('cim',       cimStep, 'step-cell')}
         ${_pc('cimchange', p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
         ${_pc('cimactive', (() => {
-            if (!p.cim_program_id) return '';
-            const isInact = p.cim_change_type === 'Inactivation';
-            return `<span class="portfolio-badge ${isInact ? 'badge-bad' : 'badge-good'}">${isInact ? 'Inactive' : 'Active'}</span>`;
+            const lbl = portfolioCimActiveLabel(p);
+            if (!lbl) return '';
+            return `<span class="portfolio-badge ${lbl === 'Inactive' ? 'badge-bad' : 'badge-good'}">${lbl}</span>`;
         })())}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
     </tr>`;

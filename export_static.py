@@ -1130,8 +1130,9 @@ function __staticInit() {
 
     // Remove auto-refresh interval (static data doesn't change)
 
-    // Initial load
-    loadDashboard();
+    // Initial load: restore saved view (Portfolio, Courses, etc.) just like Flask mode.
+    // _initDashboard() is defined in app.js and handles localStorage view restoration.
+    _initDashboard();
 }
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', __staticInit);
@@ -1140,10 +1141,12 @@ if (document.readyState === 'loading') {
 }
 '''
 
-    # Remove the DOMContentLoaded listener from the original since we add our own
+    # Remove the DOMContentLoaded listener from the original since __staticInit calls
+    # _initDashboard() directly (DOMContentLoaded already fired by the time the gate
+    # injects app.js, so the listener would never fire on the static site).
     modified = original_js.replace(
-        "document.addEventListener('DOMContentLoaded', loadDashboard);",
-        "// DOMContentLoaded handled by static override"
+        "document.addEventListener('DOMContentLoaded', _initDashboard);",
+        "// DOMContentLoaded handled by static __staticInit -> _initDashboard()"
     )
     # Remove the auto-refresh
     modified = modified.replace(
