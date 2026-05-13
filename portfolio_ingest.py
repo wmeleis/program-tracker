@@ -275,6 +275,9 @@ _SCORING_2025_OVERRIDES = {
     'security & intelligence stu, ma':           'security and intelligence studies, ma',
     'sustain urban envrt-1year, mdes':           'sustainable urban environments, mdes',
     'sustainable bldg sys, mssbs':               'sustainable building systems, mssbs',
+    # Excel degree token differs from CIM name (degree prefix not inverted)
+    'msecel elec and comp engr lead':            'ece leadership, ms',
+    'msenes energy systems - al':                'energy systems (al), ms',
 }
 
 def parse_scoring_2025(path=SCORING_2025_PATH):
