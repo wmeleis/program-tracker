@@ -395,11 +395,12 @@ _PORTFOLIO_REMOVE = frozenset({
     'Cybersecurity Microcredential Badges (non-credit levels 1-3)',
     'Future You: Leveraging AI for Success - EM EDGE Badge',
     'Entrepreneurship Boot Camp',
-    # Not programs
+    # Not programs / duplicates
     'Global Pathways in Portland (Khoury, CPS)',
     'Pre-College Online Program',
     'SummerIn Portland: Innovating to Address Complex Health Challenges',
     'University of Philippines Global Campus partnership',
+    'AI CERT in SV',  # duplicate of AI Applications, Graduate Certificate (Silicon Valley)
 })
 
 # Exact name → (corrected_name, college_override, campus_override).
