@@ -3344,9 +3344,12 @@ function renderPortfolioRow(p, hasConcentrations = false, isConcentration = fals
     const subStatus    = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
     const marketSignal = p.otp_market_signal ? `<br><span class="muted" style="font-size:0.78em">${escapeHtml(p.otp_market_signal)} / ${escapeHtml(p.otp_internal_performance)}</span>` : '';
 
+    const isSynthetic = (p.id || '').startsWith('synth_');
     const concBadge = isConcentration
         ? `<span class="portfolio-conc-badge">Conc.</span> ` : '';
-    const rowClass = isConcentration ? 'portfolio-row portfolio-concentration-row' : 'portfolio-row';
+    const rowClass = isConcentration
+        ? 'portfolio-row portfolio-concentration-row'
+        : isSynthetic ? 'portfolio-row portfolio-synthetic-row' : 'portfolio-row';
 
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
         <td class="program-name-cell">${concBadge}${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>

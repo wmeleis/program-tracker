@@ -766,6 +766,45 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             if key and key not in name_to_pid:
                 name_to_pid[key] = pid
 
+    # First pass: collect concentrations with extractable parent names that
+    # don't already have a matching row, then create synthetic parent entries.
+    n_synthetic = 0
+    pending_concs = []  # (pid, parent_raw, conc_row)
+    for pid, row in unified.items():
+        if 'concentration' not in (row['program_name'] or '').lower():
+            continue
+        parent_raw = _extract_parent_name(row['program_name'])
+        if not parent_raw:
+            continue
+        found = any(k in name_to_pid for k in (_norm(parent_raw), _degree_core(parent_raw)))
+        if not found:
+            pending_concs.append((pid, parent_raw, row))
+
+    # Create one synthetic parent per unique normalized parent name.
+    synth_created = {}  # norm_key → synthetic pid
+    for pid, parent_raw, conc_row in pending_concs:
+        norm_key = _norm(parent_raw)
+        if norm_key in synth_created:
+            continue
+        synth_pid = 'synth_' + re.sub(r'[^a-z0-9]+', '_', norm_key)[:60]
+        unified[synth_pid] = dict(_EMPTY_TRACKING, **{
+            'id':             synth_pid,
+            'program_name':   parent_raw,
+            'college':        conc_row.get('college', ''),
+            'campus':         conc_row.get('campus', ''),
+            'cim_program_id': None,
+            'cim_step':       '',
+            'cim_completion_date': '',
+        })
+        # Add to index so concentrations can find it
+        name_to_pid[norm_key] = synth_pid
+        dk = _degree_core(parent_raw)
+        if dk and dk not in name_to_pid:
+            name_to_pid[dk] = synth_pid
+        synth_created[norm_key] = synth_pid
+        n_synthetic += 1
+
+    # Second pass: link all concentrations to their parent.
     n_linked = 0
     for pid, row in unified.items():
         if 'concentration' not in (row['program_name'] or '').lower():
@@ -795,7 +834,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     print(f"  OTP: {n_otp} ({n_otp_matched} matched to CIM, {n_otp - n_otp_matched} unmatched)")
     print(f"  IPD: {n_ipd} ({n_ipd_matched} matched to CIM, {n_ipd - n_ipd_matched} unmatched)")
     print(f"  Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
-    print(f"  Concentrations: {n_conc_total} detected, {n_linked} linked to parent")
+    print(f"  Concentrations: {n_conc_total} detected, {n_linked} linked to parent ({n_synthetic} synthetic parents created)")
     return len(rows)
 
 

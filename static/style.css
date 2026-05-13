@@ -1626,6 +1626,15 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     border-left: 3px solid #cbd5e1;
 }
 
+.portfolio-synthetic-row {
+    background: #f8fafc;
+}
+
+.portfolio-synthetic-row td {
+    color: #64748b;
+    font-style: italic;
+}
+
 .portfolio-conc-badge {
     display: inline-block;
     padding: 1px 5px;
