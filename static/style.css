@@ -1791,6 +1791,24 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 }
 .portfolio-col-check:hover { background: #f8fafc; }
 .portfolio-col-check input[type=checkbox] { cursor: pointer; accent-color: var(--accent); }
+.portfolio-col-selectall {
+    display: flex;
+    gap: 6px;
+    padding: 4px 8px 6px;
+    border-bottom: 1px solid #e2e8f0;
+    margin-bottom: 4px;
+}
+.portfolio-col-selectall button {
+    flex: 1;
+    font-size: 0.8em;
+    padding: 3px 6px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #f8fafc;
+    color: #475569;
+    cursor: pointer;
+}
+.portfolio-col-selectall button:hover { background: #e2e8f0; }
 
 .muted { color: #94a3b8; }
 

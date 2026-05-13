@@ -3197,17 +3197,35 @@ function _loadPortfolioCols() {
 }
 let portfolioVisibleCols = _loadPortfolioCols();
 
-function togglePortfolioColPicker(e) {
-    e.stopPropagation();
-    const dd = document.getElementById('portfolio-col-dropdown');
-    if (!dd) return;
-    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
-    dd.innerHTML = PORTFOLIO_COLUMNS.map(c => `
+function _rebuildColDropdownItems(dd) {
+    dd.innerHTML =
+        `<div class="portfolio-col-selectall">
+            <button onclick="toggleAllPortfolioCols(true)">Select All</button>
+            <button onclick="toggleAllPortfolioCols(false)">Unselect All</button>
+        </div>` +
+        PORTFOLIO_COLUMNS.map(c => `
         <label class="portfolio-col-check">
             <input type="checkbox" ${portfolioVisibleCols.has(c.key) ? 'checked' : ''}
                    onchange="togglePortfolioCol('${c.key}',this.checked)">
             ${c.label}
         </label>`).join('');
+}
+
+function toggleAllPortfolioCols(visible) {
+    if (visible) PORTFOLIO_COLUMNS.forEach(c => portfolioVisibleCols.add(c.key));
+    else portfolioVisibleCols.clear();
+    localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols]));
+    const dd = document.getElementById('portfolio-col-dropdown');
+    if (dd && dd.classList.contains('open')) _rebuildColDropdownItems(dd);
+    renderPortfolioTable();
+}
+
+function togglePortfolioColPicker(e) {
+    e.stopPropagation();
+    const dd = document.getElementById('portfolio-col-dropdown');
+    if (!dd) return;
+    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+    _rebuildColDropdownItems(dd);
     dd.classList.add('open');
 }
 
@@ -3609,7 +3627,7 @@ function renderPortfolioRow(p, opts = {}) {
         ? `<span class="portfolio-note-text">${note || '<span class="muted">—</span>'}</span>`
         : `<span class="portfolio-note-text" onclick="editPortfolioNote(this, '${escapeHtml(p.id)}')">${note || '<span class="muted add-note">+ add note</span>'}</span>`;
 
-    const subStatus    = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
+    const subStatus    = '';  // subtitles removed per user request
     const market2025Badge = p.market_2025
         ? `<span class="portfolio-badge ${p.market_2025 === 'Good' ? 'badge-good' : 'badge-bad'}">${escapeHtml(p.market_2025)}</span>` : '—';
     const perf2025Badge = p.performance_2025

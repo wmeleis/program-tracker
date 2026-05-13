@@ -895,23 +895,27 @@ def _best_eff_cat(eff_cat, completion_date, cim_step=''):
     """Return the best available catalog-year string from multiple sources.
 
     Priority:
-      1. eff_cat field (from XML; most accurate for active proposals)
+      1. completion_date with catalog year (e.g. 'Catalog 2025-2026') — most
+         authoritative because it comes from the actual Catalog Setup step.
       2. Year embedded in cim_step name (e.g. 'Program Catalog Setup for 2027-2028')
-      3. completion_date (e.g. 'Catalog 2025-2026'; available once workflow completes)
+         — also catalog-setup-derived, used when program is still in workflow.
+      3. eff_cat from CIM XML — the program's self-reported effective catalog year;
+         always available after a batch fetch but less authoritative than (1)/(2).
     """
-    if eff_cat:
-        return eff_cat
-    # Try step name: "... for 2027-2028" or "... for 2027-28"
+    # 1. Catalog year from completion_date (most authoritative)
+    if completion_date:
+        m = re.search(r'(\d{4}[–\-]\d{4})', completion_date)
+        if m:
+            return m.group(1)
+    # 2. Year embedded in step name
     if cim_step:
         m = re.search(r'(\d{4})[–\-](\d{2,4})', cim_step)
         if m:
             return m.group(1) + '-' + (m.group(2) if len(m.group(2)) == 4
                                         else str(int(m.group(1)) // 100) + m.group(2))
-    if completion_date:
-        # "Catalog 2025-2026" → "2025-2026"
-        m2 = re.search(r'(\d{4}[–\-]\d{4})', completion_date)
-        if m2:
-            return m2.group(1)
+    # 3. eff_cat from CIM XML
+    if eff_cat:
+        return eff_cat
     return ''
 
 
@@ -1388,11 +1392,35 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     # active pipeline (no current_step), but they should still show as
     # Inactive in the portfolio if we can match them by name.
     completed_inact = _load_completed_inactivations()
+
+    # Abbreviation expansion used only for inactivation matching, where CIM
+    # full names (e.g. "Management") may differ from OTP/Roster abbreviations
+    # (e.g. "Mgmt").  Applied to both sides before comparing.
+    _ABBREV_EXPAND = {
+        r'\bmgmt\b': 'management', r'\badmin\b': 'administration',
+        r'\bdept\b': 'department', r'\bsci\b': 'science',
+        r'\beng\b': 'engineering', r'\btech\b': 'technology',
+        r'\binfo\b': 'information', r'\bsys\b': 'systems',
+        r'\bcomm\b': 'communication', r'\bintl\b': 'international',
+        r'\bdev\b': 'development', r'\benv\b': 'environmental',
+        r'\bhum\b': 'human', r'\bsoc\b': 'social',
+    }
+
+    def _norm_expanded(s):
+        """_norm + abbreviation expansion for fuzzy inact matching."""
+        t = _norm(s)
+        for pat, repl in _ABBREV_EXPAND.items():
+            t = re.sub(pat, repl, t)
+        return t
+
     # Build index: norm_name (campus-stripped) → inactivation entry
+    # Two keys per entry: with and without campus parenthetical, and
+    # two variants each: plain _norm and abbrev-expanded _norm.
     inact_index = {}
     for c in completed_inact:
-        for key in (_norm(re.sub(r'\s*\([^)]*\)\s*$', '', c['cim_name'])),
-                    _norm(c['cim_name'])):
+        base = re.sub(r'\s*\([^)]*\)\s*$', '', c['cim_name'])
+        for key in (_norm(base), _norm(c['cim_name']),
+                    _norm_expanded(base), _norm_expanded(c['cim_name'])):
             if key and key not in inact_index:
                 inact_index[key] = c
 
@@ -1401,8 +1429,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         if row.get('cim_program_id'):
             continue  # already linked to an active CIM program
         name = row.get('program_name') or ''
-        key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
-        entry = inact_index.get(key) or inact_index.get(_norm(name))
+        stripped = re.sub(r'\s*\([^)]*\)\s*$', '', name)
+        key = _norm(stripped)
+        entry = (inact_index.get(key)
+                 or inact_index.get(_norm(name))
+                 or inact_index.get(_norm_expanded(stripped))
+                 or inact_index.get(_norm_expanded(name)))
         if entry:
             row['cim_program_id']          = entry['cim_id']
             row['cim_change_type']         = 'Inactivation'
