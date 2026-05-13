@@ -3140,6 +3140,7 @@ setInterval(loadDashboard, 120000);
 // ==================== Portfolio view ====================
 
 const PORTFOLIO_COLUMNS = [
+    {key: 'degree',  label: 'Degree'},
     {key: 'college', label: 'College'},
     {key: 'campus',  label: 'Campus'},
     {key: 'otp',     label: 'OTP Status'},
@@ -3213,6 +3214,22 @@ function classifyPortfolioLevel(name) {
     if (/\b(BS|BA|BFA|BArch|BSN|BSBA|BSCF)\b/.test(n) ||
         /\b(Bachelor|Undergrad|Minor)\b/i.test(n)) return 'Undergraduate';
     return null;
+}
+
+function extractPortfolioDegree(name) {
+    const n = (name || '').replace(/\s*\([^)]*\)\s*/g, '').replace(/\s*—.*$/, '').trim();
+    // Explicit multi-word degrees first
+    if (/\bDual\s+Degree\b/i.test(n)) return 'Dual Degree';
+    if (/\bGraduate\s+Certificate\b/i.test(n)) return 'Grad Cert';
+    if (/\bUndergraduate\s+Certificate\b/i.test(n)) return 'UG Cert';
+    // Degree abbreviation after last comma
+    const m = n.match(/,\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*$/);
+    if (m) return m[1].trim();
+    // No comma: infer from keywords
+    if (/\bMinor\b/i.test(n)) return 'Minor';
+    if (/\bCertificate\b/i.test(n)) return 'Cert';
+    if (/\bDoctorate\b/i.test(n)) return 'Doctorate';
+    return '';
 }
 
 function classifyPortfolioDegree(name) {
@@ -3485,6 +3502,7 @@ function renderPortfolioRow(p, opts = {}) {
     const displayName = stripCampusFromName(p.program_name);
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
         <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}${marketSignal}</td>
+        ${_pc('degree',  extractPortfolioDegree(p.program_name))}
         ${_pc('college', abbreviateCollege(p.college))}
         ${_pc('campus',  abbreviateCampus(p.campus))}
         ${_pc('otp',     otpBadge)}
