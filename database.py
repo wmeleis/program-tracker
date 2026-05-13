@@ -1211,7 +1211,8 @@ def init_portfolio_tables(conn):
             cim_step TEXT DEFAULT '',
             cim_completion_date TEXT DEFAULT '',
             last_refreshed TEXT DEFAULT '',
-            concentration_of TEXT DEFAULT ''
+            concentration_of TEXT DEFAULT '',
+            concentrations_json TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS portfolio_notes (
@@ -1226,7 +1227,7 @@ def init_portfolio_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_portfolio_ipd_status ON portfolio_programs(ipd_status);
     """)
     for col in ('roster_status', 'roster_sub_status', 'roster_proposal_type', 'roster_launch_date',
-                'concentration_of'):
+                'concentration_of', 'concentrations_json'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1249,7 +1250,7 @@ def upsert_portfolio_program(row):
                  ipd_status, ipd_proposal_type, ipd_additional_college,
                  roster_status, roster_sub_status, roster_proposal_type, roster_launch_date,
                  cim_program_id, cim_step, cim_completion_date, last_refreshed,
-                 concentration_of)
+                 concentration_of, concentrations_json)
             VALUES
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1258,7 +1259,7 @@ def upsert_portfolio_program(row):
                  :ipd_status, :ipd_proposal_type, :ipd_additional_college,
                  :roster_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
                  :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
-                 :concentration_of)
+                 :concentration_of, :concentrations_json)
             ON CONFLICT(id) DO UPDATE SET
                 program_name=excluded.program_name,
                 college=excluded.college,
@@ -1281,7 +1282,8 @@ def upsert_portfolio_program(row):
                 cim_step=excluded.cim_step,
                 cim_completion_date=excluded.cim_completion_date,
                 last_refreshed=excluded.last_refreshed,
-                concentration_of=excluded.concentration_of
+                concentration_of=excluded.concentration_of,
+                concentrations_json=excluded.concentrations_json
         """, row)
 
 
@@ -1299,7 +1301,7 @@ def replace_all_portfolio_programs(rows):
                      ipd_status, ipd_proposal_type, ipd_additional_college,
                      roster_status, roster_sub_status, roster_proposal_type, roster_launch_date,
                      cim_program_id, cim_step, cim_completion_date, last_refreshed,
-                     concentration_of)
+                     concentration_of, concentrations_json)
                 VALUES
                     (:id, :program_name, :college, :campus,
                      :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1308,7 +1310,7 @@ def replace_all_portfolio_programs(rows):
                      :ipd_status, :ipd_proposal_type, :ipd_additional_college,
                      :roster_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
                      :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
-                     :concentration_of)
+                     :concentration_of, :concentrations_json)
             """, row)
 
 

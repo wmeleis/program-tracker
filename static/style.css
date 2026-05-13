@@ -1617,6 +1617,51 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     padding: 8px 10px;
 }
 
+.portfolio-conc-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-right: 5px;
+    padding: 0;
+    background: none;
+    border: 1px solid #cbd5e1;
+    border-radius: 3px;
+    font-size: 0.65em;
+    color: #64748b;
+    cursor: pointer;
+    vertical-align: middle;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.portfolio-conc-toggle:hover { background: #f1f5f9; border-color: #94a3b8; }
+.portfolio-conc-toggle.expanded { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
+
+.portfolio-curriculum-conc-row {
+    background: #f8fafc;
+}
+.portfolio-curriculum-conc-row td {
+    font-size: 0.9em;
+    color: #475569;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+.portfolio-curriculum-conc-row td:first-child {
+    padding-left: 32px;
+    border-left: 3px solid #bfdbfe;
+}
+.portfolio-curriculum-conc-indent {
+    margin-right: 5px;
+    color: #94a3b8;
+    font-size: 0.85em;
+}
+.portfolio-curriculum-conc-row mark {
+    background: #fef9c3;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
 .portfolio-concentration-row {
     background: #fafbfd;
 }

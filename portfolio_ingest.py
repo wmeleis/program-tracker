@@ -390,6 +390,59 @@ def _extract_parent_name(name):
     return None
 
 
+# Concentration headings to skip — purely structural / generic
+_CONC_SKIP = re.compile(
+    r'^concentrations?$'
+    r'|^concentrations?\s+(or|and|for\s+all|options?|courses?|list)\b'
+    r'|\bconcentration\s+(courses?|list|options?|requirements?)\b'
+    r'|\b(without|no)\s+concentration\b'
+    r'|\(without\s+concentration\)'
+    r'|^excluded\s+courses',
+    re.I
+)
+
+
+def _extract_concentrations_from_html(html):
+    """Return sorted list of named concentration names from CIM curriculum HTML."""
+    if not html:
+        return []
+    headings = re.findall(r'<h[234][^>]*>(.*?)</h[234]>', html, re.I | re.S)
+    results = []
+    seen = set()
+    for raw in headings:
+        h = re.sub(r'<[^>]+>', '', raw).replace('\xa0', ' ').strip()
+        h = re.sub(r'\s+', ' ', h).strip()
+        if 'concentration' not in h.lower():
+            continue
+        if _CONC_SKIP.search(h):
+            continue
+        # Strip college attribution: "—College of X" or "— Khoury College"
+        h = re.sub(r'\s*[—]\s*\S.*College.*$', '', h).strip()
+        # Strip trailing "(Optional)" / "(Required)" before further normalization
+        h = re.sub(r'\s*\([Oo]ptional\)$', '', h).strip()
+        h = re.sub(r'\s*\([Rr]equired\)$', '', h).strip()
+        # Strip trailing asterisks / footnote markers
+        h = h.rstrip('*† ').strip()
+        # "Optional Concentration in X" / "Concentration in X" → X
+        # "X with a Concentration in Y" / "X with Concentration in Y" → Y
+        m = re.match(r'^(?:optional\s+)?concentration\s+in\s+(.+)$', h, re.I)
+        if m:
+            h = m.group(1).strip()
+        elif re.search(r'\bwith\s+a?\s*concentration\s+in\s+', h, re.I):
+            h = re.sub(r'^.*\bwith\s+a?\s*concentration\s+in\s+', '', h, flags=re.I).strip()
+        # "X Concentration(s)" → X
+        elif re.search(r'\bconcentrations?$', h, re.I):
+            h = re.sub(r'\s*\bconcentrations?\s*$', '', h, flags=re.I).strip()
+        else:
+            # e.g. "Concentration Artificial Intelligence" — skip (weird non-standard)
+            if re.match(r'^concentration\s', h, re.I):
+                continue
+        if h and h.lower() not in seen:
+            seen.add(h.lower())
+            results.append(h)
+    return results
+
+
 def _expand_abbrevs(s):
     """Apply abbreviation expansions and & → and."""
     for pat, repl in _ABBREV_RE:
@@ -598,6 +651,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         'roster_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
         'roster_launch_date': '',
         'concentration_of': '',
+        'concentrations_json': '',
         'last_refreshed': now,
     }
 
@@ -757,6 +811,34 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             row['campus'] = 'Boston'
         else:
             row['campus'] = _CAMPUS_NAMES.get(campus, campus)
+
+    # ── Step 5.5: Extract concentrations from CIM curriculum HTML ────────────
+    cim_ids_needed = [row['cim_program_id'] for row in unified.values()
+                      if row.get('cim_program_id')]
+    if cim_ids_needed:
+        import json as _json
+        from database import get_db
+        with get_db() as conn:
+            curriculum_map = {}
+            for i in range(0, len(cim_ids_needed), 500):
+                chunk = cim_ids_needed[i:i + 500]
+                placeholders = ','.join('?' * len(chunk))
+                db_rows = conn.execute(
+                    f'SELECT id, curriculum_html FROM programs WHERE id IN ({placeholders})',
+                    chunk
+                ).fetchall()
+                for r in db_rows:
+                    if r['curriculum_html']:
+                        curriculum_map[r['id']] = r['curriculum_html']
+        n_with_concs = 0
+        for row in unified.values():
+            cim_id = row.get('cim_program_id')
+            if cim_id and cim_id in curriculum_map:
+                concs = _extract_concentrations_from_html(curriculum_map[cim_id])
+                if concs:
+                    row['concentrations_json'] = _json.dumps(concs)
+                    n_with_concs += 1
+        print(f"  Curriculum concentrations: {n_with_concs} programs have named concentrations")
 
     # ── Step 6: Link concentrations to parent programs ───────────────────────
     # Build a name→id index over all unified rows for parent lookup.

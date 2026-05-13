@@ -3103,6 +3103,7 @@ setInterval(loadDashboard, 120000);
 // ==================== Portfolio view ====================
 
 let allPortfolioPrograms   = [];
+let portfolioExpandedIds   = new Set();
 let portfolioCollegeFilter = '';
 let portfolioCampusFilter  = '';
 let portfolioOtpFilter     = '';
@@ -3149,10 +3150,23 @@ function setPortfolioDegree(btn, val) {
     renderPortfolioTable();
 }
 
+function togglePortfolioConcentrations(id) {
+    if (portfolioExpandedIds.has(id)) {
+        portfolioExpandedIds.delete(id);
+    } else {
+        portfolioExpandedIds.add(id);
+    }
+    renderPortfolioTable();
+}
+
 async function loadPortfolioDashboard() {
     try {
         const res = await fetch('/api/portfolio');
         allPortfolioPrograms = (await res.json()).programs || [];
+        allPortfolioPrograms.forEach(p => {
+            p.concentrations = p.concentrations_json ? JSON.parse(p.concentrations_json) : [];
+        });
+        portfolioExpandedIds = new Set();
         populatePortfolioFilters();
         renderPortfolioTable();
     } catch(e) {
@@ -3228,13 +3242,12 @@ function renderPortfolioTable() {
     if (!container) return;
 
     const filtered = getPortfolioFiltered();
-    const filteredIds = new Set(filtered.map(p => p.id));
 
     // Index all programs by id for parent lookups
     const allById = {};
     allPortfolioPrograms.forEach(p => { allById[p.id] = p; });
 
-    // Index ALL concentrations by parent id (for showing all children of a visible parent)
+    // Index portfolio concentration rows (concentration_of links) by parent
     const allConcsByParent = {};
     allPortfolioPrograms.forEach(p => {
         if (p.concentration_of) {
@@ -3243,14 +3256,13 @@ function renderPortfolioTable() {
         }
     });
 
-    // Split filtered rows into top-level and linked concentrations
+    // Split filtered rows into top-level and portfolio concentration rows
     const topLevel = [];
     const topLevelIds = new Set();
-    const matchingConcsByParent = {}; // parent_id → concentrations that matched the filter
+    const matchingConcsByParent = {};
 
     filtered.forEach(p => {
         if (p.concentration_of && allById[p.concentration_of]) {
-            // Linked concentration that passed the filter
             if (!matchingConcsByParent[p.concentration_of]) matchingConcsByParent[p.concentration_of] = [];
             matchingConcsByParent[p.concentration_of].push(p);
         } else {
@@ -3259,7 +3271,7 @@ function renderPortfolioTable() {
         }
     });
 
-    // For concentrations whose parent didn't pass the filter: force-include parent
+    // Force-include parents of matching portfolio concentration rows
     Object.keys(matchingConcsByParent).forEach(parentId => {
         if (!topLevelIds.has(parentId) && allById[parentId]) {
             topLevel.push(allById[parentId]);
@@ -3276,21 +3288,19 @@ function renderPortfolioTable() {
         portfolioOtpFilter || portfolioIpdFilter ||
         portfolioRosterFilter || portfolioCimFilter || portfolioSearch;
 
-    // Count: top-level programs + all visible concentrations
-    let concCount = 0;
-    topLevel.forEach(p => {
-        const concs = anyFilterActive
-            ? (matchingConcsByParent[p.id] || [])
-            : (allConcsByParent[p.id] || []);
-        concCount += concs.length;
-    });
+    // Determine which programs should be auto-expanded (search matches a curriculum concentration)
+    const autoExpand = new Set();
+    if (portfolioSearch) {
+        const q = portfolioSearch.toLowerCase();
+        allPortfolioPrograms.forEach(p => {
+            if (p.concentrations && p.concentrations.some(c => c.toLowerCase().includes(q))) {
+                autoExpand.add(p.id);
+            }
+        });
+    }
 
     const countEl = document.getElementById('portfolio-result-count');
-    if (countEl) {
-        countEl.textContent = concCount > 0
-            ? `${topLevel.length} programs, ${concCount} concentrations`
-            : `${topLevel.length} programs`;
-    }
+    if (countEl) countEl.textContent = `${topLevel.length} programs`;
 
     if (topLevel.length === 0 && Object.keys(matchingConcsByParent).length === 0) {
         container.innerHTML = '<p class="empty-state">No programs match your filters.</p>';
@@ -3299,12 +3309,26 @@ function renderPortfolioTable() {
 
     const rowHtml = [];
     topLevel.forEach(p => {
-        // Determine which concentrations to show under this parent
-        const concsToShow = anyFilterActive
+        const portfolioConcs = anyFilterActive
             ? (matchingConcsByParent[p.id] || [])
             : (allConcsByParent[p.id] || []);
-        rowHtml.push(renderPortfolioRow(p, concsToShow.length > 0));
-        concsToShow.forEach(c => rowHtml.push(renderPortfolioRow(c, false, true)));
+        const curriculumConcs = p.concentrations || [];
+        const isExpanded = portfolioExpandedIds.has(p.id) || autoExpand.has(p.id);
+
+        rowHtml.push(renderPortfolioRow(p, {
+            hasConcentrations: curriculumConcs.length > 0,
+            isExpanded,
+        }));
+
+        // Curriculum concentrations (expand/collapse)
+        if (curriculumConcs.length > 0 && isExpanded) {
+            curriculumConcs.forEach(name => {
+                rowHtml.push(renderPortfolioConcRow(name, portfolioSearch));
+            });
+        }
+
+        // Portfolio concentration rows (always shown under parent)
+        portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
     });
 
     container.innerHTML = `
@@ -3324,7 +3348,20 @@ function renderPortfolioTable() {
         </table>`;
 }
 
-function renderPortfolioRow(p, hasConcentrations = false, isConcentration = false) {
+function renderPortfolioConcRow(name, search) {
+    const hl = search
+        ? escapeHtml(name).replace(new RegExp(`(${escapeHtml(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
+            '<mark>$1</mark>')
+        : escapeHtml(name);
+    return `<tr class="portfolio-row portfolio-curriculum-conc-row">
+        <td class="program-name-cell"><span class="portfolio-curriculum-conc-indent">↳</span>${hl}</td>
+        <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+    </tr>`;
+}
+
+function renderPortfolioRow(p, opts = {}) {
+    const {hasConcentrations = false, isExpanded = false, isPortfolioConc = false} = opts;
+
     const otpBadge    = p.otp_status
         ? `<span class="portfolio-badge otp-badge">${escapeHtml(p.otp_status)}</span>` : '—';
     const ipdBadge    = p.ipd_status
@@ -3345,14 +3382,20 @@ function renderPortfolioRow(p, hasConcentrations = false, isConcentration = fals
     const marketSignal = p.otp_market_signal ? `<br><span class="muted" style="font-size:0.78em">${escapeHtml(p.otp_market_signal)} / ${escapeHtml(p.otp_internal_performance)}</span>` : '';
 
     const isSynthetic = (p.id || '').startsWith('synth_');
-    const concBadge = isConcentration
+    const concBadge = isPortfolioConc
         ? `<span class="portfolio-conc-badge">Conc.</span> ` : '';
-    const rowClass = isConcentration
+    const rowClass = isPortfolioConc
         ? 'portfolio-row portfolio-concentration-row'
         : isSynthetic ? 'portfolio-row portfolio-synthetic-row' : 'portfolio-row';
 
+    const toggleBtn = hasConcentrations
+        ? `<button class="portfolio-conc-toggle${isExpanded ? ' expanded' : ''}"
+               onclick="event.stopPropagation();togglePortfolioConcentrations('${escapeHtml(p.id)}')"
+               title="${isExpanded ? 'Collapse' : 'Show'} concentrations">${isExpanded ? '▼' : '▶'}</button>`
+        : '';
+
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
-        <td class="program-name-cell">${concBadge}${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
+        <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
         <td>${escapeHtml(p.college) || '—'}</td>
         <td>${escapeHtml(p.campus)  || '—'}</td>
         <td>${otpBadge}</td>
