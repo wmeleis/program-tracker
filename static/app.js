@@ -3289,6 +3289,8 @@ function togglePortfolioConcentrations(id) {
 }
 
 async function loadPortfolioDashboard() {
+    const container = document.getElementById('programs-table-container');
+    if (container) container.innerHTML = '';
     try {
         const res = await fetch('/api/portfolio');
         allPortfolioPrograms = (await res.json()).programs || [];

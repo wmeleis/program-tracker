@@ -394,6 +394,7 @@ _PORTFOLIO_REMOVE = frozenset({
     # Badges / non-degree
     'Cybersecurity Microcredential Badges (non-credit levels 1-3)',
     'Future You: Leveraging AI for Success - EM EDGE Badge',
+    'Global Leadership Summit badging',
     'Entrepreneurship Boot Camp',
     # Not programs / duplicates
     'Global Pathways in Portland (Khoury, CPS)',
