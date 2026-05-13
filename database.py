@@ -61,6 +61,7 @@ def init_db():
                 curriculum_html TEXT DEFAULT '',
                 completion_date TEXT DEFAULT '',
                 campus TEXT DEFAULT '',
+                eff_cat TEXT DEFAULT '',
                 first_seen TIMESTAMP,
                 last_updated TIMESTAMP
             );
@@ -272,9 +273,9 @@ def upsert_program(program_data):
                 INSERT INTO programs (id, banner_code, name, status, current_step,
                     total_steps, completed_steps, current_approver_emails,
                     program_type, college, department, degree, date_submitted,
-                    step_entered_date, curriculum_html, completion_date, campus,
+                    step_entered_date, curriculum_html, completion_date, campus, eff_cat,
                     first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 program_data['id'],
                 program_data.get('banner_code', ''),
@@ -293,6 +294,7 @@ def upsert_program(program_data):
                 program_data.get('curriculum_html', ''),
                 program_data.get('completion_date', ''),
                 program_data.get('campus', ''),
+                program_data.get('eff_cat', ''),
                 now, now
             ))
             changed = True
@@ -340,7 +342,7 @@ def upsert_program(program_data):
                     college = ?, department = ?, degree = ?,
                     date_submitted = ?, step_entered_date = ?,
                     curriculum_html = ?,
-                    completion_date = ?, campus = ?,
+                    completion_date = ?, campus = ?, eff_cat = ?,
                     last_updated = ?
                 WHERE id = ?
             """, (
@@ -360,6 +362,7 @@ def upsert_program(program_data):
                 keep('curriculum_html'),
                 completion_val,
                 keep('campus'),
+                keep('eff_cat'),
                 now,
                 program_data['id']
             ))
@@ -1217,7 +1220,8 @@ def init_portfolio_tables(conn):
             performance_2025 TEXT DEFAULT '',
             market_score_2025 TEXT DEFAULT '',
             performance_score_2025 TEXT DEFAULT '',
-            cim_change_type TEXT DEFAULT ''
+            cim_change_type TEXT DEFAULT '',
+            inactivation_admission TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS portfolio_notes (
@@ -1233,7 +1237,8 @@ def init_portfolio_tables(conn):
     """)
     for col in ('roster_status', 'roster_sub_status', 'roster_proposal_type', 'roster_launch_date',
                 'concentration_of', 'concentrations_json', 'market_2025', 'performance_2025',
-                'market_score_2025', 'performance_score_2025', 'cim_change_type'):
+                'market_score_2025', 'performance_score_2025', 'cim_change_type',
+                'inactivation_admission'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1259,7 +1264,7 @@ def upsert_portfolio_program(row):
                  concentration_of, concentrations_json,
                  market_2025, performance_2025,
                  market_score_2025, performance_score_2025,
-                 cim_change_type)
+                 cim_change_type, inactivation_admission)
             VALUES
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1271,7 +1276,7 @@ def upsert_portfolio_program(row):
                  :concentration_of, :concentrations_json,
                  :market_2025, :performance_2025,
                  :market_score_2025, :performance_score_2025,
-                 :cim_change_type)
+                 :cim_change_type, :inactivation_admission)
             ON CONFLICT(id) DO UPDATE SET
                 program_name=excluded.program_name,
                 college=excluded.college,
@@ -1300,7 +1305,8 @@ def upsert_portfolio_program(row):
                 performance_2025=excluded.performance_2025,
                 market_score_2025=excluded.market_score_2025,
                 performance_score_2025=excluded.performance_score_2025,
-                cim_change_type=excluded.cim_change_type
+                cim_change_type=excluded.cim_change_type,
+                inactivation_admission=excluded.inactivation_admission
         """, row)
 
 
@@ -1321,7 +1327,7 @@ def replace_all_portfolio_programs(rows):
                      concentration_of, concentrations_json,
                      market_2025, performance_2025,
                      market_score_2025, performance_score_2025,
-                     cim_change_type)
+                     cim_change_type, inactivation_admission)
                 VALUES
                     (:id, :program_name, :college, :campus,
                      :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1333,7 +1339,7 @@ def replace_all_portfolio_programs(rows):
                      :concentration_of, :concentrations_json,
                      :market_2025, :performance_2025,
                      :market_score_2025, :performance_score_2025,
-                     :cim_change_type)
+                     :cim_change_type, :inactivation_admission)
             """, row)
 
 
@@ -1374,6 +1380,7 @@ def migrate_db():
             'curriculum_html': 'TEXT DEFAULT ""',
             'completion_date': 'TEXT DEFAULT ""',   # last approval date once fully approved; empty while in pipeline
             'campus': 'TEXT DEFAULT ""',            # XML campus code (e.g. BOS, VAN); parsed from program name otherwise
+            'eff_cat': 'TEXT DEFAULT ""',           # XML <eff_cat> e.g. "2026-2027"; set for both active and completed
         }
         for col, typedef in new_cols.items():
             if col not in existing_cols:

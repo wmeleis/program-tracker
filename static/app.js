@@ -3183,6 +3183,8 @@ const PORTFOLIO_COLUMNS = [
     {key: 'cim',          label: 'CIM Step'},
     {key: 'cimchange',    label: 'CIM Change'},
     {key: 'cimactive',    label: 'CIM Active'},
+    {key: 'inactadmit',  label: 'Inactivation of Admission'},
+    {key: 'inacttoday',  label: 'Admitting Today'},
     {key: 'notes',        label: 'Notes'},
 ];
 
@@ -3240,6 +3242,25 @@ let portfolioRosterFilter    = '';
 let portfolioCimFilter       = '';
 let portfolioCimChangeFilter = '';
 let portfolioCimActiveFilter = '';
+
+// "Fall 2026" → Date object for Sep 1 of that year (approximate start of Fall semester).
+function _semesterToDate(s) {
+    if (!s) return null;
+    const m = s.match(/^(Fall|Spring|Summer)\s+(\d{4})$/i);
+    if (!m) return null;
+    const year = parseInt(m[2], 10);
+    const month = /fall/i.test(m[1]) ? 8 : /spring/i.test(m[1]) ? 0 : 5; // Sep=8, Jan=0, Jun=5
+    return new Date(year, month, 1);
+}
+
+// Returns 'Yes' if the program is still admitting today, 'No' if admission has closed,
+// or '' if there is no inactivation admission date.
+function _inactAdmittingToday(p) {
+    if (!p.inactivation_admission) return '';
+    const cutoff = _semesterToDate(p.inactivation_admission);
+    if (!cutoff) return '';
+    return cutoff > new Date() ? 'Yes' : 'No';
+}
 
 // A program is only "Inactive" once its inactivation workflow has fully completed.
 // While an inactivation proposal is still moving through CIM (cim_step is set),
@@ -3475,7 +3496,9 @@ function renderPortfolioTable() {
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimchange': av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
-            case 'cimactive': av = portfolioCimActiveLabel(a); bv = portfolioCimActiveLabel(b); break;
+            case 'cimactive':   av = portfolioCimActiveLabel(a); bv = portfolioCimActiveLabel(b); break;
+            case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
+            case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
             case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
             case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
@@ -3625,6 +3648,12 @@ function renderPortfolioRow(p, opts = {}) {
             const lbl = portfolioCimActiveLabel(p);
             if (!lbl) return '';
             return `<span class="portfolio-badge ${lbl === 'Inactive' ? 'badge-bad' : 'badge-good'}">${lbl}</span>`;
+        })())}
+        ${_pc('inactadmit', escapeHtml(p.inactivation_admission || ''))}
+        ${_pc('inacttoday', (() => {
+            const v = _inactAdmittingToday(p);
+            if (!v) return '';
+            return `<span class="portfolio-badge ${v === 'Yes' ? 'badge-good' : 'badge-bad'}">${v}</span>`;
         })())}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
     </tr>`;

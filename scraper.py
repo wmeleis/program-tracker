@@ -1522,6 +1522,7 @@ def run_full_scan(force_fetch_only=False):
             'curriculum_html': meta.get('curriculum_html', '').replace('<![CDATA[', '').replace(']]>', '').strip(),
             'completion_date': completion_date,
             'campus': meta.get('campus', ''),
+            'eff_cat': meta.get('eff_cat', ''),
         }
 
         # Detect changes
@@ -1801,6 +1802,7 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
                                .replace('<![CDATA[', '').replace(']]>', '').strip(),
             'completion_date': completion_date,
             'campus': meta.get('campus', ''),
+            'eff_cat': meta.get('eff_cat', ''),
         }
 
         upsert_program(program_data)
@@ -2248,6 +2250,7 @@ def heal_stale_program_steps(log=False, active_only=True):
                                    .replace('<![CDATA[', '').replace(']]>', '').strip(),
                 'completion_date': '',
                 'campus': meta.get('campus', ''),
+                'eff_cat': meta.get('eff_cat', ''),
             }
             upsert_program(program_data)
             if steps:
@@ -2764,7 +2767,7 @@ def compute_db_fingerprint():
         "current_approver_emails, completion_date, name, college, "
         "banner_code, campus, step_entered_date, curriculum_html, "
         "program_type, department, degree, date_submitted, "
-        "custom_reference_id "
+        "custom_reference_id, eff_cat "
         "FROM programs ORDER BY id",
         "SELECT program_id, step_order, step_name, step_status, approver_emails "
         "FROM workflow_steps ORDER BY program_id, step_order",
@@ -2787,7 +2790,7 @@ def compute_db_fingerprint():
         "SELECT id, title, current_step, current_approver_emails "
         "FROM catalog_pages ORDER BY id",
         "SELECT id, program_name, college, campus, cim_program_id, cim_step, "
-        "cim_completion_date, cim_change_type, otp_status, ipd_status, "
+        "cim_completion_date, cim_change_type, inactivation_admission, otp_status, ipd_status, "
         "roster_status, roster_launch_date, market_2025, performance_2025, "
         "market_score_2025, performance_score_2025, concentration_of "
         "FROM portfolio_programs ORDER BY id",

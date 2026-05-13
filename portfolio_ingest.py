@@ -819,7 +819,7 @@ def _load_all_cim_programs():
     from database import get_db
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT id, name, college, current_step, completion_date, status
+            SELECT id, name, college, current_step, completion_date, status, eff_cat
             FROM programs
             WHERE current_step IS NOT NULL AND current_step != ''
         """).fetchall()
@@ -836,6 +836,7 @@ def _load_all_cim_programs():
             'cim_step':            r['current_step'] or '',
             'cim_completion_date': r['completion_date'] or '',
             'cim_change_type':     _STATUS_LABEL.get(raw_status, raw_status),
+            'eff_cat':             r['eff_cat'] or '',
         })
     return result
 
@@ -848,7 +849,7 @@ def _load_completed_inactivations():
     from database import get_db
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT id, name, college, completion_date
+            SELECT id, name, college, completion_date, eff_cat
             FROM programs
             WHERE status = 'Deactivated'
               AND completion_date IS NOT NULL AND completion_date != ''
@@ -864,8 +865,54 @@ def _load_completed_inactivations():
             'cim_step':            '',
             'cim_completion_date': r['completion_date'] or '',
             'cim_change_type':     'Inactivation',
+            'eff_cat':             r['eff_cat'] or '',
         })
     return result
+
+
+def _eff_cat_to_semester(eff_cat):
+    """Convert a CIM catalog-year string to 'Fall YYYY' (first semester with no admissions).
+
+    "Catalog 2026-2027" means the academic year starting Fall 2026 — that is the
+    first semester in which the program will no longer admit students.
+    Accepts raw '2026-2027', full 'Catalog 2026-2027', or plain '2026'.
+    Returns '' when the value can't be parsed.
+    """
+    if not eff_cat:
+        return ''
+    # Strip optional 'Catalog ' prefix
+    s = re.sub(r'^[Cc]atalog\s*', '', eff_cat.strip())
+    m = re.match(r'^(\d{4})[–\-]\d{4}$', s)
+    if m:
+        return f'Fall {m.group(1)}'
+    m2 = re.match(r'^(\d{4})$', s)
+    if m2:
+        return f'Fall {m2.group(1)}'
+    return ''
+
+
+def _best_eff_cat(eff_cat, completion_date, cim_step=''):
+    """Return the best available catalog-year string from multiple sources.
+
+    Priority:
+      1. eff_cat field (from XML; most accurate for active proposals)
+      2. Year embedded in cim_step name (e.g. 'Program Catalog Setup for 2027-2028')
+      3. completion_date (e.g. 'Catalog 2025-2026'; available once workflow completes)
+    """
+    if eff_cat:
+        return eff_cat
+    # Try step name: "... for 2027-2028" or "... for 2027-28"
+    if cim_step:
+        m = re.search(r'(\d{4})[–\-](\d{2,4})', cim_step)
+        if m:
+            return m.group(1) + '-' + (m.group(2) if len(m.group(2)) == 4
+                                        else str(int(m.group(1)) // 100) + m.group(2))
+    if completion_date:
+        # "Catalog 2025-2026" → "2025-2026"
+        m2 = re.search(r'(\d{4}[–\-]\d{4})', completion_date)
+        if m2:
+            return m2.group(1)
+    return ''
 
 
 def _build_cim_index(cim_programs):
@@ -943,6 +990,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         'market_score_2025': '',
         'performance_score_2025': '',
         'cim_change_type': '',
+        'inactivation_admission': '',
         'last_refreshed': now,
     }
 
@@ -958,10 +1006,11 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             'program_name':        c['cim_name'],
             'college':             c['college'],
             'campus':              campus,
-            'cim_program_id':      c['cim_id'],
-            'cim_step':            c['cim_step'],
-            'cim_completion_date': c['cim_completion_date'],
-            'cim_change_type':     c['cim_change_type'],
+            'cim_program_id':        c['cim_id'],
+            'cim_step':              c['cim_step'],
+            'cim_completion_date':   c['cim_completion_date'],
+            'cim_change_type':       c['cim_change_type'],
+            'inactivation_admission': _eff_cat_to_semester(_best_eff_cat(c['eff_cat'], c['cim_completion_date'], c['cim_step'])) if c['cim_change_type'] == 'Inactivation' else '',
         })
 
     # ── Step 2: Overlay OTP data ─────────────────────────────────────────────
@@ -1355,9 +1404,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
         entry = inact_index.get(key) or inact_index.get(_norm(name))
         if entry:
-            row['cim_program_id']      = entry['cim_id']
-            row['cim_change_type']     = 'Inactivation'
-            row['cim_completion_date'] = entry['cim_completion_date']
+            row['cim_program_id']          = entry['cim_id']
+            row['cim_change_type']         = 'Inactivation'
+            row['cim_completion_date']     = entry['cim_completion_date']
+            row['inactivation_admission']  = _eff_cat_to_semester(
+                _best_eff_cat(entry.get('eff_cat', ''), entry.get('cim_completion_date', ''))
+            )
             n_inact_linked += 1
 
     rows = list(unified.values())
