@@ -743,6 +743,15 @@ def api_scan_trigger():
                 # or expired session must not block the rest of the scan.
                 print(f"Regulatory fetch error: {e}")
 
+            # Portfolio: re-extract concentrations from freshly-updated curriculum_html.
+            # Best-effort — a failure must not block export or deployment.
+            try:
+                from portfolio_ingest import ingest as portfolio_ingest
+                portfolio_ingest()
+                print("Portfolio ingest complete.")
+            except Exception as e:
+                print(f"Portfolio ingest error (non-fatal): {e}")
+
             # C1: Auto-export + git push only when DB content actually
             # changed since last successful export. The fingerprint hashes
             # only the user-visible fields of the source tables — not

@@ -3041,8 +3041,8 @@ const COLLEGE_ABBREVS = {
     'College of Engineering': 'COE',
     'College of Science': 'COS',
     'Coll of Professional Studies': 'CPS',
-    'Bouve College of Hlth Sciences': 'Bouve',
-    'Khoury Coll of Comp Sciences': 'Khoury',
+    'Bouve College of Hlth Sciences': 'BVE',
+    'Khoury Coll of Comp Sciences': 'KHY',
     "D'Amore-McKim School Business": 'DMSB',
     'School of Law': 'SOL',
     'Coll of Arts, Media & Design': 'CAMD',
@@ -3051,9 +3051,31 @@ const COLLEGE_ABBREVS = {
     'Office of the Provost': 'Provost',
 };
 
+const CAMPUS_ABBREVS = {
+    'Boston':          'BOS',
+    'Oakland':         'OAK',
+    'Vancouver':       'VAN',
+    'Toronto':         'TOR',
+    'Miami':           'MIA',
+    'Arlington':       'ARL',
+    'Portland':        'PTL',
+    'Silicon Valley':  'SV',
+    'Charlotte':       'CLT',
+    'Seattle':         'SEA',
+    'New York':        'NYC',
+    'London':          'LON',
+    'Online':          'ONL',
+    'Primarily Online':'POL',
+};
+
 function abbreviateCollege(college) {
     if (!college) return '—';
     return COLLEGE_ABBREVS[college] || college;
+}
+
+function abbreviateCampus(campus) {
+    if (!campus) return '—';
+    return CAMPUS_ABBREVS[campus] || campus;
 }
 
 function extractCampus(name) {
@@ -3396,8 +3418,8 @@ function renderPortfolioRow(p, opts = {}) {
 
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
         <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
-        <td>${escapeHtml(p.college) || '—'}</td>
-        <td>${escapeHtml(p.campus)  || '—'}</td>
+        <td>${abbreviateCollege(p.college)}</td>
+        <td>${abbreviateCampus(p.campus)}</td>
         <td>${otpBadge}</td>
         <td>${ipdBadge}</td>
         <td>${rosterBadge}</td>
