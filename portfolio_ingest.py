@@ -300,6 +300,8 @@ def parse_scoring_2025(path=SCORING_2025_PATH):
         performance = perf_match.group(1).capitalize() if perf_match else ''
         if not market and not performance:
             continue
+        market_score      = row.get('E', '').strip()
+        performance_score = row.get('F', '').strip()
         # Invert "DEGREE Name" → "Name, DEGREE"
         norm_name = _norm(_normalize_degree_prefix(name_raw))
         # Apply explicit override if available (maps abbreviated → canonical)
@@ -320,7 +322,8 @@ def parse_scoring_2025(path=SCORING_2025_PATH):
         words = set(re.sub(r'[^a-z0-9\s]', ' ', clean).split()) - stop
         result.append({'norm_name': norm_name, 'degree': degree,
                        'words': words,
-                       'market_2025': market, 'performance_2025': performance})
+                       'market_2025': market, 'performance_2025': performance,
+                       'market_score_2025': market_score, 'performance_score_2025': performance_score})
     return result
 
 
@@ -903,6 +906,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         'concentrations_json': '',
         'market_2025': '',
         'performance_2025': '',
+        'market_score_2025': '',
+        'performance_score_2025': '',
         'last_refreshed': now,
     }
 
@@ -1064,8 +1069,10 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
             entry = _match_scoring_2025(scoring_entries, key)
             if entry:
-                row['market_2025']      = entry['market_2025']
-                row['performance_2025'] = entry['performance_2025']
+                row['market_2025']           = entry['market_2025']
+                row['performance_2025']      = entry['performance_2025']
+                row['market_score_2025']     = entry.get('market_score_2025', '')
+                row['performance_score_2025']= entry.get('performance_score_2025', '')
                 matched_scoring += 1
 
         # Add new Boston entries for scoring programs with no portfolio match at all
@@ -1098,6 +1105,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
                 'cim_completion_date': '',
                 'market_2025': entry['market_2025'],
                 'performance_2025': entry['performance_2025'],
+                'market_score_2025': entry.get('market_score_2025', ''),
+                'performance_score_2025': entry.get('performance_score_2025', ''),
             })
             new_from_scoring += 1
 

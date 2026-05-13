@@ -3160,8 +3160,10 @@ const PORTFOLIO_COLUMNS = [
     {key: 'degree',       label: 'Degree'},
     {key: 'college',      label: 'College'},
     {key: 'campus',       label: 'Campus'},
-    {key: 'market2025',   label: '2025 Market'},
-    {key: 'perf2025',     label: '2025 Performance'},
+    {key: 'market2025',      label: '2025 Market Category'},
+    {key: 'perf2025',        label: '2025 Performance Category'},
+    {key: 'marketscore2025', label: '2025 Market Score'},
+    {key: 'perfscore2025',   label: '2025 Performance Score'},
     {key: 'otp',          label: 'OTP Status'},
     {key: 'ipd',          label: 'IPD Status'},
     {key: 'gls',          label: 'GLS Status'},
@@ -3532,8 +3534,10 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('degree',     extractPortfolioDegree(p.program_name))}
         ${_pc('college',    abbreviateCollege(p.college))}
         ${_pc('campus',     abbreviateCampus(p.campus))}
-        ${_pc('market2025', market2025Badge)}
-        ${_pc('perf2025',   perf2025Badge)}
+        ${_pc('market2025',      market2025Badge)}
+        ${_pc('perf2025',        perf2025Badge)}
+        ${_pc('marketscore2025', escapeHtml(p.market_score_2025 || ''))}
+        ${_pc('perfscore2025',   escapeHtml(p.performance_score_2025 || ''))}
         ${_pc('otp',        otpBadge)}
         ${_pc('ipd',     ipdBadge)}
         ${_pc('gls',     rosterBadge)}
