@@ -356,7 +356,7 @@ def build_static_site():
     # Remove the static app.js <script> tag; the gate injects it after unlock
     html = re.sub(r'\s*<script[^>]*src="/static/app\.js"[^>]*></script>', '', html)
     html = html.replace(
-        '<button id="scan-btn" onclick="triggerScan()">Scan Now</button>',
+        '<button id="scan-btn" onclick="triggerScan()">Update Now</button>',
         ''
     )
     # Remove the References management UI — static site has no backend for uploads.
