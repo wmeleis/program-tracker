@@ -840,6 +840,34 @@ def _load_all_cim_programs():
     return result
 
 
+def _load_completed_inactivations():
+    """Return list of CIM programs that completed the inactivation workflow.
+    These are no longer in the active pipeline but represent programs that have
+    been officially discontinued — they should show as Inactive in the portfolio.
+    """
+    from database import get_db
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT id, name, college, completion_date
+            FROM programs
+            WHERE status = 'Deactivated'
+              AND completion_date IS NOT NULL AND completion_date != ''
+        """).fetchall()
+    result = []
+    for r in rows:
+        campus = _campus_from_cim_name(r['name'] or '')
+        result.append({
+            'cim_id':              r['id'],
+            'cim_name':            r['name'] or '',
+            'college':             r['college'] or '',
+            'campus':              campus,
+            'cim_step':            '',
+            'cim_completion_date': r['completion_date'] or '',
+            'cim_change_type':     'Inactivation',
+        })
+    return result
+
+
 def _build_cim_index(cim_programs):
     """Return {match_key: cim_entry} indexed under two keys per program:
       1. Exact normalized name (full, with campus)
@@ -1306,6 +1334,32 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
                 n_linked += 1
                 break
 
+    # ── Step 8: Link portfolio entries to completed CIM inactivations ────────
+    # Programs that finished the inactivation workflow are no longer in the
+    # active pipeline (no current_step), but they should still show as
+    # Inactive in the portfolio if we can match them by name.
+    completed_inact = _load_completed_inactivations()
+    # Build index: norm_name (campus-stripped) → inactivation entry
+    inact_index = {}
+    for c in completed_inact:
+        for key in (_norm(re.sub(r'\s*\([^)]*\)\s*$', '', c['cim_name'])),
+                    _norm(c['cim_name'])):
+            if key and key not in inact_index:
+                inact_index[key] = c
+
+    n_inact_linked = 0
+    for row in unified.values():
+        if row.get('cim_program_id'):
+            continue  # already linked to an active CIM program
+        name = row.get('program_name') or ''
+        key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
+        entry = inact_index.get(key) or inact_index.get(_norm(name))
+        if entry:
+            row['cim_program_id']      = entry['cim_id']
+            row['cim_change_type']     = 'Inactivation'
+            row['cim_completion_date'] = entry['cim_completion_date']
+            n_inact_linked += 1
+
     rows = list(unified.values())
     replace_all_portfolio_programs(rows)
 
@@ -1319,6 +1373,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     n_conc_total = sum(1 for r in rows if 'concentration' in (r['program_name'] or '').lower())
     print(f"Portfolio ingest: {len(rows)} programs total")
     print(f"  CIM active: {n_cim}")
+    print(f"  Completed inactivations linked: {n_inact_linked}")
     print(f"  OTP: {n_otp} ({n_otp_matched} matched to CIM, {n_otp - n_otp_matched} unmatched)")
     print(f"  IPD: {n_ipd} ({n_ipd_matched} matched to CIM, {n_ipd - n_ipd_matched} unmatched)")
     print(f"  Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
