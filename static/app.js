@@ -3305,6 +3305,38 @@ function classifyPortfolioLevel(name) {
     return null;
 }
 
+// Canonical casing for degree abbreviations.  Keys are lowercase.
+const _DEGREE_CANONICAL = {
+    // Master's
+    'ms': 'MS', 'ma': 'MA', 'mps': 'MPS', 'mba': 'MBA', 'mpa': 'MPA',
+    'mpp': 'MPP', 'mph': 'MPH', 'mfa': 'MFA', 'med': 'MEd', 'mat': 'MAT',
+    'march': 'MArch', 'mdes': 'MDes', 'mls': 'MLS', 'mst': 'MST',
+    'msf': 'MSF', 'msld': 'MSLD', 'msa': 'MSA', 'msib': 'MSIB',
+    'mscs': 'MSCS', 'msis': 'MSIS', 'msece': 'MSECE', 'msem': 'MSEM',
+    'msme': 'MSME', 'msor': 'MSOR', 'msfmba': 'MSFMBA', 'msamba': 'MSAMBA',
+    'mssbs': 'MSSBS', 'msecel': 'MSECEL', 'msche': 'MSChE', 'msie': 'MSIE',
+    'msbioе': 'MSBioE', 'msenve': 'MSEnvE', 'mscp': 'MSCP',
+    'mscive': 'MScIvE',
+    // Doctorate
+    'phd': 'PhD', 'edd': 'EdD', 'pharmd': 'PharmD', 'dmsc': 'DMSc',
+    'dnp': 'DNP', 'dpt': 'DPT', 'dps': 'DPS', 'dlp': 'DLP',
+    // Law
+    'jd': 'JD', 'llm': 'LLM',
+    // Bachelor's
+    'bs': 'BS', 'ba': 'BA', 'bfa': 'BFA', 'barch': 'BArch', 'bsn': 'BSN',
+    'bsba': 'BSBA', 'bscs': 'BSCS', 'bsce': 'BSCE', 'bsee': 'BSEE',
+    'bsme': 'BSME', 'bsie': 'BSIE', 'bset': 'BSET', 'bscmpe': 'BSCmpE',
+    'bsche': 'BSChE', 'bsenve': 'BSEnvE', 'bsbioе': 'BSBioE', 'bacs': 'BACS',
+    'bsib': 'BSIB', 'bscf': 'BSCF',
+    // Other
+    'cags': 'CAGS', 'certg': 'CERTG', 'aa': 'AA',
+};
+
+function _canonicalizeDegree(raw) {
+    const key = (raw || '').toLowerCase().trim();
+    return _DEGREE_CANONICAL[key] || raw;
+}
+
 function extractPortfolioDegree(name) {
     const n = (name || '').replace(/\s*\([^)]*\)\s*/g, '').replace(/\s*—.*$/, '').trim();
     // Explicit multi-word degrees first
@@ -3314,9 +3346,9 @@ function extractPortfolioDegree(name) {
     if (/\bBachelor of Science\b/i.test(n)) return 'BS';
     if (/\bBachelor of Arts\b/i.test(n)) return 'BA';
     if (/\bBachelor['']?s\b/i.test(n)) return 'BS';
-    // Degree abbreviation after last comma
+    // Degree abbreviation after last comma — canonicalize casing
     const m = n.match(/,\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*$/);
-    if (m) return m[1].trim();
+    if (m) return _canonicalizeDegree(m[1].trim());
     // No comma: infer from keywords
     if (/\bMinor\b/i.test(n)) return 'Minor';
     if (/\bCertificate\b/i.test(n)) return 'Cert';
