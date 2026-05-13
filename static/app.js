@@ -3157,15 +3157,17 @@ setInterval(loadDashboard, 120000);
 // ==================== Portfolio view ====================
 
 const PORTFOLIO_COLUMNS = [
-    {key: 'degree',  label: 'Degree'},
-    {key: 'college', label: 'College'},
-    {key: 'campus',  label: 'Campus'},
-    {key: 'otp',     label: 'OTP Status'},
-    {key: 'ipd',     label: 'IPD Status'},
-    {key: 'gls',     label: 'GLS Status'},
-    {key: 'launch',  label: 'Launch Date'},
-    {key: 'cim',     label: 'CIM Step'},
-    {key: 'notes',   label: 'Notes'},
+    {key: 'degree',       label: 'Degree'},
+    {key: 'college',      label: 'College'},
+    {key: 'campus',       label: 'Campus'},
+    {key: 'market2025',   label: '2025 Market'},
+    {key: 'perf2025',     label: '2025 Performance'},
+    {key: 'otp',          label: 'OTP Status'},
+    {key: 'ipd',          label: 'IPD Status'},
+    {key: 'gls',          label: 'GLS Status'},
+    {key: 'launch',       label: 'Launch Date'},
+    {key: 'cim',          label: 'CIM Step'},
+    {key: 'notes',        label: 'Notes'},
 ];
 
 function _loadPortfolioCols() {
@@ -3506,7 +3508,10 @@ function renderPortfolioRow(p, opts = {}) {
         : `<span class="portfolio-note-text" onclick="editPortfolioNote(this, '${escapeHtml(p.id)}')">${note || '<span class="muted add-note">+ add note</span>'}</span>`;
 
     const subStatus    = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
-    const marketSignal = p.otp_market_signal ? `<br><span class="muted" style="font-size:0.78em">${escapeHtml(p.otp_market_signal)} / ${escapeHtml(p.otp_internal_performance)}</span>` : '';
+    const market2025Badge = p.market_2025
+        ? `<span class="portfolio-badge ${p.market_2025 === 'Good' ? 'badge-good' : 'badge-bad'}">${escapeHtml(p.market_2025)}</span>` : '—';
+    const perf2025Badge = p.performance_2025
+        ? `<span class="portfolio-badge ${p.performance_2025 === 'Good' ? 'badge-good' : 'badge-bad'}">${escapeHtml(p.performance_2025)}</span>` : '—';
 
     const isSynthetic = (p.id || '').startsWith('synth_');
     const concBadge = isPortfolioConc
@@ -3523,11 +3528,13 @@ function renderPortfolioRow(p, opts = {}) {
 
     const displayName = normalizePortfolioName(stripCampusFromName(p.program_name));
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
-        <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}${marketSignal}</td>
-        ${_pc('degree',  extractPortfolioDegree(p.program_name))}
-        ${_pc('college', abbreviateCollege(p.college))}
-        ${_pc('campus',  abbreviateCampus(p.campus))}
-        ${_pc('otp',     otpBadge)}
+        <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}</td>
+        ${_pc('degree',     extractPortfolioDegree(p.program_name))}
+        ${_pc('college',    abbreviateCollege(p.college))}
+        ${_pc('campus',     abbreviateCampus(p.campus))}
+        ${_pc('market2025', market2025Badge)}
+        ${_pc('perf2025',   perf2025Badge)}
+        ${_pc('otp',        otpBadge)}
         ${_pc('ipd',     ipdBadge)}
         ${_pc('gls',     rosterBadge)}
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}

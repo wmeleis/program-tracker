@@ -36,6 +36,10 @@ _db_module.DB_PATH = _find_db_path()
 XLSX_PATH   = os.path.expanduser("~/Downloads/portfolio_sharepoint.xlsx")
 TSV_PATH    = os.path.expanduser("~/Downloads/portfolio_smartsheet.tsv")
 ROSTER_PATH = os.path.expanduser("~/Downloads/portfolio_roster.tsv")
+SCORING_2025_PATH = os.path.expanduser(
+    "~/committees/nu-docs/Programs/Program review/Program review 2025/"
+    "Graduate Program Scoring-Boston-for WM-9-16-25.xlsx"
+)
 OTP_SHEET   = "OTP Program Tracking"
 
 
@@ -196,6 +200,170 @@ def parse_smartsheet(path=TSV_PATH):
                 'ipd_additional_college': additional_college,
             })
     return programs
+
+
+# ---------------------------------------------------------------------------
+# Parse 2025 Graduate Program Scoring Excel (Boston)
+# ---------------------------------------------------------------------------
+
+# Explicit overrides for entries whose names are too abbreviated to auto-match.
+# Keys = _norm of the Excel "Program Desc" column (after degree-prefix inversion).
+# Values = _norm of the portfolio program name (without campus parenthetical).
+_SCORING_2025_OVERRIDES = {
+    # Degree codes not in the general prefix list
+    'chemical engineering, msche':               'chemical engineering, mschemical engineering',
+    # Use portfolio canonical name fragments instead
+    'engineering management, msem':              'engineering management, msem',
+    'industrial engineering, msie':              'industrial engineering, msie',
+    'mechanical engineering, msme':              'mechanical engineering, msme',
+    'civil engineering, mscive':                 'civil engineering, mscive',
+    'sports leadership, msld':                   'sports leadership, msld',
+    'counseling psychology, mscp':               'counseling psychology, mscp',
+    'accounting, msa':                           'accounting, msa',
+    'public policy, mpp':                        'public policy, mpp',
+    # Truncated / abbreviated names
+    'app qnt methods & soc anlys, ms':           'applied quantitative methods and social analysis, ms',
+    'applied educational psych, ms':             'applied educational psychology, ms',
+    'applied logistics (cps), mps':              'applied logistics, mps',
+    'applied machine lntel(cps), mps':           'applied machine intelligence, mps',
+    'architecture 2 year, march':                'architecture 2 year, march',
+    'business admin-evening, mba':               'business administration, mba—part-time',
+    'business admini-full time, mba':            'business administration, mba—full-time',
+    'commerce & econ dvpmt (cps), ms':           'commerce and economic development, ms',
+    'computer science - align, mscs':            'computer science—align, mscs',
+    'corp/orgn comm (cps), ms':                  'corporate and organizational communication, ms',
+    'critical care acnp (de), ms':               'nursing—adult-gerontology nurse practitioner, acute care, ms',
+    'critical care nurs nnp (de), ms':           'nursing—neonatal nurse practitioner, ms',
+    'cyber-physical systems, ms':                'cyber-physical systems, ms',
+    'data architecture and mgmt, ms':            'data architecture and management, ms',
+    'digital media - connect, mps':              'digital media—connect, mps',
+    'environmental sci & policy, ms':            'environmental science and policy, ms',
+    'finance/business evenin, msfmba':           'finance/business admin, msfmba',
+    'global stu/intl reltn (cps), ms':           'global studies and international relations, ms',
+    'human movement & rehab sci, ms':            'human movement and rehabilitation sciences, ms',
+    'human resources mgmt (cps), ms':            'human resources management, ms',
+    'info dsgn & data visualztn, mfa':           'information design and data visualization, mfa',
+    'info dsgn & data visualztn, ms':            'information design and data visualization, ms',
+    'information syst - bridge, msis':           'information systems, msis (bridge)',
+    'media innov and data comm, ms':             'media innovation and data communication, ms',
+    'medicinal chem & drug disc, ms':            'medicinal chemistry and drug discovery, ms',
+    'mpp public policy':                         'public policy, mpp',
+    'msa accounting':                            'accounting, msa',
+    'msamba accounting/business adm':            'accounting/business administration, msamba',
+    'msche chemical engineering':                'chemical engineering, msche',
+    'mscive civil engineering':                  'civil engineering, mscive',
+    'mscp counseling psychology':                'counseling psychology, mscp',
+    'msecel elec and comp engr lead':            'electrical and computer engineering leadership, msecel',
+    'msem engineering management':               'engineering management, msem',
+    'msie industrial engineering':               'industrial engineering, msie',
+    'msld sports leadership (cps)':              'sports leadership, msld',
+    'msme mechanical engineering':               'mechanical engineering, msme',
+    'nonprofit management (cps), ms':            'nonprofit management, ms',
+    'nurse anesthesia, dnp':                     'nurse anesthesia, dnp',
+    'nursing (de), ms':                          'nursing, ms',
+    'nursing, dnp':                              'nursing, dnp',
+    'operations research as, msor':              'operations research as, ms',
+    'organizational ldrshp (cps), ms':           'organizational leadership, ms',
+    'ped acute prim care pnp(de), ms':           'nursing—pediatric nurse practitioner, acute and primary care, ms',
+    'primary care nurs anp (de), ms':            'nursing—adult gerontology nurse practitioner, primary care, ms',
+    'primary care nurs fnp (de), ms':            'nursing—family nurse practitioner, primary care, ms',
+    'project management (cps), ms':              'project management, ms',
+    'psych-mental health (de), ms':              'nursing—psychiatric-mental mental health nurse practitioner, ms',
+    'public administration, mpa':                'public administration, mpa',
+    'quant finance/bus admin, msfmba':           'quant finance and business admin, msfmba',
+    'regulatory affairs (cps), ms':              'regulatory affairs, ms',
+    'security & intelligence stu, ma':           'security and intelligence studies, ma',
+    'sustain urban envrt-1year, mdes':           'sustainable urban environments, mdes',
+    'sustainable bldg sys, mssbs':               'sustainable building systems, mssbs',
+}
+
+def parse_scoring_2025(path=SCORING_2025_PATH):
+    """Parse the 2025 graduate program scoring workbook.
+
+    Returns a list of dicts with keys:
+      norm_name, degree, words, market_2025, performance_2025
+    Column B = Program Desc (e.g. 'MSCS Computer Science', may be truncated)
+    Column G = Category (e.g. 'Good Market, Bad Internal Performance')
+    """
+    if not os.path.exists(path):
+        return []
+    raw = _parse_xlsx_sheet(path, 'Sheet1')
+    result = []
+    for row in raw:
+        name_raw = row.get('B', '').strip()
+        category = row.get('G', '').strip()
+        if not name_raw or not category:
+            continue
+        mkt_match  = re.search(r'^(Good|Bad)\s+Market', category, re.I)
+        perf_match = re.search(r'(Good|Bad)\s+Internal Performance', category, re.I)
+        market      = mkt_match.group(1).capitalize()  if mkt_match  else ''
+        performance = perf_match.group(1).capitalize() if perf_match else ''
+        if not market and not performance:
+            continue
+        # Invert "DEGREE Name" → "Name, DEGREE"
+        norm_name = _norm(_normalize_degree_prefix(name_raw))
+        # Apply explicit override if available (maps abbreviated → canonical)
+        norm_name = _SCORING_2025_OVERRIDES.get(norm_name, norm_name)
+        # Extract degree suffix for filtering
+        deg_m = re.search(r',\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*$', norm_name)
+        degree = deg_m.group(1).strip().lower() if deg_m else ''
+        # Content words (no degree tokens, no stop words) for fuzzy overlap
+        stop = {'in', 'of', 'and', 'the', 'for', 'a', 'an', 'with', 'at', 'cps',
+                'ms', 'ma', 'mps', 'mba', 'mfa', 'phd', 'edd', 'dnp', 'dpt',
+                'mscs', 'msis', 'msor', 'msece', 'msme', 'msfmba', 'msn',
+                'llm', 'jd', 'mat', 'med', 'march', 'certg', 'cert',
+                'de', 'sc', 'eve', 'evening', 'time', 'full', 'year', '1', '2', '3'}
+        # Normalize &→and, strip parentheticals like (cps)/(de), collapse punctuation
+        clean = re.sub(r'\([^)]*\)', ' ', norm_name)  # strip (cps), (de), etc.
+        clean = re.sub(r'\s*[-–]\s*', ' ', clean)      # dash → space
+        clean = clean.replace('&', ' and ')
+        words = set(re.sub(r'[^a-z0-9\s]', ' ', clean).split()) - stop
+        result.append({'norm_name': norm_name, 'degree': degree,
+                       'words': words,
+                       'market_2025': market, 'performance_2025': performance})
+    return result
+
+
+def _match_scoring_2025(scoring_entries, portfolio_norm_key):
+    """Find the best scoring entry for a portfolio program (normalized name).
+
+    Returns the entry dict or None.
+    Tries exact match first, then degree-matched word-overlap (≥0.6 Jaccard).
+    """
+    # Extract degree from portfolio key
+    deg_m = re.search(r',\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*$', portfolio_norm_key)
+    p_degree = deg_m.group(1).strip().lower() if deg_m else ''
+    stop = {'in', 'of', 'and', 'the', 'for', 'a', 'an', 'with', 'at', 'cps',
+            'ms', 'ma', 'mps', 'mba', 'mfa', 'phd', 'edd', 'dnp', 'dpt',
+            'mscs', 'msis', 'msor', 'msece', 'msme', 'msfmba', 'msn',
+            'llm', 'jd', 'mat', 'med', 'march', 'certg', 'cert',
+            'de', 'sc', 'eve', 'evening', 'time', 'full', 'year', '1', '2', '3'}
+
+    def _norm_words(s):
+        s = re.sub(r'\([^)]*\)', ' ', s)
+        s = re.sub(r'\s*[-–]\s*', ' ', s)
+        s = s.replace('&', ' and ')
+        return set(re.sub(r'[^a-z0-9\s]', ' ', s).split()) - stop
+
+    p_words = _norm_words(portfolio_norm_key)
+
+    exact = [e for e in scoring_entries if e['norm_name'] == portfolio_norm_key]
+    if exact:
+        return exact[0]
+
+    best, best_score = None, 0.0
+    for e in scoring_entries:
+        if e['degree'] != p_degree:
+            continue
+        inter = len(e['words'] & p_words)
+        union = len(e['words'] | p_words)
+        if union == 0:
+            continue
+        score = inter / union
+        if score > best_score and score >= 0.45:
+            best_score = score
+            best = e
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -733,6 +901,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         'roster_launch_date': '',
         'concentration_of': '',
         'concentrations_json': '',
+        'market_2025': '',
+        'performance_2025': '',
         'last_refreshed': now,
     }
 
@@ -877,6 +1047,63 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             row['college'] = p['college']
         if not row.get('campus') and p['campus']:
             row['campus'] = p['campus']
+
+    # ── Step 4.5: Overlay 2025 graduate program scoring ─────────────────────
+    scoring_entries = parse_scoring_2025()
+    if scoring_entries:
+        matched_scoring = 0
+        # Build a lookup: norm_name (no campus) → list of row objects
+        name_to_rows = {}
+        for row in unified.values():
+            name = row.get('program_name') or ''
+            key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
+            name_to_rows.setdefault(key, []).append(row)
+
+        for row in unified.values():
+            name = row.get('program_name') or ''
+            key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
+            entry = _match_scoring_2025(scoring_entries, key)
+            if entry:
+                row['market_2025']      = entry['market_2025']
+                row['performance_2025'] = entry['performance_2025']
+                matched_scoring += 1
+
+        # Add new Boston entries for scoring programs with no portfolio match at all
+        already_matched = set()
+        for row in unified.values():
+            if row.get('market_2025'):
+                name = row.get('program_name') or ''
+                key = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
+                entry = _match_scoring_2025(scoring_entries, key)
+                if entry:
+                    already_matched.add(entry['norm_name'])
+
+        new_from_scoring = 0
+        for entry in scoring_entries:
+            if entry['norm_name'] in already_matched:
+                continue
+            # Create a minimal Boston-campus portfolio row for this program
+            # Reconstruct a display name from the normalized form
+            display_name = entry['norm_name'].title()
+            pid = _make_id(display_name, 'Boston')
+            if pid in unified:
+                continue
+            unified[pid] = dict(_EMPTY_TRACKING, **{
+                'id': pid,
+                'program_name': display_name,
+                'college': '',
+                'campus': 'Boston',
+                'cim_program_id': None,
+                'cim_step': '',
+                'cim_completion_date': '',
+                'market_2025': entry['market_2025'],
+                'performance_2025': entry['performance_2025'],
+            })
+            new_from_scoring += 1
+
+        print(f"  2025 scoring: {len(scoring_entries)} entries, {matched_scoring} matched, {new_from_scoring} new Boston rows added")
+    else:
+        print(f"  2025 scoring: file not found, skipping ({SCORING_2025_PATH})")
 
     # ── Step 5: Clean up college and campus values ───────────────────────────
     for row in unified.values():

@@ -1212,7 +1212,9 @@ def init_portfolio_tables(conn):
             cim_completion_date TEXT DEFAULT '',
             last_refreshed TEXT DEFAULT '',
             concentration_of TEXT DEFAULT '',
-            concentrations_json TEXT DEFAULT ''
+            concentrations_json TEXT DEFAULT '',
+            market_2025 TEXT DEFAULT '',
+            performance_2025 TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS portfolio_notes (
@@ -1227,7 +1229,7 @@ def init_portfolio_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_portfolio_ipd_status ON portfolio_programs(ipd_status);
     """)
     for col in ('roster_status', 'roster_sub_status', 'roster_proposal_type', 'roster_launch_date',
-                'concentration_of', 'concentrations_json'):
+                'concentration_of', 'concentrations_json', 'market_2025', 'performance_2025'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1250,7 +1252,8 @@ def upsert_portfolio_program(row):
                  ipd_status, ipd_proposal_type, ipd_additional_college,
                  roster_status, roster_sub_status, roster_proposal_type, roster_launch_date,
                  cim_program_id, cim_step, cim_completion_date, last_refreshed,
-                 concentration_of, concentrations_json)
+                 concentration_of, concentrations_json,
+                 market_2025, performance_2025)
             VALUES
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1259,7 +1262,8 @@ def upsert_portfolio_program(row):
                  :ipd_status, :ipd_proposal_type, :ipd_additional_college,
                  :roster_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
                  :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
-                 :concentration_of, :concentrations_json)
+                 :concentration_of, :concentrations_json,
+                 :market_2025, :performance_2025)
             ON CONFLICT(id) DO UPDATE SET
                 program_name=excluded.program_name,
                 college=excluded.college,
@@ -1283,7 +1287,9 @@ def upsert_portfolio_program(row):
                 cim_completion_date=excluded.cim_completion_date,
                 last_refreshed=excluded.last_refreshed,
                 concentration_of=excluded.concentration_of,
-                concentrations_json=excluded.concentrations_json
+                concentrations_json=excluded.concentrations_json,
+                market_2025=excluded.market_2025,
+                performance_2025=excluded.performance_2025
         """, row)
 
 

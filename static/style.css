@@ -1594,6 +1594,16 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     white-space: nowrap;
 }
 
+.badge-good {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+.badge-bad {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
 .otp-badge {
     background: #fef3c7;
     color: #92400e;
