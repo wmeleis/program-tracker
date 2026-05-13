@@ -114,6 +114,10 @@ function switchView(view) {
     const btnPort = document.getElementById('btn-portfolio');
     if (btnPort) btnPort.classList.toggle('active', view === 'portfolio');
 
+    // "Manage custom references" is only relevant on the Programs view
+    const refsLink = document.querySelector('.subtle-links');
+    if (refsLink) refsLink.style.display = view === 'programs' ? '' : 'none';
+
     // Reset filters when switching views
     pipelineFilter = null;
     typeFilter = '';
