@@ -1444,6 +1444,35 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
             )
             n_inact_linked += 1
 
+    # ── Step 9: Recover college from CIM for no-college portfolio rows ────────
+    # IPD/Roster rows often omit college; CIM has it.  Build a stem→college
+    # index over ALL programs (active + completed) for a best-effort lookup.
+    from database import get_db as _get_db
+    with _get_db() as _conn:
+        _cim_all = _conn.execute(
+            "SELECT name, college FROM programs WHERE college IS NOT NULL AND college != ''"
+        ).fetchall()
+    _cim_college_index = {}
+    for _r in _cim_all:
+        _stem = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', _r['name'] or ''))
+        if _stem and _stem not in _cim_college_index:
+            _cim_college_index[_stem] = _r['college']
+    _cim_college_index_full = {_norm(_r['name'] or ''): _r['college'] for _r in _cim_all if _r['name']}
+
+    n_college_recovered = 0
+    for row in unified.values():
+        if row.get('college'):
+            continue
+        name = row.get('program_name') or ''
+        stem = _norm(re.sub(r'\s*\([^)]*\)\s*$', '', name))
+        college = (_cim_college_index.get(stem)
+                   or _cim_college_index_full.get(_norm(name))
+                   or _cim_college_index.get(_norm_expanded(stem))
+                   or _cim_college_index_full.get(_norm_expanded(name)))
+        if college:
+            row['college'] = college
+            n_college_recovered += 1
+
     rows = list(unified.values())
     replace_all_portfolio_programs(rows)
 
@@ -1462,6 +1491,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     print(f"  IPD: {n_ipd} ({n_ipd_matched} matched to CIM, {n_ipd - n_ipd_matched} unmatched)")
     print(f"  Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
     print(f"  Concentrations: {n_conc_total} detected, {n_explicit} explicit + {n_linked} regex-linked to parent ({n_synthetic} synthetic parents created)")
+    if n_college_recovered:
+        print(f"  Colleges recovered from CIM: {n_college_recovered}")
     return len(rows)
 
 
