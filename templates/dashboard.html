@@ -151,6 +151,20 @@
             </div>
         </div>
         <div class="filter-group">
+            <label>Inact. of Admission:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-inactadmit" onchange="portfolioInactAdmitFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactadmit')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Admitting Today:</label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-inacttoday" onchange="portfolioInactTodayFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inacttoday')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
             <div class="portfolio-col-picker" id="portfolio-col-picker">
                 <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">Columns ▾</button>
                 <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>

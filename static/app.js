@@ -3258,8 +3258,10 @@ let portfolioOtpFilter       = '';
 let portfolioIpdFilter       = '';
 let portfolioRosterFilter    = '';
 let portfolioCimFilter       = '';
-let portfolioCimChangeFilter = '';
-let portfolioCimActiveFilter = '';
+let portfolioCimChangeFilter  = '';
+let portfolioCimActiveFilter  = '';
+let portfolioInactAdmitFilter = '';
+let portfolioInactTodayFilter = '';
 
 // "Fall 2026" → Date object for Sep 1 of that year (approximate start of Fall semester).
 function _semesterToDate(s) {
@@ -3394,8 +3396,11 @@ function populatePortfolioFilters() {
     const ipdStatuses   = [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort();
     const rosterStatuses = [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort();
     const cimSteps       = [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort();
-    const cimChangeVals  = [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort();
-    const cimActiveVals  = [...new Set(programs.map(portfolioCimActiveLabel).filter(Boolean))].sort();
+    const cimChangeVals    = [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort();
+    const cimActiveVals    = [...new Set(programs.map(portfolioCimActiveLabel).filter(Boolean))].sort();
+    const inactAdmitVals   = [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
+        (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0));
+    const inactTodayVals   = [...new Set(programs.map(p => _inactAdmittingToday(p)).filter(Boolean))].sort();
 
     function populate(id, values, current) {
         const sel = document.getElementById(id);
@@ -3410,8 +3415,10 @@ function populatePortfolioFilters() {
     populate('portfolio-filter-ipd',     ipdStatuses,   portfolioIpdFilter);
     populate('portfolio-filter-roster',    rosterStatuses,  portfolioRosterFilter);
     populate('portfolio-filter-cim',       cimSteps,        portfolioCimFilter);
-    populate('portfolio-filter-cimchange', cimChangeVals,   portfolioCimChangeFilter);
-    populate('portfolio-filter-cimactive', cimActiveVals,   portfolioCimActiveFilter);
+    populate('portfolio-filter-cimchange',   cimChangeVals,    portfolioCimChangeFilter);
+    populate('portfolio-filter-cimactive',   cimActiveVals,    portfolioCimActiveFilter);
+    populate('portfolio-filter-inactadmit',  inactAdmitVals,   portfolioInactAdmitFilter);
+    populate('portfolio-filter-inacttoday',  inactTodayVals,   portfolioInactTodayFilter);
 }
 
 const _portfolioFilterVars = {
@@ -3421,8 +3428,10 @@ const _portfolioFilterVars = {
     'portfolio-filter-ipd':     () => { portfolioIpdFilter     = ''; },
     'portfolio-filter-roster':    () => { portfolioRosterFilter    = ''; },
     'portfolio-filter-cim':       () => { portfolioCimFilter       = ''; },
-    'portfolio-filter-cimchange': () => { portfolioCimChangeFilter = ''; },
-    'portfolio-filter-cimactive': () => { portfolioCimActiveFilter = ''; },
+    'portfolio-filter-cimchange':   () => { portfolioCimChangeFilter  = ''; },
+    'portfolio-filter-cimactive':   () => { portfolioCimActiveFilter  = ''; },
+    'portfolio-filter-inactadmit':  () => { portfolioInactAdmitFilter = ''; },
+    'portfolio-filter-inacttoday':  () => { portfolioInactTodayFilter = ''; },
 };
 
 function clearPortfolioFilter(id) {
@@ -3443,8 +3452,10 @@ function getPortfolioFiltered() {
     if (portfolioIpdFilter)     rows = rows.filter(p => p.ipd_status    === portfolioIpdFilter);
     if (portfolioRosterFilter)    rows = rows.filter(p => p.roster_status  === portfolioRosterFilter);
     if (portfolioCimFilter)       rows = rows.filter(p => p.cim_step       === portfolioCimFilter);
-    if (portfolioCimChangeFilter) rows = rows.filter(p => p.cim_change_type === portfolioCimChangeFilter);
-    if (portfolioCimActiveFilter) rows = rows.filter(p => portfolioCimActiveLabel(p) === portfolioCimActiveFilter);
+    if (portfolioCimChangeFilter)  rows = rows.filter(p => p.cim_change_type === portfolioCimChangeFilter);
+    if (portfolioCimActiveFilter)  rows = rows.filter(p => portfolioCimActiveLabel(p) === portfolioCimActiveFilter);
+    if (portfolioInactAdmitFilter) rows = rows.filter(p => p.inactivation_admission === portfolioInactAdmitFilter);
+    if (portfolioInactTodayFilter) rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
         rows = rows.filter(p =>
@@ -3532,7 +3543,8 @@ function renderPortfolioTable() {
         portfolioCollegeFilter || portfolioCampusFilter ||
         portfolioOtpFilter || portfolioIpdFilter ||
         portfolioRosterFilter || portfolioCimFilter ||
-        portfolioCimChangeFilter || portfolioCimActiveFilter || portfolioSearch;
+        portfolioCimChangeFilter || portfolioCimActiveFilter ||
+        portfolioInactAdmitFilter || portfolioInactTodayFilter || portfolioSearch;
 
     // Determine which programs should be auto-expanded (search matches a curriculum concentration)
     const autoExpand = new Set();
