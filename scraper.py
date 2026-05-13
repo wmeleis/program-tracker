@@ -2786,6 +2786,11 @@ def compute_db_fingerprint():
         "FROM custom_references ORDER BY id",
         "SELECT id, title, current_step, current_approver_emails "
         "FROM catalog_pages ORDER BY id",
+        "SELECT id, program_name, college, campus, cim_program_id, cim_step, "
+        "cim_completion_date, cim_change_type, otp_status, ipd_status, "
+        "roster_status, roster_launch_date, market_2025, performance_2025, "
+        "market_score_2025, performance_score_2025, concentration_of "
+        "FROM portfolio_programs ORDER BY id",
     ]
     with get_db() as conn:
         for q in queries:

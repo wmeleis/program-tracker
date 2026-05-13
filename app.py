@@ -754,9 +754,12 @@ def api_scan_trigger():
 
             # C1: Auto-export + git push only when DB content actually
             # changed since last successful export. The fingerprint hashes
-            # only the user-visible fields of the source tables — not
-            # `fetched_at` etc. — so an idempotent re-fetch (same content,
-            # new timestamp) doesn't false-trigger an export. On no-change
+            # the user-visible fields of all source tables (programs, courses,
+            # workflows, references, regulatory, catalog_pages, portfolio_programs)
+            # — not `fetched_at` etc. — so an idempotent re-fetch (same content,
+            # new timestamp) doesn't false-trigger an export. Portfolio ingest
+            # runs BEFORE this check so portfolio changes (e.g. a completed
+            # inactivation being linked) also trigger re-export. On no-change
             # days this saves ~30-60s of CPU/IO + git push bandwidth.
             scan_status['phase'] = 'Exporting & deploying...'
             scan_status['progress'] = 90
