@@ -3182,7 +3182,6 @@ const PORTFOLIO_COLUMNS = [
     {key: 'launch',       label: 'Launch Date'},
     {key: 'cim',          label: 'CIM Step'},
     {key: 'cimchange',    label: 'CIM Change'},
-    {key: 'cimactive',    label: 'CIM Active'},
     {key: 'inactadmit',  label: 'Inactivation of Admission'},
     {key: 'inacttoday',  label: 'Admitting Today'},
     {key: 'notes',        label: 'Notes'},
@@ -3259,7 +3258,6 @@ let portfolioIpdFilter       = '';
 let portfolioRosterFilter    = '';
 let portfolioCimFilter       = '';
 let portfolioCimChangeFilter  = '';
-let portfolioCimActiveFilter  = '';
 let portfolioInactAdmitFilter = '';
 let portfolioInactTodayFilter = '';
 
@@ -3285,11 +3283,6 @@ function _inactAdmittingToday(p) {
 // A program is only "Inactive" once its inactivation workflow has fully completed.
 // While an inactivation proposal is still moving through CIM (cim_step is set),
 // the program is still running (teach-out phase) and should show as "Active".
-function portfolioCimActiveLabel(p) {
-    if (!p.cim_program_id) return '';
-    const inactivated = p.cim_change_type === 'Inactivation' && !p.cim_step && p.cim_completion_date;
-    return inactivated ? 'Inactive' : 'Active';
-}
 let portfolioLevelFilter   = '';
 let portfolioDegreeFilter  = '';
 let portfolioSortKey = '';   // '' = default (college/name), or a PORTFOLIO_COLUMNS key or 'name'
@@ -3411,7 +3404,6 @@ function populatePortfolioFilters() {
     const rosterStatuses = [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort();
     const cimSteps       = [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort();
     const cimChangeVals    = [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort();
-    const cimActiveVals    = [...new Set(programs.map(portfolioCimActiveLabel).filter(Boolean))].sort();
     const inactAdmitVals   = [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
         (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0));
     const inactTodayVals   = [...new Set(programs.map(p => _inactAdmittingToday(p)).filter(Boolean))].sort();
@@ -3430,7 +3422,6 @@ function populatePortfolioFilters() {
     populate('portfolio-filter-roster',    rosterStatuses,  portfolioRosterFilter);
     populate('portfolio-filter-cim',       cimSteps,        portfolioCimFilter);
     populate('portfolio-filter-cimchange',   cimChangeVals,    portfolioCimChangeFilter);
-    populate('portfolio-filter-cimactive',   cimActiveVals,    portfolioCimActiveFilter);
     populate('portfolio-filter-inactadmit',  inactAdmitVals,   portfolioInactAdmitFilter);
     populate('portfolio-filter-inacttoday',  inactTodayVals,   portfolioInactTodayFilter);
 }
@@ -3443,7 +3434,6 @@ const _portfolioFilterVars = {
     'portfolio-filter-roster':    () => { portfolioRosterFilter    = ''; },
     'portfolio-filter-cim':       () => { portfolioCimFilter       = ''; },
     'portfolio-filter-cimchange':   () => { portfolioCimChangeFilter  = ''; },
-    'portfolio-filter-cimactive':   () => { portfolioCimActiveFilter  = ''; },
     'portfolio-filter-inactadmit':  () => { portfolioInactAdmitFilter = ''; },
     'portfolio-filter-inacttoday':  () => { portfolioInactTodayFilter = ''; },
 };
@@ -3467,7 +3457,6 @@ function getPortfolioFiltered() {
     if (portfolioRosterFilter)    rows = rows.filter(p => p.roster_status  === portfolioRosterFilter);
     if (portfolioCimFilter)       rows = rows.filter(p => p.cim_step       === portfolioCimFilter);
     if (portfolioCimChangeFilter)  rows = rows.filter(p => p.cim_change_type === portfolioCimChangeFilter);
-    if (portfolioCimActiveFilter)  rows = rows.filter(p => portfolioCimActiveLabel(p) === portfolioCimActiveFilter);
     if (portfolioInactAdmitFilter) rows = rows.filter(p => p.inactivation_admission === portfolioInactAdmitFilter);
     if (portfolioInactTodayFilter) rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     if (portfolioSearch) {
@@ -3539,7 +3528,6 @@ function renderPortfolioTable() {
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimchange': av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
-            case 'cimactive':   av = portfolioCimActiveLabel(a); bv = portfolioCimActiveLabel(b); break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
             case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
@@ -3557,7 +3545,7 @@ function renderPortfolioTable() {
         portfolioCollegeFilter || portfolioCampusFilter ||
         portfolioOtpFilter || portfolioIpdFilter ||
         portfolioRosterFilter || portfolioCimFilter ||
-        portfolioCimChangeFilter || portfolioCimActiveFilter ||
+        portfolioCimChangeFilter ||
         portfolioInactAdmitFilter || portfolioInactTodayFilter || portfolioSearch;
 
     // Determine which programs should be auto-expanded (search matches a curriculum concentration)
@@ -3688,11 +3676,6 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
         ${_pc('cimchange', p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
-        ${_pc('cimactive', (() => {
-            const lbl = portfolioCimActiveLabel(p);
-            if (!lbl) return '';
-            return `<span class="portfolio-badge ${lbl === 'Inactive' ? 'badge-bad' : 'badge-good'}">${lbl}</span>`;
-        })())}
         ${_pc('inactadmit', escapeHtml(p.inactivation_admission || ''))}
         ${_pc('inacttoday', (() => {
             const v = _inactAdmittingToday(p);
