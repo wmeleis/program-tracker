@@ -3164,8 +3164,13 @@ function _initDashboard() {
 
 document.addEventListener('DOMContentLoaded', _initDashboard);
 
-// Auto-refresh every 2 minutes (data display only, not scanning)
-setInterval(loadDashboard, 120000);
+// Auto-refresh every 2 minutes — refreshes whichever view is active
+setInterval(() => {
+    if (currentView === 'programs') loadDashboard();
+    else if (currentView === 'courses') loadCoursesDashboard();
+    else if (currentView === 'catalog') loadCatalogDashboard();
+    else if (currentView === 'portfolio') loadPortfolioDashboard();
+}, 120000);
 
 // ==================== Portfolio view ====================
 
