@@ -632,6 +632,21 @@ _PORTFOLIO_RENAME = {
         ('Data Science, MS', 'Coll of Arts, Media & Design', 'Boston'),
     'Data Science - Health Data concentration, MS':
         ('Data Science, MS', 'Office of the Provost', 'Boston'),
+    # No-college IPD/Roster entries not in CIM pipeline
+    'Applied Quantum Information Science and Engineering, MS':
+        ('Applied Quantum Information Science and Engineering, MS', 'Office of the Provost', 'Boston'),
+    'Genetic Counseling, MS':
+        ('Genetic Counseling, MS', 'Bouve College of Hlth Sciences', 'Boston'),
+    'Half Major, Applied Creative Writing':
+        ('Half Major, Applied Creative Writing', 'Coll of Arts, Media & Design', 'Boston'),
+    'Management with Concentration in Strategic Technology Leadership at the, MS':
+        ('Management, MS—Strategic Technology Leadership', "D'Amore-McKim School Business", 'Portland'),
+    'Pediatric Primary Care (De), Ms':
+        ('Pediatric Primary Care, MS—Direct Entry', 'Bouve College of Hlth Sciences', 'Boston'),
+    'Pharmd Pharmacy Graduate':
+        ('Pharmacy, PharmD', 'Bouve College of Hlth Sciences', 'Boston'),
+    'Physical Therapy (De), Dpt':
+        ('Physical Therapy, DPT—Direct Entry', 'Bouve College of Hlth Sciences', 'Boston'),
 }
 
 # Strip "at Roux" / "for Maine" from program names; these indicate Portland campus.
