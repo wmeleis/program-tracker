@@ -453,6 +453,20 @@ def parse_roster(path=ROSTER_PATH):
 # Parse GLS Tableau CSV
 # ---------------------------------------------------------------------------
 
+# Explicit GLS raw_name → portfolio canonical name overrides (for abbreviations
+# that are too short/different for the fuzzy matcher to resolve).
+# Key = exact GLS "Program" column value; Value = portfolio program_name.
+_GLS_NAME_MAP = {
+    'MS App Quant Methods & Soc Analysis':  'Applied Quantitative Methods And Social Analysis, Ms',
+    'MS Human Movement and Rehab Sci':      'Human Movement and Rehabilitation Sciences, MS (Boston)',
+    'MS Media Innov and Data Comm':         'Media Innovation and Data Communication, MS (Boston)',
+    'MS Critical Care ACNP (DE)':           'Nursing—Adult-Gerontology Nurse Practitioner, Acute Care, MS',
+    'MS Critical Care Nurs NNP (DE)':       'Nursing—Neonatal Nurse Practitioner, MS',
+    'MS Ped Acute Prim Care (PNP) (DE)':   'Nursing—Pediatric Nurse Practitioner, Acute and Primary Care, MS',
+    'MS Primary Care Nurse ANP (DE)':       'Nursing—Adult-Gerontology Nurse Practitioner, Primary Care, MS',
+    'MS Psych-Mental Health (DE)':          'Nursing—Psychiatric-Mental Health Nurse Practitioner, MS',
+}
+
 # Known degree abbreviations that can appear as the first token in GLS names
 _GLS_DEGREES = {
     'MS', 'PhD', 'MA', 'MBA', 'MFA', 'MPH', 'MPS', 'MEd', 'MArch', 'MSW',
@@ -1365,13 +1379,18 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
 
     # ── Step 4.6: Overlay GLS Tableau data ──────────────────────────────────
     if gls_data:
+        # Build reverse lookup from _GLS_NAME_MAP: portfolio_name → status
+        gls_by_raw = {e['raw_name']: e['status'] for e in gls_data}
+        gls_explicit = {
+            port_name: gls_by_raw[gls_name]
+            for gls_name, port_name in _GLS_NAME_MAP.items()
+            if gls_name in gls_by_raw
+        }
         n_gls_matched = 0
         for row in unified.values():
-            status = _match_gls(
-                row.get('program_name') or '',
-                row.get('campus') or '',
-                gls_data,
-            )
+            name = row.get('program_name') or ''
+            status = (gls_explicit.get(name)
+                      or _match_gls(name, row.get('campus') or '', gls_data))
             if status:
                 row['gls_status'] = status
                 n_gls_matched += 1
