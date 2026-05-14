@@ -324,6 +324,7 @@ async function loadCatalogDashboard() {
         const [pipelineRes, pagesRes] = await Promise.all([
             fetch('/api/catalog_pipeline'),
             fetch('/api/catalog'),
+            loadScanStatus(),
         ]);
         cachedCatalogPipeline = (await pipelineRes.json()).pipeline || [];
         allCatalogPages = (await pagesRes.json()).catalog_pages || [];
@@ -3389,7 +3390,10 @@ async function loadPortfolioDashboard() {
     const container = document.getElementById('programs-table-container');
     if (container) container.innerHTML = '';
     try {
-        const res = await fetch('/api/portfolio');
+        const [res] = await Promise.all([
+            fetch('/api/portfolio'),
+            loadScanStatus(),
+        ]);
         allPortfolioPrograms = (await res.json()).programs || [];
         allPortfolioPrograms.forEach(p => {
             p.concentrations = p.concentrations_json ? JSON.parse(p.concentrations_json) : [];

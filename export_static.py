@@ -712,8 +712,17 @@ function __staticInit() {
     };
 
     // Catalog dashboard: read from embedded data instead of /api endpoints.
+    function _setLastUpdated(D) {
+        const updatedEl = document.getElementById('last-updated');
+        if (updatedEl && D.last_scan) {
+            const d = new Date(D.last_scan.scan_time);
+            updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
+        }
+    }
+
     window.loadCatalogDashboard = async function() {
         const D = await _getData();
+        _setLastUpdated(D);
         cachedCatalogPipeline = D.catalog_pipeline || [];
         allCatalogPages = D.catalog_pages || [];
         if (typeof populateCatalogCollegeFilter === 'function') populateCatalogCollegeFilter();
@@ -725,6 +734,7 @@ function __staticInit() {
     // Portfolio dashboard: read from embedded data; disable refresh + notes.
     window.loadPortfolioDashboard = async function() {
         const D = await _getData();
+        _setLastUpdated(D);
         allPortfolioPrograms = D.portfolio_programs || [];
         if (typeof populatePortfolioFilters === 'function') populatePortfolioFilters();
         renderPortfolioTable();
