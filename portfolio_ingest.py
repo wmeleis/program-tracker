@@ -601,6 +601,37 @@ _PORTFOLIO_RENAME = {
         ('Omics', 'College of Science', 'Boston'),
     'AI (new concentration) Bouve, MS':
         ('Bouve Health AI', 'Bouve College of Hlth Sciences', 'Boston'),
+    # IPD name corrections — map spreadsheet names to CIM canonical forms
+    'Architecture 2 Year, March':
+        ('Master of Architecture—Two-Year Program', 'Coll of Arts, Media & Design', 'Boston'),
+    'Counseling Psychology, Mscp':
+        ('Counseling Psychology, MSCP', 'Bouve College of Hlth Sciences', 'Boston'),
+    'Computer Science—Align, Mscs':
+        ('Computer Science, MSCS—Align', 'Khoury Coll of Comp Sciences', ''),
+    'Digital Media—Connect, Mps':
+        ('Digital Media, MPS—Connect', 'Coll of Professional Studies', ''),
+    'Electrical Engineering, Msece':
+        ('Electrical and Computer Engineering, MSECE', 'College of Engineering', ''),
+    'MS-Align, Master of Science in Data Science':
+        ('Data Science, MS—Align', 'Office of the Provost', ''),
+    'Masters of Science in Artificial Intelligence':
+        ('Artificial Intelligence, MS', 'Office of the Provost', ''),
+    'Network Science PhD':
+        ('Network Science, PhD', 'Coll of Soc Sci & Humanities', 'Boston'),
+    'Sustainable Urban Environments, Mdes':
+        ('Sustainable Urban Environments, MDes', 'Coll of Arts, Media & Design', 'Boston'),
+    'International Law, LLM':
+        ('Law, LLM', 'School of Law', 'Boston'),
+    'Pharmd Pharm & Mph Pub Hlth De':
+        ('Pharmacy, PharmD—Direct Entry / Public Health, MPH', 'Bouve College of Hlth Sciences', 'Boston'),
+    'Pub Hlth & Pharmd Pharm Gr, Mph':
+        ('Public Health, MPH / Pharmacy, PharmD', 'Bouve College of Hlth Sciences', 'Boston'),
+    'Civil Engineering, Mscive':
+        ('Civil Engineering, MSCivE', 'College of Engineering', ''),
+    'Data Science - CAMD Concentration, MS':
+        ('Data Science, MS', 'Coll of Arts, Media & Design', 'Boston'),
+    'Data Science - Health Data concentration, MS':
+        ('Data Science, MS', 'Office of the Provost', 'Boston'),
 }
 
 # Strip "at Roux" / "for Maine" from program names; these indicate Portland campus.

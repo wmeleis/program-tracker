@@ -3182,6 +3182,7 @@ const PORTFOLIO_COLUMNS = [
     {key: 'launch',       label: 'Launch Date'},
     {key: 'cim',          label: 'CIM Step'},
     {key: 'cimchange',    label: 'CIM Change'},
+    {key: 'inworkflow',   label: 'In Workflow'},
     {key: 'inactadmit',  label: 'Inactivation of Admission'},
     {key: 'inacttoday',  label: 'Admitting Today'},
     {key: 'notes',        label: 'Notes'},
@@ -3236,6 +3237,12 @@ function togglePortfolioCol(key, visible) {
 }
 
 document.addEventListener('click', e => {
+    // Close multi-select filter dropdowns on outside click
+    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => {
+        const wrap = el.closest('.filter-multi-wrap');
+        if (wrap && !wrap.contains(e.target)) el.classList.remove('open');
+    });
+    // Close column picker dropdown on outside click
     const picker = document.getElementById('portfolio-col-picker');
     if (picker && !picker.contains(e.target)) {
         const dd = document.getElementById('portfolio-col-dropdown');
@@ -3251,14 +3258,15 @@ function _pc(key, content, cls) {
 
 let allPortfolioPrograms   = [];
 let portfolioExpandedIds   = new Set();
-let portfolioCollegeFilter = '';
-let portfolioCampusFilter  = '';
-let portfolioOtpFilter       = '';
-let portfolioIpdFilter       = '';
-let portfolioRosterFilter    = '';
-let portfolioCimFilter       = '';
-let portfolioCimChangeFilter  = '';
-let portfolioInactAdmitFilter = '';
+let portfolioCollegeFilter   = new Set();
+let portfolioCampusFilter    = new Set();
+let portfolioOtpFilter       = new Set();
+let portfolioIpdFilter       = new Set();
+let portfolioRosterFilter    = new Set();
+let portfolioCimFilter       = new Set();
+let portfolioCimChangeFilter  = new Set();
+let portfolioInWorkflowFilter = new Set();
+let portfolioInactAdmitFilter = new Set();
 let portfolioInactTodayFilter = '';
 
 // "Fall 2026" → Date object for Sep 1 of that year (approximate start of Fall semester).
@@ -3394,54 +3402,140 @@ async function loadPortfolioDashboard() {
     }
 }
 
-function populatePortfolioFilters() {
+function _getPortfolioFilterValues() {
     const programs = allPortfolioPrograms;
+    return {
+        'portfolio-filter-college':    [...new Set(programs.map(p => p.college).filter(Boolean))].sort(),
+        'portfolio-filter-campus':     [...new Set(programs.map(p => p.campus).filter(Boolean))].sort(),
+        'portfolio-filter-otp':        [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort(),
+        'portfolio-filter-ipd':        [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort(),
+        'portfolio-filter-roster':     [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort(),
+        'portfolio-filter-cim':        [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort(),
+        'portfolio-filter-cimchange':  [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort(),
+        'portfolio-filter-inworkflow': ['Yes', 'No'],
+        'portfolio-filter-inactadmit': [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
+            (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0)),
+    };
+}
 
-    const colleges      = [...new Set(programs.map(p => p.college).filter(Boolean))].sort();
-    const campuses      = [...new Set(programs.map(p => p.campus).filter(Boolean))].sort();
-    const otpStatuses   = [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort();
-    const ipdStatuses   = [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort();
-    const rosterStatuses = [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort();
-    const cimSteps       = [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort();
-    const cimChangeVals    = [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort();
-    const inactAdmitVals   = [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
-        (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0));
-    const inactTodayVals   = [...new Set(programs.map(p => _inactAdmittingToday(p)).filter(Boolean))].sort();
-
-    function populate(id, values, current) {
-        const sel = document.getElementById(id);
-        if (!sel) return;
-        sel.innerHTML = `<option value="" disabled${current ? '' : ' selected'}> — select — </option>` +
-            values.map(v => `<option value="${escapeHtml(v)}" ${v === current ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
-        sel.closest('.filter-select-wrap').classList.toggle('has-value', !!current);
+function _updateMultiFilterBtn(id, filterSet) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const wrap = document.getElementById('fmw-' + id);
+    if (filterSet.size === 0) {
+        btn.textContent = '— select — ▾';
+        if (wrap) wrap.classList.remove('has-value');
+    } else if (filterSet.size === 1) {
+        btn.textContent = [...filterSet][0] + ' ▾';
+        if (wrap) wrap.classList.add('has-value');
+    } else {
+        btn.textContent = filterSet.size + ' selected ▾';
+        if (wrap) wrap.classList.add('has-value');
     }
-    populate('portfolio-filter-college', colleges,      portfolioCollegeFilter);
-    populate('portfolio-filter-campus',  campuses,      portfolioCampusFilter);
-    populate('portfolio-filter-otp',     otpStatuses,   portfolioOtpFilter);
-    populate('portfolio-filter-ipd',     ipdStatuses,   portfolioIpdFilter);
-    populate('portfolio-filter-roster',    rosterStatuses,  portfolioRosterFilter);
-    populate('portfolio-filter-cim',       cimSteps,        portfolioCimFilter);
-    populate('portfolio-filter-cimchange',   cimChangeVals,    portfolioCimChangeFilter);
-    populate('portfolio-filter-inactadmit',  inactAdmitVals,   portfolioInactAdmitFilter);
-    populate('portfolio-filter-inacttoday',  inactTodayVals,   portfolioInactTodayFilter);
+}
+
+function populatePortfolioFilters() {
+    const multiIds = [
+        'portfolio-filter-college', 'portfolio-filter-campus',
+        'portfolio-filter-otp', 'portfolio-filter-ipd', 'portfolio-filter-roster',
+        'portfolio-filter-cim', 'portfolio-filter-cimchange',
+        'portfolio-filter-inworkflow', 'portfolio-filter-inactadmit',
+    ];
+    const filterSetMap = {
+        'portfolio-filter-college':    portfolioCollegeFilter,
+        'portfolio-filter-campus':     portfolioCampusFilter,
+        'portfolio-filter-otp':        portfolioOtpFilter,
+        'portfolio-filter-ipd':        portfolioIpdFilter,
+        'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-cim':        portfolioCimFilter,
+        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+    };
+    multiIds.forEach(id => _updateMultiFilterBtn(id, filterSetMap[id] || new Set()));
+
+    // Admitting Today stays as single-select
+    const inactTodayVals = [...new Set(allPortfolioPrograms.map(p => _inactAdmittingToday(p)).filter(Boolean))].sort();
+    const sel = document.getElementById('portfolio-filter-inacttoday');
+    if (sel) {
+        sel.innerHTML = `<option value="" disabled${portfolioInactTodayFilter ? '' : ' selected'}> — select — </option>` +
+            inactTodayVals.map(v => `<option value="${escapeHtml(v)}" ${v === portfolioInactTodayFilter ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+        sel.closest('.filter-select-wrap').classList.toggle('has-value', !!portfolioInactTodayFilter);
+    }
 }
 
 const _portfolioFilterVars = {
-    'portfolio-filter-college': () => { portfolioCollegeFilter = ''; },
-    'portfolio-filter-campus':  () => { portfolioCampusFilter  = ''; },
-    'portfolio-filter-otp':     () => { portfolioOtpFilter     = ''; },
-    'portfolio-filter-ipd':     () => { portfolioIpdFilter     = ''; },
-    'portfolio-filter-roster':    () => { portfolioRosterFilter    = ''; },
-    'portfolio-filter-cim':       () => { portfolioCimFilter       = ''; },
-    'portfolio-filter-cimchange':   () => { portfolioCimChangeFilter  = ''; },
-    'portfolio-filter-inactadmit':  () => { portfolioInactAdmitFilter = ''; },
-    'portfolio-filter-inacttoday':  () => { portfolioInactTodayFilter = ''; },
+    'portfolio-filter-college':    () => { portfolioCollegeFilter.clear();    _updateMultiFilterBtn('portfolio-filter-college',    portfolioCollegeFilter); },
+    'portfolio-filter-campus':     () => { portfolioCampusFilter.clear();     _updateMultiFilterBtn('portfolio-filter-campus',     portfolioCampusFilter); },
+    'portfolio-filter-otp':        () => { portfolioOtpFilter.clear();        _updateMultiFilterBtn('portfolio-filter-otp',        portfolioOtpFilter); },
+    'portfolio-filter-ipd':        () => { portfolioIpdFilter.clear();        _updateMultiFilterBtn('portfolio-filter-ipd',        portfolioIpdFilter); },
+    'portfolio-filter-roster':     () => { portfolioRosterFilter.clear();     _updateMultiFilterBtn('portfolio-filter-roster',     portfolioRosterFilter); },
+    'portfolio-filter-cim':        () => { portfolioCimFilter.clear();        _updateMultiFilterBtn('portfolio-filter-cim',        portfolioCimFilter); },
+    'portfolio-filter-cimchange':  () => { portfolioCimChangeFilter.clear();  _updateMultiFilterBtn('portfolio-filter-cimchange',  portfolioCimChangeFilter); },
+    'portfolio-filter-inworkflow': () => { portfolioInWorkflowFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inworkflow', portfolioInWorkflowFilter); },
+    'portfolio-filter-inactadmit': () => { portfolioInactAdmitFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inactadmit', portfolioInactAdmitFilter); },
+    'portfolio-filter-inacttoday': () => { portfolioInactTodayFilter = ''; },
 };
 
 function clearPortfolioFilter(id) {
+    // Close any open dropdown for this filter
+    const dd = document.getElementById('fmd-' + id);
+    if (dd) dd.classList.remove('open');
+    // For single-select (inacttoday), reset the <select> value
     const sel = document.getElementById(id);
-    if (sel) sel.value = '';
+    if (sel && sel.tagName === 'SELECT') sel.value = '';
     if (_portfolioFilterVars[id]) _portfolioFilterVars[id]();
+    updateClearButtons();
+    renderPortfolioTable();
+}
+
+function togglePortfolioMultiFilter(id, e) {
+    e.stopPropagation();
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) return;
+    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+    // Close other open dropdowns
+    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => el.classList.remove('open'));
+    const filterSetMap = {
+        'portfolio-filter-college':    portfolioCollegeFilter,
+        'portfolio-filter-campus':     portfolioCampusFilter,
+        'portfolio-filter-otp':        portfolioOtpFilter,
+        'portfolio-filter-ipd':        portfolioIpdFilter,
+        'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-cim':        portfolioCimFilter,
+        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+    };
+    const filterSet = filterSetMap[id];
+    const valuesMap = _getPortfolioFilterValues();
+    const vals = valuesMap[id] || [];
+    dd.innerHTML = vals.map(v => `
+        <label class="portfolio-col-check">
+            <input type="checkbox" ${filterSet && filterSet.has(v) ? 'checked' : ''}
+                   onchange="togglePortfolioMultiValue(${JSON.stringify(id)}, ${JSON.stringify(v)}, this.checked)">
+            ${escapeHtml(v)}
+        </label>`).join('');
+    dd.classList.add('open');
+}
+
+function togglePortfolioMultiValue(id, value, checked) {
+    const filterSetMap = {
+        'portfolio-filter-college':    portfolioCollegeFilter,
+        'portfolio-filter-campus':     portfolioCampusFilter,
+        'portfolio-filter-otp':        portfolioOtpFilter,
+        'portfolio-filter-ipd':        portfolioIpdFilter,
+        'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-cim':        portfolioCimFilter,
+        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+    };
+    const filterSet = filterSetMap[id];
+    if (!filterSet) return;
+    if (checked) filterSet.add(value);
+    else filterSet.delete(value);
+    _updateMultiFilterBtn(id, filterSet);
     updateClearButtons();
     renderPortfolioTable();
 }
@@ -3450,15 +3544,16 @@ function getPortfolioFiltered() {
     let rows = allPortfolioPrograms.slice();
     if (portfolioLevelFilter)   rows = rows.filter(p => classifyPortfolioLevel(p.program_name)  === portfolioLevelFilter);
     if (portfolioDegreeFilter)  rows = rows.filter(p => classifyPortfolioDegree(p.program_name) === portfolioDegreeFilter);
-    if (portfolioCollegeFilter) rows = rows.filter(p => p.college === portfolioCollegeFilter);
-    if (portfolioCampusFilter)  rows = rows.filter(p => p.campus  === portfolioCampusFilter);
-    if (portfolioOtpFilter)     rows = rows.filter(p => p.otp_status    === portfolioOtpFilter);
-    if (portfolioIpdFilter)     rows = rows.filter(p => p.ipd_status    === portfolioIpdFilter);
-    if (portfolioRosterFilter)    rows = rows.filter(p => p.roster_status  === portfolioRosterFilter);
-    if (portfolioCimFilter)       rows = rows.filter(p => p.cim_step       === portfolioCimFilter);
-    if (portfolioCimChangeFilter)  rows = rows.filter(p => p.cim_change_type === portfolioCimChangeFilter);
-    if (portfolioInactAdmitFilter) rows = rows.filter(p => p.inactivation_admission === portfolioInactAdmitFilter);
-    if (portfolioInactTodayFilter) rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
+    if (portfolioCollegeFilter.size)    rows = rows.filter(p => portfolioCollegeFilter.has(p.college || ''));
+    if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
+    if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
+    if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
+    if (portfolioRosterFilter.size)     rows = rows.filter(p => portfolioRosterFilter.has(p.roster_status || ''));
+    if (portfolioCimFilter.size)        rows = rows.filter(p => portfolioCimFilter.has(p.cim_step || ''));
+    if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
+    if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? (p.cim_step ? 'Yes' : 'No') : ''));
+    if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
+    if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
         rows = rows.filter(p =>
@@ -3527,7 +3622,8 @@ function renderPortfolioTable() {
             case 'gls':       av = a.roster_status || ''; bv = b.roster_status || ''; break;
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
-            case 'cimchange': av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
+            case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
+            case 'inworkflow':  av = a.cim_step ? 'Yes' : ''; bv = b.cim_step ? 'Yes' : ''; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
             case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
@@ -3542,11 +3638,11 @@ function renderPortfolioTable() {
     });
 
     const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter ||
-        portfolioCollegeFilter || portfolioCampusFilter ||
-        portfolioOtpFilter || portfolioIpdFilter ||
-        portfolioRosterFilter || portfolioCimFilter ||
-        portfolioCimChangeFilter ||
-        portfolioInactAdmitFilter || portfolioInactTodayFilter || portfolioSearch;
+        portfolioCollegeFilter.size || portfolioCampusFilter.size ||
+        portfolioOtpFilter.size || portfolioIpdFilter.size ||
+        portfolioRosterFilter.size || portfolioCimFilter.size ||
+        portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
+        portfolioInactAdmitFilter.size || portfolioInactTodayFilter || portfolioSearch;
 
     // Determine which programs should be auto-expanded (search matches a curriculum concentration)
     const autoExpand = new Set();
@@ -3675,8 +3771,9 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('gls',     rosterBadge)}
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
-        ${_pc('cimchange', p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
-        ${_pc('inactadmit', escapeHtml(p.inactivation_admission || ''))}
+        ${_pc('cimchange',   p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
+        ${_pc('inworkflow',  p.cim_program_id ? (p.cim_step ? 'Yes' : '') : '')}
+        ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
         ${_pc('inacttoday', (() => {
             const v = _inactAdmittingToday(p);
             if (!v) return '';

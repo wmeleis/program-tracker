@@ -364,6 +364,51 @@ header h1 {
     display: block;
 }
 
+/* Multi-select checkbox filter dropdowns */
+.filter-multi-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+}
+.filter-multi-btn {
+    font-size: 0.85em;
+    padding: 4px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.filter-multi-wrap.has-value .filter-multi-btn {
+    background: #eff6ff;
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.filter-multi-wrap.has-value .filter-clear {
+    display: block;
+}
+.filter-multi-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.10);
+    min-width: 180px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 200;
+    padding: 6px 4px;
+}
+.filter-multi-dropdown.open { display: block; }
+
 .search-group { flex: 1; min-width: 200px; }
 .search-group input { width: 100%; }
 .search-group .filter-select-wrap { width: 100%; }
