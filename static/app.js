@@ -3179,6 +3179,7 @@ const PORTFOLIO_COLUMNS = [
     {key: 'perfscore2025',   label: '2025 Performance Score'},
     {key: 'otp',          label: 'OTP Status'},
     {key: 'ipd',          label: 'IPD Status'},
+    {key: 'svt',          label: 'SVT Status'},
     {key: 'gls',          label: 'GLS Status'},
     {key: 'launch',       label: 'Launch Date'},
     {key: 'cim',          label: 'CIM Step'},
@@ -3263,7 +3264,8 @@ let portfolioCollegeFilter   = new Set();
 let portfolioCampusFilter    = new Set();
 let portfolioOtpFilter       = new Set();
 let portfolioIpdFilter       = new Set();
-let portfolioRosterFilter    = new Set();
+let portfolioRosterFilter    = new Set();  // SVT Status filter
+let portfolioGlsFilter       = new Set();
 let portfolioCimFilter       = new Set();
 let portfolioCimChangeFilter  = new Set();
 let portfolioInWorkflowFilter = new Set();
@@ -3413,7 +3415,8 @@ function _getPortfolioFilterValues() {
         'portfolio-filter-campus':     [...new Set(programs.map(p => p.campus).filter(Boolean))].sort(),
         'portfolio-filter-otp':        [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort(),
         'portfolio-filter-ipd':        [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort(),
-        'portfolio-filter-roster':     [...new Set(programs.map(p => p.roster_status).filter(Boolean))].sort(),
+        'portfolio-filter-roster':     [...new Set(programs.map(p => p.svt_status).filter(Boolean))].sort(),
+        'portfolio-filter-gls':        [...new Set(programs.map(p => p.gls_status).filter(Boolean))].sort(),
         'portfolio-filter-cim':        [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort(),
         'portfolio-filter-cimchange':  [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort(),
         'portfolio-filter-inworkflow': ['Yes', 'No'],
@@ -3442,6 +3445,7 @@ function populatePortfolioFilters() {
     const multiIds = [
         'portfolio-filter-college', 'portfolio-filter-campus',
         'portfolio-filter-otp', 'portfolio-filter-ipd', 'portfolio-filter-roster',
+        'portfolio-filter-gls',
         'portfolio-filter-cim', 'portfolio-filter-cimchange',
         'portfolio-filter-inworkflow', 'portfolio-filter-inactadmit',
     ];
@@ -3451,6 +3455,7 @@ function populatePortfolioFilters() {
         'portfolio-filter-otp':        portfolioOtpFilter,
         'portfolio-filter-ipd':        portfolioIpdFilter,
         'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-gls':        portfolioGlsFilter,
         'portfolio-filter-cim':        portfolioCimFilter,
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
@@ -3474,6 +3479,7 @@ const _portfolioFilterVars = {
     'portfolio-filter-otp':        () => { portfolioOtpFilter.clear();        _updateMultiFilterBtn('portfolio-filter-otp',        portfolioOtpFilter); },
     'portfolio-filter-ipd':        () => { portfolioIpdFilter.clear();        _updateMultiFilterBtn('portfolio-filter-ipd',        portfolioIpdFilter); },
     'portfolio-filter-roster':     () => { portfolioRosterFilter.clear();     _updateMultiFilterBtn('portfolio-filter-roster',     portfolioRosterFilter); },
+    'portfolio-filter-gls':        () => { portfolioGlsFilter.clear();        _updateMultiFilterBtn('portfolio-filter-gls',        portfolioGlsFilter); },
     'portfolio-filter-cim':        () => { portfolioCimFilter.clear();        _updateMultiFilterBtn('portfolio-filter-cim',        portfolioCimFilter); },
     'portfolio-filter-cimchange':  () => { portfolioCimChangeFilter.clear();  _updateMultiFilterBtn('portfolio-filter-cimchange',  portfolioCimChangeFilter); },
     'portfolio-filter-inworkflow': () => { portfolioInWorkflowFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inworkflow', portfolioInWorkflowFilter); },
@@ -3506,6 +3512,7 @@ function togglePortfolioMultiFilter(id, e) {
         'portfolio-filter-otp':        portfolioOtpFilter,
         'portfolio-filter-ipd':        portfolioIpdFilter,
         'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-gls':        portfolioGlsFilter,
         'portfolio-filter-cim':        portfolioCimFilter,
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
@@ -3530,6 +3537,7 @@ function togglePortfolioMultiValue(id, value, checked) {
         'portfolio-filter-otp':        portfolioOtpFilter,
         'portfolio-filter-ipd':        portfolioIpdFilter,
         'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-gls':        portfolioGlsFilter,
         'portfolio-filter-cim':        portfolioCimFilter,
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
@@ -3552,7 +3560,8 @@ function getPortfolioFiltered() {
     if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
     if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
     if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
-    if (portfolioRosterFilter.size)     rows = rows.filter(p => portfolioRosterFilter.has(p.roster_status || ''));
+    if (portfolioRosterFilter.size)     rows = rows.filter(p => portfolioRosterFilter.has(p.svt_status || ''));
+    if (portfolioGlsFilter.size)        rows = rows.filter(p => portfolioGlsFilter.has(p.gls_status || ''));
     if (portfolioCimFilter.size)        rows = rows.filter(p => portfolioCimFilter.has(p.cim_step || ''));
     if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
     if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? (p.cim_step ? 'Yes' : 'No') : ''));
@@ -3623,7 +3632,8 @@ function renderPortfolioTable() {
             case 'campus':    av = a.campus  || '';  bv = b.campus  || '';  break;
             case 'otp':       av = a.otp_status || ''; bv = b.otp_status || ''; break;
             case 'ipd':       av = a.ipd_status || ''; bv = b.ipd_status || ''; break;
-            case 'gls':       av = a.roster_status || ''; bv = b.roster_status || ''; break;
+            case 'svt':       av = a.svt_status || ''; bv = b.svt_status || ''; break;
+            case 'gls':       av = a.gls_status || ''; bv = b.gls_status || ''; break;
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
@@ -3644,7 +3654,7 @@ function renderPortfolioTable() {
     const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter ||
         portfolioCollegeFilter.size || portfolioCampusFilter.size ||
         portfolioOtpFilter.size || portfolioIpdFilter.size ||
-        portfolioRosterFilter.size || portfolioCimFilter.size ||
+        portfolioRosterFilter.size || portfolioGlsFilter.size || portfolioCimFilter.size ||
         portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
         portfolioInactAdmitFilter.size || portfolioInactTodayFilter || portfolioSearch;
 
@@ -3731,9 +3741,11 @@ function renderPortfolioRow(p, opts = {}) {
         ? `<span class="portfolio-badge otp-badge">${escapeHtml(p.otp_status)}</span>` : '—';
     const ipdBadge    = p.ipd_status
         ? `<span class="portfolio-badge ipd-badge">${escapeHtml(p.ipd_status)}</span>` : '—';
-    const rosterBadge = p.roster_status
-        ? `<span class="portfolio-badge roster-badge">${escapeHtml(p.roster_status)}</span>
+    const svtBadge = p.svt_status
+        ? `<span class="portfolio-badge roster-badge">${escapeHtml(p.svt_status)}</span>
            ${p.roster_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.roster_sub_status)}</span>` : ''}` : '—';
+    const glsBadge = p.gls_status
+        ? `<span class="portfolio-badge gls-badge">${escapeHtml(p.gls_status)}</span>` : '—';
     const cimStep  = p.cim_step ? escapeHtml(p.cim_step) : '';
     const note = escapeHtml(p.note || '');
     const isStatic = typeof window._staticMode !== 'undefined';
@@ -3772,7 +3784,8 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('perfscore2025',   escapeHtml(p.performance_score_2025 || ''))}
         ${_pc('otp',        otpBadge)}
         ${_pc('ipd',     ipdBadge)}
-        ${_pc('gls',     rosterBadge)}
+        ${_pc('svt',     svtBadge)}
+        ${_pc('gls',     glsBadge)}
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
         ${_pc('cimchange',   p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}

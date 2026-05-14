@@ -1206,10 +1206,11 @@ def init_portfolio_tables(conn):
             ipd_status TEXT DEFAULT '',
             ipd_proposal_type TEXT DEFAULT '',
             ipd_additional_college TEXT DEFAULT '',
-            roster_status TEXT DEFAULT '',
+            svt_status TEXT DEFAULT '',
             roster_sub_status TEXT DEFAULT '',
             roster_proposal_type TEXT DEFAULT '',
             roster_launch_date TEXT DEFAULT '',
+            gls_status TEXT DEFAULT '',
             cim_program_id INTEGER,
             cim_step TEXT DEFAULT '',
             cim_completion_date TEXT DEFAULT '',
@@ -1235,8 +1236,13 @@ def init_portfolio_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_portfolio_otp_status ON portfolio_programs(otp_status);
         CREATE INDEX IF NOT EXISTS idx_portfolio_ipd_status ON portfolio_programs(ipd_status);
     """)
-    for col in ('roster_status', 'roster_sub_status', 'roster_proposal_type', 'roster_launch_date',
-                'concentration_of', 'concentrations_json', 'market_2025', 'performance_2025',
+    # Rename roster_status → svt_status on existing DBs
+    try:
+        conn.execute("ALTER TABLE portfolio_programs RENAME COLUMN roster_status TO svt_status")
+    except Exception:
+        pass
+    for col in ('svt_status', 'roster_sub_status', 'roster_proposal_type', 'roster_launch_date',
+                'gls_status', 'concentration_of', 'concentrations_json', 'market_2025', 'performance_2025',
                 'market_score_2025', 'performance_score_2025', 'cim_change_type',
                 'inactivation_admission'):
         try:
@@ -1244,7 +1250,7 @@ def init_portfolio_tables(conn):
         except Exception:
             pass
     try:
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_roster_status ON portfolio_programs(roster_status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_svt_status ON portfolio_programs(svt_status)")
     except Exception:
         pass
 
@@ -1259,7 +1265,8 @@ def upsert_portfolio_program(row):
                  otp_market_signal, otp_internal_performance,
                  otp_q3_status, otp_effective_term,
                  ipd_status, ipd_proposal_type, ipd_additional_college,
-                 roster_status, roster_sub_status, roster_proposal_type, roster_launch_date,
+                 svt_status, roster_sub_status, roster_proposal_type, roster_launch_date,
+                 gls_status,
                  cim_program_id, cim_step, cim_completion_date, last_refreshed,
                  concentration_of, concentrations_json,
                  market_2025, performance_2025,
@@ -1271,7 +1278,8 @@ def upsert_portfolio_program(row):
                  :otp_market_signal, :otp_internal_performance,
                  :otp_q3_status, :otp_effective_term,
                  :ipd_status, :ipd_proposal_type, :ipd_additional_college,
-                 :roster_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
+                 :svt_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
+                 :gls_status,
                  :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
                  :concentration_of, :concentrations_json,
                  :market_2025, :performance_2025,
@@ -1291,10 +1299,11 @@ def upsert_portfolio_program(row):
                 ipd_status=excluded.ipd_status,
                 ipd_proposal_type=excluded.ipd_proposal_type,
                 ipd_additional_college=excluded.ipd_additional_college,
-                roster_status=excluded.roster_status,
+                svt_status=excluded.svt_status,
                 roster_sub_status=excluded.roster_sub_status,
                 roster_proposal_type=excluded.roster_proposal_type,
                 roster_launch_date=excluded.roster_launch_date,
+                gls_status=excluded.gls_status,
                 cim_program_id=excluded.cim_program_id,
                 cim_step=excluded.cim_step,
                 cim_completion_date=excluded.cim_completion_date,
@@ -1322,7 +1331,8 @@ def replace_all_portfolio_programs(rows):
                      otp_market_signal, otp_internal_performance,
                      otp_q3_status, otp_effective_term,
                      ipd_status, ipd_proposal_type, ipd_additional_college,
-                     roster_status, roster_sub_status, roster_proposal_type, roster_launch_date,
+                     svt_status, roster_sub_status, roster_proposal_type, roster_launch_date,
+                     gls_status,
                      cim_program_id, cim_step, cim_completion_date, last_refreshed,
                      concentration_of, concentrations_json,
                      market_2025, performance_2025,
@@ -1334,7 +1344,8 @@ def replace_all_portfolio_programs(rows):
                      :otp_market_signal, :otp_internal_performance,
                      :otp_q3_status, :otp_effective_term,
                      :ipd_status, :ipd_proposal_type, :ipd_additional_college,
-                     :roster_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
+                     :svt_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date,
+                     :gls_status,
                      :cim_program_id, :cim_step, :cim_completion_date, :last_refreshed,
                      :concentration_of, :concentrations_json,
                      :market_2025, :performance_2025,

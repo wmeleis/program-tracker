@@ -12,7 +12,8 @@ Prerequisites:
 Outputs:
     ~/Downloads/portfolio_sharepoint.xlsx   — OTP Program Tracking workbook
     ~/Downloads/portfolio_smartsheet.tsv    — IPD Dashboard (tab-separated)
-    ~/Downloads/portfolio_roster.tsv        — GLS Roster of Record (all campuses/colleges)
+    ~/Downloads/portfolio_roster.tsv        — SVT Roster of Record (all campuses/colleges)
+    ~/Downloads/portfolio_gls.csv           — GLS Program Detail (Tableau)
 """
 
 import subprocess
@@ -27,6 +28,8 @@ BROWSER_APP = os.environ.get("BROWSER_APP", "Google Chrome")
 SHAREPOINT_URL = "https://northeastern-my.sharepoint.com/:x:/r/personal/g_wahhab_northeastern_edu/Documents/Optimization,%20Withdrawal,%20and%20Deactivation%20Tracker.xlsx?d=w8de2224c326e4b8eb46cdbc819a6ff9d&csf=1&web=1&e=DblQiu"
 SMARTSHEET_URL = "https://app.smartsheet.com/b/publish?EQBCT=65a022ed48d94beea1d54ef5b933fc48"
 GLS_ROSTER_HUB = "https://app.smartsheet.com/b/publish?EQBCT=547ce640b5bf44809634971051a0bf62"
+GLS_TABLEAU_URL = "https://tableau.northeastern.edu/views/ProgramOptimazationDeactivationWithdrawal/ProgramDetail.csv"
+GLS_TABLEAU_FRAGMENT = "tableau.northeastern.edu"
 
 # Sub-dashboard tokens extracted from the GLS hub config API
 _CAMPUS_DASHBOARDS = {
@@ -446,6 +449,177 @@ def fetch_roster_dashboards():
 
 
 # ---------------------------------------------------------------------------
+# GLS Tableau: download Program Detail CSV
+# ---------------------------------------------------------------------------
+
+def fetch_gls_tableau():
+    """Download the GLS Program Detail CSV from Tableau via the logged-in Chrome session.
+
+    Fetches https://tableau.northeastern.edu/views/ProgramOptimazationDeactivationWithdrawal/ProgramDetail.csv
+    using a Chrome tab that is already authenticated to Northeastern SSO.
+    The response is plain CSV text; it is saved to ~/Downloads/portfolio_gls.csv.
+
+    Uses any existing tab whose URL contains 'tableau.northeastern.edu'.
+    If no such tab exists, opens one temporarily and closes it after the fetch.
+    """
+    print("\n--- GLS Tableau CSV ---")
+    CHUNK = 200000  # characters per polling chunk
+
+    # Check for an existing Tableau tab
+    check_script = f'''tell application "{BROWSER_APP}"
+        set tabIdx to 0
+        repeat with i from 1 to count of tabs of window 1
+            if (URL of tab i of window 1) contains "{GLS_TABLEAU_FRAGMENT}" then
+                set tabIdx to i
+                exit repeat
+            end if
+        end repeat
+        return tabIdx as text
+    end tell'''
+    r = subprocess.run(['osascript', '-e', check_script], capture_output=True, text=True, timeout=10)
+    try:
+        existing_tab_idx = int(r.stdout.strip())
+    except (ValueError, AttributeError):
+        existing_tab_idx = 0
+
+    opened_new_tab = False
+    if existing_tab_idx == 0:
+        tab_idx = open_new_tab(GLS_TABLEAU_URL)
+        if tab_idx is None:
+            print("  Could not open a new tab — skipping GLS Tableau fetch")
+            return
+        opened_new_tab = True
+        print(f"  Opened new tab {tab_idx}, waiting for page to load...")
+        wait_for_load_by_idx(tab_idx, timeout=30)
+        time.sleep(2)
+    else:
+        tab_idx = existing_tab_idx
+        print(f"  Using existing Tableau tab {tab_idx}")
+
+    try:
+        # Fetch the CSV via fetch() with credentials, store as text in a hidden div
+        js_fetch = f"""
+        (async () => {{
+            try {{
+                const resp = await fetch({json.dumps(GLS_TABLEAU_URL)}, {{credentials: 'include'}});
+                const text = await resp.text();
+                let div = document.getElementById('__gls_result');
+                if (!div) {{
+                    div = document.createElement('div');
+                    div.id = '__gls_result';
+                    div.style.display = 'none';
+                    document.body.appendChild(div);
+                }}
+                // Split into chunks to avoid AppleScript return-value limits
+                const chunkSize = {CHUNK};
+                const n = Math.ceil(text.length / chunkSize);
+                for (let c = 0; c < n; c++) {{
+                    let cd = document.createElement('div');
+                    cd.id = '__gls_chunk_' + c;
+                    cd.style.display = 'none';
+                    cd.textContent = text.substring(c * chunkSize, (c + 1) * chunkSize);
+                    document.body.appendChild(cd);
+                }}
+                div.setAttribute('data-chunks', n);
+                div.setAttribute('data-done', '1');
+            }} catch(e) {{
+                let div = document.getElementById('__gls_result');
+                if (!div) {{
+                    div = document.createElement('div');
+                    div.id = '__gls_result';
+                    div.style.display = 'none';
+                    document.body.appendChild(div);
+                }}
+                div.setAttribute('data-error', e.message);
+                div.setAttribute('data-done', '1');
+            }}
+        }})();
+        """
+        run_js_by_idx(tab_idx, js_fetch, timeout=15)
+
+        print("  Downloading CSV...")
+        # Poll for data-done
+        deadline = time.time() + 90
+        done = False
+        while time.time() < deadline:
+            result = run_js_by_idx(
+                tab_idx,
+                "(document.getElementById('__gls_result')||{}).getAttribute('data-done')",
+                timeout=10
+            )
+            if result and result.strip() == '1':
+                done = True
+                break
+            time.sleep(1)
+
+        if not done:
+            print("  Timeout waiting for GLS CSV download — skipping")
+            return
+
+        # Check for error
+        err = run_js_by_idx(
+            tab_idx,
+            "(document.getElementById('__gls_result')||{}).getAttribute('data-error')",
+            timeout=10
+        )
+        if err and err.strip() not in ('', 'null', 'undefined'):
+            print(f"  GLS Tableau fetch error: {err.strip()}")
+            return
+
+        # Read chunk count
+        n_chunks_raw = run_js_by_idx(
+            tab_idx,
+            "(document.getElementById('__gls_result')||{}).getAttribute('data-chunks')",
+            timeout=10
+        )
+        try:
+            n_chunks = int((n_chunks_raw or '').strip())
+        except (ValueError, TypeError):
+            print(f"  Could not read chunk count: {n_chunks_raw!r} — skipping")
+            return
+
+        parts = []
+        for c in range(n_chunks):
+            chunk = run_js_by_idx(
+                tab_idx,
+                f"(document.getElementById('__gls_chunk_{c}')||{{textContent:''}}).textContent",
+                timeout=15
+            )
+            parts.append(chunk or '')
+            if (c + 1) % 5 == 0:
+                print(f"    chunk {c+1}/{n_chunks}")
+
+        csv_text = ''.join(parts)
+
+        out = os.path.join(OUTPUT_DIR, "portfolio_gls.csv")
+        with open(out, 'w', encoding='utf-8') as f:
+            f.write(csv_text)
+        print(f"  Saved: {out}  ({len(csv_text):,} chars)")
+
+        # Clean up holder divs
+        run_js_by_idx(
+            tab_idx,
+            "document.querySelectorAll('[id^=__gls_]').forEach(d => d.remove())",
+            timeout=5
+        )
+
+    finally:
+        if opened_new_tab:
+            close_tab_by_idx(tab_idx)
+
+
+def wait_for_load_by_idx(tab_idx, timeout=30):
+    """Wait for readyState == 'complete' on a tab identified by index."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        state = run_js_by_idx(tab_idx, "document.readyState", timeout=10)
+        if state == 'complete':
+            return True
+        time.sleep(1)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -455,4 +629,5 @@ if __name__ == "__main__":
     fetch_sharepoint()
     fetch_smartsheet()
     fetch_roster_dashboards()
+    fetch_gls_tableau()
     print("\nDone.")

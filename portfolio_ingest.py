@@ -36,6 +36,7 @@ _db_module.DB_PATH = _find_db_path()
 XLSX_PATH   = os.path.expanduser("~/Downloads/portfolio_sharepoint.xlsx")
 TSV_PATH    = os.path.expanduser("~/Downloads/portfolio_smartsheet.tsv")
 ROSTER_PATH = os.path.expanduser("~/Downloads/portfolio_roster.tsv")
+GLS_PATH    = os.path.expanduser("~/Downloads/portfolio_gls.csv")
 SCORING_2025_PATH = os.path.expanduser(
     "~/committees/nu-docs/Programs/Program review/Program review 2025/"
     "Graduate Program Scoring-Boston-for WM-9-16-25.xlsx"
@@ -373,11 +374,11 @@ def _match_scoring_2025(scoring_entries, portfolio_norm_key):
 
 
 # ---------------------------------------------------------------------------
-# Parse GLS Roster of Record TSV
+# Parse SVT Roster of Record TSV
 # ---------------------------------------------------------------------------
 
 def parse_roster(path=ROSTER_PATH):
-    """Parse the roster TSV produced by fetch_portfolio_data.fetch_roster_dashboards().
+    """Parse the SVT roster TSV produced by fetch_portfolio_data.fetch_roster_dashboards().
 
     Each line: source_name \\t source_type \\t program_name \\t col5_value \\t
                col5_label \\t status \\t sub_status \\t proposal_type \\t launch_date
@@ -439,13 +440,66 @@ def parse_roster(path=ROSTER_PATH):
                 'program_name':       prog_name,
                 'campus':             campus,
                 'college':            college,
-                'roster_status':      status,
+                'svt_status':         status,
                 'roster_sub_status':  sub_status,
                 'roster_proposal_type': proposal,
                 'roster_launch_date': launch_date,
             })
 
     return programs
+
+
+# ---------------------------------------------------------------------------
+# Parse GLS Tableau CSV
+# ---------------------------------------------------------------------------
+
+def parse_gls(path=GLS_PATH):
+    """Parse the Tableau CSV downloaded from the GLS Program Detail view.
+
+    The CSV is expected to have at minimum:
+      - A column whose header contains "program" (case-insensitive) → program name
+      - A column whose header equals "Status" exactly → status string
+
+    Returns a dict {_norm(program_name): status_string}.
+    Gracefully returns {} when the file is missing or unparseable.
+    """
+    if not os.path.exists(path):
+        return {}
+
+    import csv
+    result = {}
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames is None:
+                return {}
+
+            # Find name column (contains "program", case-insensitive)
+            name_col = None
+            status_col = None
+            for field in reader.fieldnames:
+                if name_col is None and 'program' in field.lower():
+                    name_col = field
+                if status_col is None and field == 'Status':
+                    status_col = field
+
+            if not name_col or not status_col:
+                print(f"  GLS CSV: could not find required columns in {reader.fieldnames}")
+                return {}
+
+            for row in reader:
+                name = row.get(name_col, '').strip()
+                status = row.get(status_col, '').strip()
+                if not name:
+                    continue
+                key = _norm(name)
+                if key and key not in result:
+                    result[key] = status
+    except Exception as e:
+        print(f"  GLS CSV parse error: {e}")
+        return {}
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1011,7 +1065,7 @@ def _find_cim(name, campus, cim_index):
 # Merge and ingest
 # ---------------------------------------------------------------------------
 
-def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
+def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_path=GLS_PATH):
     """Seed from CIM active programs, overlay OTP/IPD/Roster tracking data."""
     from database import replace_all_portfolio_programs
 
@@ -1022,6 +1076,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     otp_rows     = parse_otp(xlsx_path)
     ipd_rows     = parse_smartsheet(tsv_path)
     roster_rows  = parse_roster(roster_path)
+    gls_data     = parse_gls(gls_path)
     cim_index    = _build_cim_index(cim_programs)
 
     now = datetime.now().isoformat()
@@ -1031,8 +1086,9 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         'otp_market_signal': '', 'otp_internal_performance': '',
         'otp_q3_status': '', 'otp_effective_term': '',
         'ipd_status': '', 'ipd_proposal_type': '', 'ipd_additional_college': '',
-        'roster_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
+        'svt_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
         'roster_launch_date': '',
+        'gls_status': '',
         'concentration_of': '',
         'concentrations_json': '',
         'market_2025': '',
@@ -1178,8 +1234,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
                         'cim_completion_date': '',
                     })
             row = unified[pid]
-        if not row.get('roster_status'):
-            row['roster_status']        = p['roster_status']
+        if not row.get('svt_status'):
+            row['svt_status']           = p['svt_status']
             row['roster_sub_status']    = p['roster_sub_status']
             row['roster_proposal_type'] = p['roster_proposal_type']
             row['roster_launch_date']   = p['roster_launch_date']
@@ -1252,6 +1308,22 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
         print(f"  2025 scoring: {len(scoring_entries)} entries, {matched_scoring} matched, {new_from_scoring} new Boston rows added")
     else:
         print(f"  2025 scoring: file not found, skipping ({SCORING_2025_PATH})")
+
+    # ── Step 4.6: Overlay GLS Tableau data ──────────────────────────────────
+    if gls_data:
+        n_gls_matched = 0
+        for row in unified.values():
+            name = row.get('program_name') or ''
+            # Try with campus parenthetical stripped first, then full name
+            stripped = re.sub(r'\s*\([^)]*\)\s*$', '', name)
+            status = (gls_data.get(_norm(stripped))
+                      or gls_data.get(_norm(name)))
+            if status:
+                row['gls_status'] = status
+                n_gls_matched += 1
+        print(f"  GLS Tableau: {len(gls_data)} entries loaded, {n_gls_matched} matched")
+    else:
+        print(f"  GLS Tableau: file not found or empty, skipping ({GLS_PATH})")
 
     # ── Step 5: Clean up college and campus values ───────────────────────────
     for row in unified.values():
@@ -1526,6 +1598,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     n_otp    = len(otp_rows)
     n_ipd    = len(ipd_rows)
     n_roster = len(roster_rows)
+    n_gls    = len(gls_data)
     n_otp_matched    = sum(1 for p in otp_rows    if _find_cim(p['_norm_name'], p['campus'], cim_index))
     n_ipd_matched    = sum(1 for p in ipd_rows    if _find_cim(p['program_name'], '', cim_index))
     n_roster_matched = sum(1 for p in roster_rows if _find_cim(p['program_name'], p['campus'], cim_index))
@@ -1535,7 +1608,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH):
     print(f"  Completed inactivations linked: {n_inact_linked}")
     print(f"  OTP: {n_otp} ({n_otp_matched} matched to CIM, {n_otp - n_otp_matched} unmatched)")
     print(f"  IPD: {n_ipd} ({n_ipd_matched} matched to CIM, {n_ipd - n_ipd_matched} unmatched)")
-    print(f"  Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
+    print(f"  SVT Roster: {n_roster} ({n_roster_matched} matched to CIM, {n_roster - n_roster_matched} unmatched)")
+    print(f"  GLS Tableau: {n_gls} entries loaded")
     print(f"  Concentrations: {n_conc_total} detected, {n_explicit} explicit + {n_linked} regex-linked to parent ({n_synthetic} synthetic parents created)")
     if n_college_recovered:
         print(f"  Colleges recovered from CIM: {n_college_recovered}")
