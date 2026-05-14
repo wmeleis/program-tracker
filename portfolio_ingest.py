@@ -453,53 +453,107 @@ def parse_roster(path=ROSTER_PATH):
 # Parse GLS Tableau CSV
 # ---------------------------------------------------------------------------
 
+# Known degree abbreviations that can appear as the first token in GLS names
+_GLS_DEGREES = {
+    'MS', 'PhD', 'MA', 'MBA', 'MFA', 'MPH', 'MPS', 'MEd', 'MArch', 'MSW',
+    'DNP', 'DPT', 'PharmD', 'JD', 'LLM', 'CAGS', 'CERTG', 'BS', 'BA', 'BFA',
+    'BArch', 'BM', 'EdD', 'DPS', 'DMSc', 'MSCP', 'MSIS', 'MSCS', 'MSECE',
+    'MSCivE', 'MSCIVE', 'MSDS', 'MSML', 'MSME', 'MHI', 'MPA', 'MPP', 'MRED',
+    'MSBA', 'MSIT', 'MEM', 'MIS', 'MHA',
+}
+_STOP = {'', 'and', 'the', 'of', 'in', 'for', 'a', 'an', 'at', 'to', 'with',
+         'science', 'studies', 'arts', 'management'}
+
+
+def _gls_key_words(s):
+    """Return a frozenset of meaningful words from a string, for GLS matching."""
+    return frozenset(w for w in re.split(r'[\W_]+', s.lower()) if w and w not in _STOP)
+
+
 def parse_gls(path=GLS_PATH):
-    """Parse the Tableau CSV downloaded from the GLS Program Detail view.
+    """Parse the Tableau GLS CSV into a list of structured entry dicts.
 
-    The CSV is expected to have at minimum:
-      - A column whose header contains "program" (case-insensitive) → program name
-      - A column whose header equals "Status" exactly → status string
-
-    Returns a dict {_norm(program_name): status_string}.
-    Gracefully returns {} when the file is missing or unparseable.
+    GLS uses "DEGREE Subject" name format; portfolio uses "Subject, DEGREE".
+    Returns list of {degree, subject_words, campus, status, raw_name}.
+    Returns [] when the file is missing or unparseable.
     """
     if not os.path.exists(path):
-        return {}
+        return []
 
     import csv
-    result = {}
+    entries = []
     try:
         with open(path, encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
-            if reader.fieldnames is None:
-                return {}
-
-            # Find name column (contains "program", case-insensitive)
-            name_col = None
-            status_col = None
-            for field in reader.fieldnames:
-                if name_col is None and 'program' in field.lower():
-                    name_col = field
-                if status_col is None and field == 'Status':
-                    status_col = field
-
-            if not name_col or not status_col:
-                print(f"  GLS CSV: could not find required columns in {reader.fieldnames}")
-                return {}
-
+            if not reader.fieldnames:
+                return []
             for row in reader:
-                name = row.get(name_col, '').strip()
-                status = row.get(status_col, '').strip()
-                if not name:
+                raw_name = (row.get('Program') or '').strip()
+                status   = (row.get('Status')  or '').strip()
+                campus   = (row.get('Campus')  or '').strip()
+                if not raw_name or not status:
                     continue
-                key = _norm(name)
-                if key and key not in result:
-                    result[key] = status
+                tokens = raw_name.split()
+                if tokens and tokens[0].upper() in _GLS_DEGREES:
+                    degree = tokens[0].upper()
+                    subj   = ' '.join(tokens[1:])
+                else:
+                    degree = ''
+                    subj   = raw_name
+                entries.append({
+                    'degree':        degree,
+                    'subject_words': _gls_key_words(subj),
+                    'campus':        campus,
+                    'status':        status,
+                    'raw_name':      raw_name,
+                })
     except Exception as e:
         print(f"  GLS CSV parse error: {e}")
-        return {}
+        return []
+    return entries
 
-    return result
+
+def _match_gls(program_name, program_campus, gls_entries):
+    """Return GLS status for a portfolio program, or '' if no match found.
+
+    Matches by: degree abbreviation + subject word overlap (Jaccard ≥ 0.45)
+    + campus alignment (Boston entries match Boston-or-blank portfolio entries).
+    """
+    # Extract degree from "Subject, DEGREE [— Suffix] (Campus)" format
+    deg_m = re.search(r',\s*([A-Za-z]{2,10}(?:[A-Za-z]+)?)\s*(?:—.*)?(?:\([^)]*\))?\s*$',
+                      program_name)
+    port_degree = deg_m.group(1).upper() if deg_m else ''
+
+    # Extract subject (before the first comma, strip campus parenthetical)
+    subj_part = re.sub(r'\([^)]*\)', '', program_name.split(',')[0]).strip()
+    port_words = _gls_key_words(subj_part)
+    if not port_words:
+        return ''
+
+    # Infer campus from name parenthetical if program_campus is blank
+    camp_m = re.search(r'\(([^)]+)\)', program_name)
+    port_campus = program_campus or (camp_m.group(1) if camp_m else 'Boston')
+
+    best_score, best_status = 0.0, ''
+    for e in gls_entries:
+        # Campus check: GLS Boston entries only match Boston portfolio programs
+        gls_campus = e['campus'] or 'Boston'
+        if gls_campus != port_campus:
+            continue
+
+        # Degree check: if both have a degree, they must agree
+        if e['degree'] and port_degree and e['degree'] != port_degree:
+            continue
+
+        sw = e['subject_words']
+        if not sw:
+            continue
+        jaccard = len(port_words & sw) / len(port_words | sw)
+        if jaccard > best_score:
+            best_score  = jaccard
+            best_status = e['status']
+
+    return best_status if best_score >= 0.45 else ''
 
 
 # ---------------------------------------------------------------------------
@@ -1313,11 +1367,11 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     if gls_data:
         n_gls_matched = 0
         for row in unified.values():
-            name = row.get('program_name') or ''
-            # Try with campus parenthetical stripped first, then full name
-            stripped = re.sub(r'\s*\([^)]*\)\s*$', '', name)
-            status = (gls_data.get(_norm(stripped))
-                      or gls_data.get(_norm(name)))
+            status = _match_gls(
+                row.get('program_name') or '',
+                row.get('campus') or '',
+                gls_data,
+            )
             if status:
                 row['gls_status'] = status
                 n_gls_matched += 1

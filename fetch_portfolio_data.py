@@ -28,8 +28,7 @@ BROWSER_APP = os.environ.get("BROWSER_APP", "Google Chrome")
 SHAREPOINT_URL = "https://northeastern-my.sharepoint.com/:x:/r/personal/g_wahhab_northeastern_edu/Documents/Optimization,%20Withdrawal,%20and%20Deactivation%20Tracker.xlsx?d=w8de2224c326e4b8eb46cdbc819a6ff9d&csf=1&web=1&e=DblQiu"
 SMARTSHEET_URL = "https://app.smartsheet.com/b/publish?EQBCT=65a022ed48d94beea1d54ef5b933fc48"
 GLS_ROSTER_HUB = "https://app.smartsheet.com/b/publish?EQBCT=547ce640b5bf44809634971051a0bf62"
-GLS_TABLEAU_URL = "https://tableau.northeastern.edu/views/ProgramOptimazationDeactivationWithdrawal/ProgramDetail.csv"
-GLS_TABLEAU_FRAGMENT = "tableau.northeastern.edu"
+TABLEAU_PAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'tableau_pat.json')
 
 # Sub-dashboard tokens extracted from the GLS hub config API
 _CAMPUS_DASHBOARDS = {
@@ -453,159 +452,100 @@ def fetch_roster_dashboards():
 # ---------------------------------------------------------------------------
 
 def fetch_gls_tableau():
-    """Download the GLS Program Detail CSV from Tableau via the logged-in Chrome session.
+    """Download the GLS Program Detail CSV from Tableau using the REST API + PAT.
 
-    Fetches https://tableau.northeastern.edu/views/ProgramOptimazationDeactivationWithdrawal/ProgramDetail.csv
-    using a Chrome tab that is already authenticated to Northeastern SSO.
-    The response is plain CSV text; it is saved to ~/Downloads/portfolio_gls.csv.
-
-    Uses any existing tab whose URL contains 'tableau.northeastern.edu'.
-    If no such tab exists, opens one temporarily and closes it after the fetch.
+    Credentials are read from data/tableau_pat.json (gitignored).
+    No browser required — pure Python urllib requests.
+    Saves to ~/Downloads/portfolio_gls.csv.
     """
+    import requests as _requests
+
     print("\n--- GLS Tableau CSV ---")
-    CHUNK = 200000  # characters per polling chunk
 
-    # Check for an existing Tableau tab
-    check_script = f'''tell application "{BROWSER_APP}"
-        set tabIdx to 0
-        repeat with i from 1 to count of tabs of window 1
-            if (URL of tab i of window 1) contains "{GLS_TABLEAU_FRAGMENT}" then
-                set tabIdx to i
-                exit repeat
-            end if
-        end repeat
-        return tabIdx as text
-    end tell'''
-    r = subprocess.run(['osascript', '-e', check_script], capture_output=True, text=True, timeout=10)
+    # Load PAT credentials
+    pat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'tableau_pat.json')
+    if not os.path.exists(pat_path):
+        print(f"  No credentials file at {pat_path} — skipping")
+        return
+    with open(pat_path) as f:
+        creds = json.load(f)
+
+    server       = creds['server'].rstrip('/')
+    site_name    = creds['site']
+    token_name   = creds['token_name']
+    token_secret = creds['token_secret']
+
+    api_ver = '3.24'   # Tableau Server 2025.1
+
+    sess = _requests.Session()
+    sess.headers.update({'Content-Type': 'application/json', 'Accept': 'application/json'})
+
+    def _req(method, url, body=None, token=None, accept=None, timeout=60):
+        if accept:
+            sess.headers['Accept'] = accept
+        if token:
+            sess.headers['X-Tableau-Auth'] = token
+        resp = sess.request(method, url, json=body, timeout=timeout)
+        return resp.status_code, resp.content
+
+    # Step 1 — sign in with PAT
+    signin_url = f"{server}/api/{api_ver}/auth/signin"
+    status, raw = _req('POST', signin_url, body={
+        'credentials': {
+            'personalAccessTokenName': token_name,
+            'personalAccessTokenSecret': token_secret,
+            'site': {'contentUrl': site_name},
+        }
+    })
+    if status != 200:
+        print(f"  Tableau sign-in failed (HTTP {status}): {raw[:200]}")
+        return
+    signin_data = json.loads(raw)
+    auth_token = signin_data['credentials']['token']
+    site_id    = signin_data['credentials']['site']['id']
+    print(f"  Signed in (site id={site_id[:8]}…)")
+
     try:
-        existing_tab_idx = int(r.stdout.strip())
-    except (ValueError, AttributeError):
-        existing_tab_idx = 0
-
-    opened_new_tab = False
-    if existing_tab_idx == 0:
-        tab_idx = open_new_tab(GLS_TABLEAU_URL)
-        if tab_idx is None:
-            print("  Could not open a new tab — skipping GLS Tableau fetch")
-            return
-        opened_new_tab = True
-        print(f"  Opened new tab {tab_idx}, waiting for page to load...")
-        wait_for_load_by_idx(tab_idx, timeout=30)
-        time.sleep(2)
-    else:
-        tab_idx = existing_tab_idx
-        print(f"  Using existing Tableau tab {tab_idx}")
-
-    try:
-        # Fetch the CSV via fetch() with credentials, store as text in a hidden div
-        js_fetch = f"""
-        (async () => {{
-            try {{
-                const resp = await fetch({json.dumps(GLS_TABLEAU_URL)}, {{credentials: 'include'}});
-                const text = await resp.text();
-                let div = document.getElementById('__gls_result');
-                if (!div) {{
-                    div = document.createElement('div');
-                    div.id = '__gls_result';
-                    div.style.display = 'none';
-                    document.body.appendChild(div);
-                }}
-                // Split into chunks to avoid AppleScript return-value limits
-                const chunkSize = {CHUNK};
-                const n = Math.ceil(text.length / chunkSize);
-                for (let c = 0; c < n; c++) {{
-                    let cd = document.createElement('div');
-                    cd.id = '__gls_chunk_' + c;
-                    cd.style.display = 'none';
-                    cd.textContent = text.substring(c * chunkSize, (c + 1) * chunkSize);
-                    document.body.appendChild(cd);
-                }}
-                div.setAttribute('data-chunks', n);
-                div.setAttribute('data-done', '1');
-            }} catch(e) {{
-                let div = document.getElementById('__gls_result');
-                if (!div) {{
-                    div = document.createElement('div');
-                    div.id = '__gls_result';
-                    div.style.display = 'none';
-                    document.body.appendChild(div);
-                }}
-                div.setAttribute('data-error', e.message);
-                div.setAttribute('data-done', '1');
-            }}
-        }})();
-        """
-        run_js_by_idx(tab_idx, js_fetch, timeout=15)
-
-        print("  Downloading CSV...")
-        # Poll for data-done
-        deadline = time.time() + 90
-        done = False
-        while time.time() < deadline:
-            result = run_js_by_idx(
-                tab_idx,
-                "(document.getElementById('__gls_result')||{}).getAttribute('data-done')",
-                timeout=10
-            )
-            if result and result.strip() == '1':
-                done = True
-                break
-            time.sleep(1)
-
-        if not done:
-            print("  Timeout waiting for GLS CSV download — skipping")
-            return
-
-        # Check for error
-        err = run_js_by_idx(
-            tab_idx,
-            "(document.getElementById('__gls_result')||{}).getAttribute('data-error')",
-            timeout=10
+        # Step 2 — find the view by workbook/view name
+        view_url = (
+            f"{server}/api/{api_ver}/sites/{site_id}/views"
+            f"?filter=viewUrlName:eq:ProgramDetail"
         )
-        if err and err.strip() not in ('', 'null', 'undefined'):
-            print(f"  GLS Tableau fetch error: {err.strip()}")
+        status, raw = _req('GET', view_url, token=auth_token)
+        if status != 200:
+            print(f"  Could not list views (HTTP {status}): {raw[:200]}")
             return
-
-        # Read chunk count
-        n_chunks_raw = run_js_by_idx(
-            tab_idx,
-            "(document.getElementById('__gls_result')||{}).getAttribute('data-chunks')",
-            timeout=10
+        views_data = json.loads(raw)
+        views = views_data.get('views', {}).get('view', [])
+        if not views:
+            print("  No view named 'ProgramDetail' found — skipping")
+            return
+        # Pick the one in the right workbook
+        view = next(
+            (v for v in views
+             if 'ProgramOptimazationDeactivationWithdrawal' in v.get('contentUrl', '')),
+            views[0]
         )
-        try:
-            n_chunks = int((n_chunks_raw or '').strip())
-        except (ValueError, TypeError):
-            print(f"  Could not read chunk count: {n_chunks_raw!r} — skipping")
+        view_id = view['id']
+        print(f"  Found view: {view.get('name')} (id={view_id[:8]}…)")
+
+        # Step 3 — download CSV data (Tableau renders the view server-side; allow 120s)
+        data_url = f"{server}/api/{api_ver}/sites/{site_id}/views/{view_id}/data"
+        status, raw = _req('GET', data_url, token=auth_token, accept='*/*', timeout=120)
+        if status != 200:
+            print(f"  CSV download failed (HTTP {status}): {raw[:200]}")
             return
-
-        parts = []
-        for c in range(n_chunks):
-            chunk = run_js_by_idx(
-                tab_idx,
-                f"(document.getElementById('__gls_chunk_{c}')||{{textContent:''}}).textContent",
-                timeout=15
-            )
-            parts.append(chunk or '')
-            if (c + 1) % 5 == 0:
-                print(f"    chunk {c+1}/{n_chunks}")
-
-        csv_text = ''.join(parts)
-
+        csv_text = raw.decode('utf-8-sig')  # strip BOM if present
         out = os.path.join(OUTPUT_DIR, "portfolio_gls.csv")
         with open(out, 'w', encoding='utf-8') as f:
             f.write(csv_text)
-        print(f"  Saved: {out}  ({len(csv_text):,} chars)")
-
-        # Clean up holder divs
-        run_js_by_idx(
-            tab_idx,
-            "document.querySelectorAll('[id^=__gls_]').forEach(d => d.remove())",
-            timeout=5
-        )
+        lines = csv_text.count('\n')
+        print(f"  Saved: {out}  ({lines} rows, {len(csv_text):,} chars)")
 
     finally:
-        if opened_new_tab:
-            close_tab_by_idx(tab_idx)
+        # Sign out
+        signout_url = f"{server}/api/{api_ver}/auth/signout"
+        _req('POST', signout_url, token=auth_token)
 
 
 def wait_for_load_by_idx(tab_idx, timeout=30):
