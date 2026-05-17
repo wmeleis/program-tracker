@@ -754,6 +754,9 @@ _PORTFOLIO_RENAME = {
         ('Data Science, MS', 'Coll of Arts, Media & Design', 'Boston'),
     'Data Science - Health Data concentration, MS':
         ('Data Science, MS', 'Office of the Provost', 'Boston'),
+    # "MS in AI (New COE Concentration in ...)" stripped → "AI, MS" → map to canonical
+    'AI, MS':
+        ('Artificial Intelligence, MS', 'College of Engineering', ''),
     # No-college IPD/Roster entries not in CIM pipeline
     'Applied Quantum Information Science and Engineering, MS':
         ('Applied Quantum Information Science and Engineering, MS', 'Office of the Provost', 'Boston'),
@@ -809,6 +812,53 @@ def _extract_parent_name(name):
     if m:
         return f"{m.group(1).strip()}, {m.group(2).strip()}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# IPD / Roster synth-row filters
+# ---------------------------------------------------------------------------
+
+# Non-program entries that should never be added as synth portfolio rows.
+# Matches names that are initiatives, non-credit offerings, badges, pilots, etc.
+_IPD_NON_PROGRAM_RE = re.compile(
+    r'\bworkforce\s+re.?entr\w*\b'
+    r'|\bboot\s*camp\b'
+    r'|\bbadge\b'
+    r'|\bchaplain\b'
+    r'|\blead\s+by\s+learning\b'
+    r'|\bnon.?credit\b'
+    r'|\bpre.?college\b'
+    r'|\bpre.?nursing\b'
+    r'|\bprior\s+learning\s+assessment\b'
+    r'|\bpilot\s+program\b'
+    r'|\bexpansion\s+to\b'
+    r'|\bglobal\s+leadership\s+summit\b'
+    r'|\bcps\s+graduate\s+degrees?\b'
+    r'|\benergy\s+workforce\b'
+    r'|\bconverted\s+to\s+fully\s+online\b'
+    r'|\bapprentice\b'
+    r'|\bai\s+for\s+workforce\b'
+    r'|\bcultural\s+anthropology\s+(?:&|and)\s+health\b',
+    re.I
+)
+
+# Only IPD entries whose normalized name ends with a recognized degree / credential
+# suffix are eligible to be added as new synth portfolio rows.
+_RECOGNIZED_DEGREE_SUFFIX_RE = re.compile(
+    r',\s*(?:ms|ma|mps|mpa|mph|mba|mfa|med|mem|march|mdes|mscs|msis|msor|msfmba|msece|'
+    r'msene|mssbs|dnp|dpt|dmsc|edd|phd|jd|llm|dlp|bs|ba|bfa|barch|bsn|bsba|bscf|'
+    r'certg?|mat|mbe|mscp|msld|msem|msme|mscive|msml|msba|dmsc|dps|march|mred|'
+    r'graduate\s+certificate|half\s+major)\s*(?:\(.*\))?\s*$',
+    re.I
+)
+
+# "X Concentration in the MS/MA/etc in Y (Campus)"
+# These represent concentrations appended to an existing program — look up the
+# parent "Y, DEGREE (Campus)" in CIM instead of creating a standalone row.
+_CONC_IN_DEGREE_IN_RE = re.compile(
+    r'^.+?\s+Concentration\s+in\s+the\s+(MS|MA|PhD|MBA|MPS|MFA|MEd|MArch|DNP|DPT|EdD)\s+in\s+(.+)$',
+    re.I
+)
 
 
 # Concentration headings to skip — purely structural / generic
@@ -957,11 +1007,40 @@ def _normalize_non_cim_name(name):
       'Certificate in X'                         → 'X, Graduate Certificate'
       'Certificate, X'                           → 'X, Graduate Certificate'
       'CERTG-CODE : X, Graduate Certificate (Y)' → 'X, Graduate Certificate (Y)'
+      'Master of Science in X'                   → 'X, MS'
+      'Master of Arts in X'                      → 'X, MA'
     Campus suffix is stripped in all cases (it belongs in the campus field).
     """
     s = name.strip()
     # Strip leading "CODE-CODE : " prefix (e.g. "CERTG-ENGM : ")
     s = re.sub(r'^[A-Z]+-[A-Z]+\s*:\s*', '', s)
+    # "Master of Science in X" → "X, MS"  (and similar long-form degree names)
+    # Also handles inline abbreviation: "Master of Science (M.S.) in X"
+    m = re.match(r'^Masters?\s+of\s+Science\s*(?:\([^)]*\))?\s*(?:in\s+)?(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', MS'
+    m = re.match(r'^Masters?\s+of\s+Arts\s+(?:in\s+)?(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', MA'
+    m = re.match(r'^Masters?\s+of\s+(?:Public\s+)?Health\s+(?:in\s+)?(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', MPH'
+    m = re.match(r'^Masters?\s+of\s+(?:Business\s+)?Administration\s+(?:in\s+)?(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', MBA'
+    # "Bachelor of Science in X" / "Bachelor of Arts in X" → "X, BS" / "X, BA"
+    m = re.match(r'^Bachelors?\s+of\s+Science\s+(?:in\s+)?(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', BS'
+    m = re.match(r'^Bachelors?\s+of\s+Arts\s+(?:in\s+)?(.+)$', s, re.I)
+    if m:
+        rest = _strip_trailing_campus(m.group(1).strip())
+        return rest + ', BA'
     # "Graduate Certificate in X" with optional trailing campus
     m = re.match(r'^Graduate\s+Certificate\s+in\s+(.+)$', s, re.I)
     if m:
@@ -1165,6 +1244,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         'performance_score_2025': '',
         'cim_change_type': '',
         'inactivation_admission': '',
+        'proposal_stage': '',
         'last_refreshed': now,
     }
 
@@ -1224,21 +1304,81 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         if not row.get('college') and p['college']:
             row['college'] = p['college']
 
+    _ipd_added   = []  # (input_name, input_campus, norm_name, campus)
+    _ipd_skipped = []  # (input_name, input_campus, reason)
+    _roster_added = []  # (input_name, input_campus, norm_name, campus)
+
     # ── Step 3: Overlay IPD data ─────────────────────────────────────────────
     for p in ipd_rows:
-        # Extract embedded campus and normalize name (CERT/Graduate Certificate format)
-        embedded_campus = _extract_embedded_campus(p['program_name'])
-        norm_name = _normalize_non_cim_name(p['program_name'])
+        raw_name = p['program_name']
 
-        # Try CIM match: original name first, then normalized+embedded campus
-        cim = _find_cim(p['program_name'], '', cim_index)
-        if not cim and (embedded_campus or norm_name != p['program_name']):
+        # -- Non-program filter: skip entries that are clearly not degree programs --
+        if _IPD_NON_PROGRAM_RE.search(raw_name):
+            _ipd_skipped.append((raw_name, _extract_embedded_campus(raw_name), 'non-program'))
+            continue
+
+        # -- Pre-process: "X Concentration in the DEGREE in Y (Campus)" --------
+        #    E.g. "AI Concentration in the MS in Health Informatics (Charlotte)"
+        #    → overlay IPD status on parent CIM program "Health Informatics, MS (Charlotte)"
+        conc_m = _CONC_IN_DEGREE_IN_RE.match(raw_name)
+        if conc_m:
+            degree_str  = conc_m.group(1).upper()
+            parent_rest = conc_m.group(2).strip()
+            # Campus may be in parens "(Charlotte)" or as trailing ", Charlotte"
+            parent_camp = ''
+            camp_m2 = re.search(r'\(([^)]+)\)\s*$', parent_rest)
+            if camp_m2:
+                parent_camp = camp_m2.group(1)
+                parent_rest = parent_rest[:camp_m2.start()].strip()
+            else:
+                parent_camp = _extract_embedded_campus(parent_rest)
+                if parent_camp:
+                    parent_rest = _strip_trailing_campus(parent_rest)
+            parent_name = f'{parent_rest}, {degree_str}'
+            cim = _find_cim(parent_name, parent_camp, cim_index)
+            if cim:
+                pid = f"cim_{cim['cim_id']}"
+                row = unified[pid]
+                if not row.get('ipd_status'):
+                    row['ipd_status']             = p['ipd_status']
+                    row['ipd_proposal_type']      = p['ipd_proposal_type']
+                    row['ipd_additional_college'] = p['ipd_additional_college']
+                if not row.get('college') and p['ipd_college']:
+                    row['college'] = p['ipd_college']
+            else:
+                _ipd_skipped.append((raw_name, parent_camp,
+                                     f'concentration — parent "{parent_name}" not in CIM'))
+            continue
+
+        # -- Pre-process: strip "(New ... Concentration in ...)" parentheticals --
+        #    "MS in AI (New COE Concentration in High Performance and Edge AI)"
+        #    → "MS in AI" → normalize to "Artificial Intelligence, MS"
+        processed_name = re.sub(
+            r'\s*\(New\s+\w+\s+Concentration\s+in\s+[^)]+\)', '', raw_name
+        ).strip()
+
+        # Extract embedded campus and normalize name (CERT / Graduate Certificate etc.)
+        embedded_campus = _extract_embedded_campus(processed_name)
+        norm_name = _normalize_non_cim_name(processed_name)
+
+        # Try CIM match: processed name first, then normalized + embedded campus
+        cim = _find_cim(processed_name, '', cim_index)
+        if not cim and (embedded_campus or norm_name != processed_name):
             cim = _find_cim(norm_name, embedded_campus, cim_index)
 
         if cim:
             pid = f"cim_{cim['cim_id']}"
             row = unified[pid]
         else:
+            # -- Type-gate: only add synth rows for recognized degree programs.
+            #    Exception: names explicitly listed in _PORTFOLIO_RENAME are
+            #    allowed through — they'll be corrected in Step 5.6.
+            if (not _RECOGNIZED_DEGREE_SUFFIX_RE.search(norm_name)
+                    and norm_name not in _PORTFOLIO_RENAME):
+                _ipd_skipped.append((raw_name, embedded_campus or '',
+                                     f'no recognized degree suffix ({norm_name})'))
+                continue
+
             store_campus = embedded_campus or 'Boston'
             pid = _make_id(norm_name, store_campus)
             if pid not in unified:
@@ -1251,6 +1391,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     'cim_step':       '',
                     'cim_completion_date': '',
                 })
+                _ipd_added.append((raw_name, embedded_campus or '', norm_name, store_campus))
             row = unified[pid]
         if not row.get('ipd_status'):
             row['ipd_status']             = p['ipd_status']
@@ -1301,6 +1442,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                         'cim_step':       '',
                         'cim_completion_date': '',
                     })
+                    _roster_added.append((p['program_name'], p['campus'] or '', norm_name, p['campus'] or 'Boston'))
             row = unified[pid]
         if not row.get('svt_status'):
             row['svt_status']           = p['svt_status']
@@ -1471,6 +1613,32 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             row['id'] = new_pid
             del unified[pid]
             unified[new_pid] = row
+
+    # ── Step 5.7: Dedup — remove non-CIM rows shadowed by a CIM row ───────────
+    # After renaming, a non-CIM row might now share name+campus with a CIM row
+    # (e.g. "AI, MS" → renamed to "Artificial Intelligence, MS" which already has
+    # a cim_XXX entry).  Remove the non-CIM duplicate; the CIM row is authoritative
+    # and already has any IPD tracking data overlaid in Step 3.
+    def _dedup_key(row):
+        """Name (campus stripped from parens) + campus, both lowercased."""
+        name_bare = re.sub(r'\s*\([^)]*\)\s*$', '', row.get('program_name') or '').strip()
+        campus = (row.get('campus') or 'Boston').strip().lower()
+        return (_norm(name_bare), campus)
+
+    _cim_name_campus = {}
+    for pid, row in unified.items():
+        if pid.startswith('cim_'):
+            _cim_name_campus[_dedup_key(row)] = pid
+    _n_deduped = 0
+    for pid in list(unified):
+        if pid not in unified or pid.startswith('cim_') or pid.startswith('synth_'):
+            continue
+        row = unified[pid]
+        if _dedup_key(row) in _cim_name_campus:
+            del unified[pid]
+            _n_deduped += 1
+    if _n_deduped:
+        print(f"  Deduped {_n_deduped} non-CIM rows merged into matching CIM entries")
 
     # ── Step 6: Link concentrations to parent programs ───────────────────────
     # Build a name→id index over all unified rows for parent lookup.
@@ -1686,6 +1854,33 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     print(f"  Concentrations: {n_conc_total} detected, {n_explicit} explicit + {n_linked} regex-linked to parent ({n_synthetic} synthetic parents created)")
     if n_college_recovered:
         print(f"  Colleges recovered from CIM: {n_college_recovered}")
+
+    # Write portfolio_mismatches.json for the Console UI
+    _mismatch_file = os.path.join(os.path.dirname(_find_db_path()), 'portfolio_mismatches.json')
+    try:
+        import json as _json
+        _mismatch_data = {
+            'updated_at': now,
+            'ipd_added': [
+                {'input_name': inp, 'input_campus': inp_c, 'name': n, 'campus': c}
+                for inp, inp_c, n, c in sorted(_ipd_added, key=lambda x: x[2])
+            ],
+            'ipd_skipped': [
+                {'input_name': inp, 'input_campus': inp_c, 'reason': reason}
+                for inp, inp_c, reason in sorted(_ipd_skipped, key=lambda x: x[0])
+            ],
+            'roster_added': [
+                {'input_name': inp, 'input_campus': inp_c, 'name': n, 'campus': c}
+                for inp, inp_c, n, c in sorted(_roster_added, key=lambda x: x[2])
+            ],
+            'ipd_redesigns': [],
+            'mismatches': [],
+        }
+        with open(_mismatch_file, 'w') as _f:
+            _json.dump(_mismatch_data, _f, indent=2)
+    except Exception as _e:
+        print(f"  Warning: could not write portfolio_mismatches.json: {_e}")
+
     return len(rows)
 
 
