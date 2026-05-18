@@ -3179,24 +3179,42 @@ setInterval(() => {
 // ==================== Portfolio view ====================
 
 const PORTFOLIO_COLUMNS = [
-    {key: 'degree',       label: 'Degree'},
-    {key: 'college',      label: 'College'},
-    {key: 'campus',       label: 'Campus'},
-    {key: 'market2025',      label: '2025 Market Category'},
-    {key: 'perf2025',        label: '2025 Performance Category'},
-    {key: 'marketscore2025', label: '2025 Market Score'},
-    {key: 'perfscore2025',   label: '2025 Performance Score'},
-    {key: 'otp',          label: 'OTP Status'},
-    {key: 'ipd',          label: 'IPD Status'},
-    {key: 'svt',          label: 'SVT Status'},
-    {key: 'gls',          label: 'GLS Status'},
-    {key: 'launch',       label: 'Launch Date'},
-    {key: 'cim',          label: 'CIM Step'},
-    {key: 'cimchange',    label: 'CIM Change'},
-    {key: 'inworkflow',   label: 'In Workflow'},
-    {key: 'inactadmit',  label: 'Inactivation of Admission'},
-    {key: 'inacttoday',  label: 'Admitting Today'},
-    {key: 'notes',        label: 'Notes'},
+    {key: 'degree',       label: 'Degree',
+        help: 'Degree level (BS / MS / PhD / Certificate / Minor / PlusOne / Concentration / Dual). Detected from the program name and CIM degree code.'},
+    {key: 'college',      label: 'College',
+        help: 'Owning college. From CIM XML for tracked programs; SVT/IPD-supplied values are normalized to the canonical CIM name so duplicates and abbreviations are merged.'},
+    {key: 'campus',       label: 'Campus',
+        help: 'Deployment campus. All online variants (Online, Primarily Online, "Online - Vancouver Requirements", etc.) are merged into a single "Online" campus.'},
+    {key: 'market2025',      label: '2025 Market Category',
+        help: 'Market category from the 2025 portfolio scoring workbook (Boston programs only).'},
+    {key: 'perf2025',        label: '2025 Performance Category',
+        help: 'Performance category from the 2025 portfolio scoring workbook (Boston programs only).'},
+    {key: 'marketscore2025', label: '2025 Market Score',
+        help: 'Numeric market score from the 2025 portfolio scoring workbook (Boston programs only).'},
+    {key: 'perfscore2025',   label: '2025 Performance Score',
+        help: 'Numeric performance score from the 2025 portfolio scoring workbook (Boston programs only).'},
+    {key: 'otp',          label: 'OTP Status',
+        help: 'Status from the "OTP Program Tracking" sheet of the Optimization, Withdrawal, and Deactivation Tracker (Boston-only; being deprecated).'},
+    {key: 'ipd',          label: 'IPD Status',
+        help: 'Development status from the IPD Smartsheet (e.g. "Approved for Development by IPD"). Tracks proposals that have not yet entered CIM workflow.'},
+    {key: 'svt',          label: 'SVT Status',
+        help: 'Roster of Record status from the GLS/SVT Smartsheet (e.g. Active, Launching, Inactivating).'},
+    {key: 'gls',          label: 'GLS Status',
+        help: 'Per-campus status from the GLS Tableau dashboard (campus deployment health).'},
+    {key: 'launch',       label: 'Launch Date',
+        help: 'Planned launch date from the SVT/GLS Roster of Record.'},
+    {key: 'cim',          label: 'CIM Step',
+        help: 'Current CourseLeaf CIM workflow step (the review role currently holding the proposal). Blank when the program is not in active workflow.'},
+    {key: 'cimchange',    label: 'CIM Change',
+        help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
+    {key: 'inworkflow',   label: 'In Workflow',
+        help: 'Yes if the program currently has an active CIM workflow step; otherwise blank.'},
+    {key: 'inactadmit',  label: 'Inactivation of Admission',
+        help: 'Term beginning when the program will no longer admit new students (from CIM’s inactivation proposal fields).'},
+    {key: 'inacttoday',  label: 'Admitting Today',
+        help: 'Yes if the program is admitting students this term, No if its Inactivation of Admission term has already started.'},
+    {key: 'notes',        label: 'Notes',
+        help: 'Free-form notes from the source feeds (CIM justification, IPD comments, etc.).'},
 ];
 
 function _loadPortfolioCols() {
@@ -3720,19 +3738,23 @@ function renderPortfolioTable() {
         portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
     });
 
+    const _help = (text) => text
+        ? `<span class="col-help" title="${escapeHtml(text)}" onclick="event.stopPropagation()">&#9432;</span>`
+        : '';
     const visibleHeaders = PORTFOLIO_COLUMNS
         .filter(c => portfolioVisibleCols.has(c.key))
         .map(c => {
             const active = portfolioSortKey === c.key;
             const arrow = active ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
-            return `<th class="sortable-header${active ? ' sort-active' : ''}" onclick="sortPortfolioBy('${c.key}')">${c.label}${arrow}</th>`;
+            return `<th class="sortable-header${active ? ' sort-active' : ''}" onclick="sortPortfolioBy('${c.key}')">${escapeHtml(c.label)}${_help(c.help)}${arrow}</th>`;
         }).join('');
     const nameArrow = (!portfolioSortKey || portfolioSortKey === 'name') ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
     const nameActive = !portfolioSortKey || portfolioSortKey === 'name';
+    const nameHelp = _help('Canonical program name from CIM. Combined-major and concentration rows are nested under their parent and revealed with the expand caret.');
     container.innerHTML = `
         <table class="program-table">
             <thead><tr>
-                <th class="sortable-header${nameActive ? ' sort-active' : ''}" onclick="sortPortfolioBy('name')">Program${nameArrow}</th>
+                <th class="sortable-header${nameActive ? ' sort-active' : ''}" onclick="sortPortfolioBy('name')">Program${nameHelp}${nameArrow}</th>
                 ${visibleHeaders}
             </tr></thead>
             <tbody>${rowHtml.join('')}</tbody>

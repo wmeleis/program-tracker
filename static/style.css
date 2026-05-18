@@ -84,7 +84,7 @@ header h1 {
     font-weight: 500;
 }
 
-#scan-btn {
+#scan-btn, #console-btn {
     background: var(--accent);
     color: white;
     border: none;
@@ -94,10 +94,11 @@ header h1 {
     font-size: 13px;
     font-weight: 500;
     transition: background 0.2s;
+    margin-left: 8px;
 }
 
-#scan-btn:hover { background: var(--accent-hover); }
-#scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+#scan-btn:hover, #console-btn:hover { background: var(--accent-hover); }
+#scan-btn:disabled, #console-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Progress Container */
 .progress-container {
@@ -293,6 +294,67 @@ header h1 {
     color: var(--accent);
 }
 
+/* Info tooltip: fixed-position overlay driven by JS (escapes overflow:hidden parents) */
+.info-tip-wrap {
+    display: inline-flex;
+    align-items: center;
+}
+.info-tip {
+    display: inline-flex;
+    align-items: center;
+}
+.tip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 10px;
+    margin-left: 2px;
+    border-radius: 50%;
+    background: rgba(100, 116, 139, 0.2);
+    color: #64748b;
+    font-size: 7px;
+    font-weight: 700;
+    font-style: normal;
+    line-height: 1;
+    cursor: default;
+    flex-shrink: 0;
+    position: relative;
+    top: -5px;
+}
+.tip-icon:hover {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--accent);
+}
+.tip-bubble { display: none; }
+#tip-overlay {
+    display: none;
+    position: fixed;
+    background: #1e293b;
+    color: #f1f5f9;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+    padding: 8px 12px;
+    border-radius: 7px;
+    white-space: normal;
+    width: 220px;
+    z-index: 99999;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    text-transform: none;
+    letter-spacing: 0;
+}
+#tip-overlay::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #1e293b;
+}
+
 /* Days at step indicator */
 .days-at-step {
     font-size: 12px;
@@ -482,6 +544,22 @@ header h1 {
     background: #fafbfc;
     cursor: pointer;
     user-select: none;
+    position: relative;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.program-table th:has(.tip-icon) {
+    overflow: visible;
+}
+.col-resize-handle {
+    position: absolute;
+    top: 0; right: 0;
+    width: 6px; height: 100%;
+    cursor: col-resize;
+    z-index: 2;
+}
+.col-resize-handle:hover, .col-resize-handle.resizing {
+    background: rgba(59,130,246,0.35);
 }
 
 .program-table th:hover {
@@ -495,6 +573,21 @@ header h1 {
 .program-table th.sort-active {
     color: var(--accent);
     background: #eff6ff;
+}
+
+/* Info ⓘ icon shown next to portfolio column header labels. Hover shows the
+   help tooltip (native title attribute). Clicking it does not trigger sort
+   on the parent <th>. */
+.col-help {
+    display: inline-block;
+    margin-left: 5px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: help;
+    vertical-align: 2px;
+}
+.col-help:hover {
+    color: var(--accent);
 }
 
 .program-table td {
@@ -527,17 +620,20 @@ header h1 {
 }
 
 /* Row-level visual distinction for new vs changed programs */
-.program-row.row-added td:first-child {
+.program-row.row-added td:first-child,
+.portfolio-row.row-added td:first-child {
     border-left: 4px solid #22c55e;
     padding-left: 10px;
 }
 
-.program-row.row-edited td:first-child {
+.program-row.row-edited td:first-child,
+.portfolio-row.row-edited td:first-child {
     border-left: 4px solid #3b82f6;
     padding-left: 10px;
 }
 
-.program-row.row-deactivated td:first-child {
+.program-row.row-deactivated td:first-child,
+.portfolio-row.row-deactivated td:first-child {
     border-left: 4px solid #ef4444;
     padding-left: 10px;
 }
@@ -1603,7 +1699,7 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 
 /* ==================== Portfolio view ==================== */
 
-.portfolio-lvl-btn, .portfolio-deg-btn {
+.portfolio-lvl-btn, .portfolio-deg-btn, .portfolio-status-btn {
     padding: 5px 13px;
     border: 2px solid var(--border);
     border-radius: 6px;
@@ -1614,11 +1710,11 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     font-weight: 600;
     transition: all 0.2s;
 }
-.portfolio-lvl-btn:hover, .portfolio-deg-btn:hover {
+.portfolio-lvl-btn:hover, .portfolio-deg-btn:hover, .portfolio-status-btn:hover {
     border-color: var(--accent);
     color: var(--accent);
 }
-.portfolio-lvl-btn.active, .portfolio-deg-btn.active {
+.portfolio-lvl-btn.active, .portfolio-deg-btn.active, .portfolio-status-btn.active {
     background: #eff6ff;
     color: var(--accent);
     border-color: var(--accent);
@@ -1652,6 +1748,16 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     background: #fee2e2;
     color: #991b1b;
     border: 1px solid #fca5a5;
+}
+.badge-proposal {
+    background: #f59e0b;
+    color: #fff;
+    border: 1px solid #d97706;
+}
+.badge-complete {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
 }
 .otp-badge {
     background: #fef3c7;
@@ -1736,6 +1842,10 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     border-left: 3px solid #cbd5e1;
 }
 
+.portfolio-precim-row {
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+}
 .portfolio-synthetic-row {
     background: #f8fafc;
 }
@@ -1797,6 +1907,18 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 }
 
 .refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+#portfolio-table-toolbar {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: #fafbfc;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: var(--radius) var(--radius) 0 0;
+    margin-top: 8px;
+}
 
 .portfolio-col-picker {
     position: relative;
