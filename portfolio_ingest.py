@@ -576,6 +576,13 @@ _LONG_DEGREE_MAP = [
     (re.compile(r'^bachelor\s+of\s+fine\s+arts\s*(?:in\s+)?', re.I), 'BFA'),
     (re.compile(r'^graduate\s+certificate\s*(?:in\s+)?', re.I), 'Graduate Certificate'),
     (re.compile(r'^certificate\s*(?:in\s+)?', re.I), 'Graduate Certificate'),
+    # Generic "Master(s) in X" / "Masters of X" without a more specific phrase.
+    # The actual CIM credential could be MS / MA / MEd; we default to MS and
+    # rely on the campus-aware fallback in _lookup_cim() to bridge to MA/MEd
+    # when no MS variant exists.
+    (re.compile(r'^masters?\s+in\s+', re.I), 'MS'),
+    (re.compile(r'^masters?\s+of\s+', re.I), 'MS'),
+    (re.compile(r'^bachelors?\s+in\s+', re.I), 'BS'),
 ]
 
 # When a long-form degree like "Doctor of Professional Studies" has no subject
@@ -1182,6 +1189,17 @@ def _parse_external_name(name_raw):
         # If the "subject" part parses as a valid degree and the "degree" part does not, swap.
         if _is_valid_degree(subj) and not _is_valid_degree(deg_clean):
             subj, deg = deg_raw.strip(), _norm_degree(subj)
+        # If the trailing degree position holds non-degree annotation
+        # (e.g. "One Year MBA, STEM designated"), scan the subject for an
+        # embedded degree code and use that.
+        elif not _is_valid_degree(deg_clean):
+            emb = re.search(r'\b(MBA|MS|MA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSBA|MEng|MSW|LLM|BS|BA|BFA|BSN|PhD|EdD|DNP|DPT|JD|CAGS)\b', subj)
+            if emb:
+                # Move the embedded degree out of subject; the remainder is
+                # the program qualifier (e.g. "One Year" for "One Year MBA")
+                rest = (subj[:emb.start()] + subj[emb.end():]).strip().strip(',').strip()
+                deg = _norm_degree(emb.group(1))
+                subj = rest if rest else emb.group(1)
         return subj, deg, campus
 
     # "Subject Graduate Certificate" format (degree at end without a comma)
@@ -1431,6 +1449,18 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             base_deg = norm_deg.split('-')[0]
             if base_deg:
                 row, mt = _try(norm_subj, base_deg, norm_campus_str)
+                if row:
+                    return row, mt
+
+        # Generic-master fallback: "Masters in X" is normalized to MS in
+        # _LONG_DEGREE_MAP but the CIM program may be MA/MEd. If MS lookup
+        # fails, try other master's variants at the same campus before
+        # giving up. Same idea for "Masters of X" without specific phrase.
+        if norm_deg in ('ms', 'ma', 'med'):
+            for alt in ('ms', 'ma', 'med', 'mpa', 'mpp', 'mfa', 'mps'):
+                if alt == norm_deg:
+                    continue
+                row, mt = _try(norm_subj, alt, norm_campus_str)
                 if row:
                     return row, mt
 
