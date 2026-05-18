@@ -105,6 +105,7 @@ function setProgramKindFilter(kind) {
 
 function switchView(view) {
     currentView = view;
+    try { localStorage.setItem('cim-active-view', view); } catch(e) {}
 
     // Update button states
     document.getElementById('btn-programs').classList.toggle('active', view === 'programs');
@@ -113,6 +114,10 @@ function switchView(view) {
     if (btnCat) btnCat.classList.toggle('active', view === 'catalog');
     const btnPort = document.getElementById('btn-portfolio');
     if (btnPort) btnPort.classList.toggle('active', view === 'portfolio');
+
+    // "Manage custom references" is only relevant on the Programs view
+    const refsLink = document.querySelector('.subtle-links');
+    if (refsLink) refsLink.style.display = view === 'programs' ? '' : 'none';
 
     // Reset filters when switching views
     pipelineFilter = null;
@@ -137,27 +142,30 @@ function switchView(view) {
     const campusFilter = document.getElementById('filter-campus');
 
     const subjectGroup = document.getElementById('filter-group-subject');
-    // Portfolio view uses its own filter bar; hide all standard filters
     const portfolioFilters = document.getElementById('portfolio-filters');
-    const pipelineSection = document.getElementById('pipeline');
-    const pipelineBar = document.getElementById('pipeline-bar');
-    const standardFilters = document.getElementById('filter-bar');
-    const proposalRow = document.getElementById('proposal-row');
+
+    // Sections to hide entirely in portfolio view
+    const pipelineSection   = document.getElementById('pipeline');
+    const smartViewsSection = document.querySelector('.smart-views-section');
+    const kindFilterRow     = document.getElementById('kind-filter-row');
+    const smartActionsSection = document.querySelector('.smart-actions-section');
+    const filtersSection    = document.querySelector('.filters-section');
 
     if (view === 'portfolio') {
-        if (portfolioFilters) portfolioFilters.style.display = 'flex';
-        if (pipelineSection) pipelineSection.style.display = 'none';
-        if (standardFilters) standardFilters.style.display = 'none';
-        if (proposalRow) proposalRow.style.display = 'none';
-        typeSection.style.display = 'none';
-        proposalSection.style.display = 'none';
-        if (subjectGroup) subjectGroup.style.display = 'none';
+        if (portfolioFilters)    portfolioFilters.style.display = 'flex';
+        if (pipelineSection)     pipelineSection.style.display = 'none';
+        if (smartViewsSection)   smartViewsSection.style.display = 'none';
+        if (kindFilterRow)       kindFilterRow.style.display = 'none';
+        if (smartActionsSection) smartActionsSection.style.display = 'none';
+        if (filtersSection)      filtersSection.style.display = 'none';
+        if (subjectGroup)        subjectGroup.style.display = 'none';
     } else {
-        if (portfolioFilters) portfolioFilters.style.display = 'none';
-        if (pipelineSection) pipelineSection.style.display = '';
-        if (pipelineBar) pipelineBar.style.display = 'flex';
-        if (standardFilters) standardFilters.style.display = 'flex';
-        if (proposalRow) proposalRow.style.display = 'flex';
+        if (portfolioFilters)    portfolioFilters.style.display = 'none';
+        if (pipelineSection)     pipelineSection.style.display = 'block';
+        if (smartViewsSection)   smartViewsSection.style.display = 'flex';
+        if (kindFilterRow)       kindFilterRow.style.display = view === 'programs' ? 'flex' : 'none';
+        if (smartActionsSection) smartActionsSection.style.display = view === 'catalog' ? 'none' : 'flex';
+        if (filtersSection)      filtersSection.style.display = 'flex';
 
         if (view === 'courses') {
             typeSection.style.display = 'flex';
@@ -316,6 +324,7 @@ async function loadCatalogDashboard() {
         const [pipelineRes, pagesRes] = await Promise.all([
             fetch('/api/catalog_pipeline'),
             fetch('/api/catalog'),
+            loadScanStatus(),
         ]);
         cachedCatalogPipeline = (await pipelineRes.json()).pipeline || [];
         allCatalogPages = (await pagesRes.json()).catalog_pages || [];
@@ -2225,13 +2234,23 @@ function diffLines(oldLines, newLines) {
     // list under a single subheading), sort courses by code. Elective lists
     // are semantically sets — the same courses in a different order is not a
     // real curriculum change — so canonicalizing order lets LCS match 1-to-1.
+    //
+    // BUT: don't sort buffers that contain "or COURSE" / "and COURSE"
+    // alternative rows. Those buffers are ordered primary→alternative
+    // pairs (e.g., "MISM 6402" then "or DADS 6400") that read as a
+    // single requirement; sorting them alphabetically moves DADS before
+    // MISM and breaks the visual pairing in the rendered diff.
     function canonicalize(lines) {
+        const ALT_RE = /^(or|and)\s+/i;
         const out = [];
         let buffer = [];
         const flush = () => {
             if (buffer.length) {
-                buffer.sort((a, b) =>
-                    (a.key || a.code || '').localeCompare(b.key || b.code || ''));
+                const hasAlt = buffer.some(l => ALT_RE.test(l.code || ''));
+                if (!hasAlt) {
+                    buffer.sort((a, b) =>
+                        (a.key || a.code || '').localeCompare(b.key || b.code || ''));
+                }
                 out.push(...buffer);
                 buffer = [];
             }
@@ -2328,6 +2347,55 @@ function diffLines(oldLines, newLines) {
             }
         }
     }
+
+    // Second post-LCS pass: pair removed/added entries by SET key
+    // (primary code + all alt codes, normalized + sorted). This handles
+    // mirror "or" pairings — e.g., proposal's "DADS 6400 or MISM 6402"
+    // (DADS primary, MISM alt) vs reference's "MISM 6402 or DADS 6400"
+    // (MISM primary, DADS alt). The primaries differ so the first pass
+    // doesn't match them, but the set of choices ("take either course")
+    // is identical and the user reads them as the same requirement.
+    function entrySetKey(entry) {
+        if (!entry) return '';
+        const codes = [normForCompare(entry.code || '')];
+        for (const a of (entry.alts || [])) {
+            const stripped = (a.code || '').replace(/^(or|and)\s+/i, '');
+            codes.push(normForCompare(stripped));
+        }
+        return codes.filter(Boolean).sort().join('|');
+    }
+    const removedBySetKey = {};
+    courseDiff.forEach((e, idx) => {
+        if (e && e.type === 'removed') {
+            const k = entrySetKey(e.left);
+            // Only consider multi-code sets — single-code entries would
+            // have matched via the primary-key pass above.
+            if (k.indexOf('|') >= 0) {
+                (removedBySetKey[k] = removedBySetKey[k] || []).push(idx);
+            }
+        }
+    });
+    for (let idx = 0; idx < courseDiff.length; idx++) {
+        const e = courseDiff[idx];
+        if (e && e.type === 'added') {
+            const k = entrySetKey(e.right);
+            if (k.indexOf('|') >= 0) {
+                const candidates = removedBySetKey[k];
+                if (candidates && candidates.length) {
+                    const rIdx = candidates.shift();
+                    courseDiff[rIdx] = {
+                        type: 'same',
+                        leftIdx: courseDiff[rIdx].leftIdx,
+                        rightIdx: e.rightIdx,
+                        left: courseDiff[rIdx].left,
+                        right: e.right,
+                    };
+                    courseDiff[idx] = null;
+                }
+            }
+        }
+    }
+
     // Filter out the nulls
     for (let idx = courseDiff.length - 1; idx >= 0; idx--) {
         if (courseDiff[idx] === null) courseDiff.splice(idx, 1);
@@ -2392,7 +2460,14 @@ function diffLines(oldLines, newLines) {
 
 // Render a single side's cell content. Two columns per side: code + title
 // (with hours inlined into title as "(NSH)" by html_cleaner).
-function renderCourseCell(item, cls) {
+// Render one side's cells of a Compare row. `otherItem` is the diff entry
+// from the OPPOSITE side (if any) — we use its primary code AND its alts
+// list to detect any alt on this side that doesn't appear anywhere on
+// the other (matched as either primary or alt). `mySide`
+// ('left'|'right'|undefined) drives the asymmetric color: a right-only
+// alt reads as "added relative to proposal" (green); a left-only alt
+// reads as "in proposal but not reference" (red).
+function renderCourseCell(item, cls, otherItem, mySide) {
     if (!item) return `<td class="${cls}" colspan="2"></td>`;
     if (item.isHeader) {
         return `<td class="${cls} cmp-header" colspan="2">${escapeHtml(item.title)}</td>`;
@@ -2400,21 +2475,68 @@ function renderCourseCell(item, cls) {
     const titleWithHours = item.hours
         ? `${item.title} (${item.hours}SH)`
         : item.title;
-    return `<td class="${cls} cmp-code">${escapeHtml(item.code)}</td>` +
-           `<td class="${cls} cmp-title">${escapeHtml(titleWithHours)}</td>`;
+    // Standalone "or COURSE 1234" rows (no preceding primary, or
+    // mergeAlts missed it) keep the cmp-alt indent fallback.
+    const isAlt = /^(or|and)\s+/i.test(item.code || '');
+    const codeCls = isAlt ? `${cls} cmp-code cmp-alt` : `${cls} cmp-code`;
+
+    // Build a normalized lookup of every code (primary + alts) on the
+    // OTHER side, so we can flag asymmetric alts (codes that don't
+    // appear anywhere on the opposite side). The "or "/"and " prefix
+    // is stripped before comparison.
+    const otherSet = new Set();
+    if (otherItem) {
+        otherSet.add(normForCompare((otherItem.code || '').replace(/^(or|and)\s+/i, '')));
+        for (const a of (otherItem.alts || [])) {
+            otherSet.add(normForCompare((a.code || '').replace(/^(or|and)\s+/i, '')));
+        }
+    }
+
+    // Render the primary + any alternatives in the same cell so they
+    // can never be visually separated by the LCS diff layout. Each
+    // alternative becomes a sub-line with indent + lighter weight.
+    // Asymmetric alts (not on the other side) get cmp-alt-asym which
+    // tints them green/red to match the row's added/removed color so
+    // partial differences inside a "same" row remain visible.
+    let codeHtml = escapeHtml(item.code);
+    let titleHtml = escapeHtml(titleWithHours);
+    if (item.alts && item.alts.length) {
+        for (const a of item.alts) {
+            const altTitleWithHours = a.hours ? `${a.title} (${a.hours}SH)` : a.title;
+            const myAltCode = (a.code || '').replace(/^(or|and)\s+/i, '');
+            const isShared = otherItem !== undefined &&
+                otherSet.has(normForCompare(myAltCode));
+            let lineCls = 'cmp-alt-line';
+            if (otherItem !== undefined && !isShared) {
+                // Asymmetric — color based on which side this is.
+                // mySide=right → "added relative to proposal" (green)
+                // mySide=left  → "in proposal but not reference" (red)
+                lineCls += mySide === 'left'
+                    ? ' cmp-alt-asym-left'
+                    : ' cmp-alt-asym-right';
+            }
+            codeHtml += `<div class="${lineCls}">${escapeHtml(a.code)}</div>`;
+            titleHtml += `<div class="${lineCls}">${escapeHtml(altTitleWithHours)}</div>`;
+        }
+    }
+    return `<td class="${codeCls}">${codeHtml}</td>` +
+           `<td class="${cls} cmp-title">${titleHtml}</td>`;
 }
 
 // Render a side-by-side comparison table
 function renderSideBySide(diff, leftLabel, rightLabel) {
     let rows = diff.map(d => {
+        // For 'same' and 'moved' (both sides present), pass each side's
+        // alts to the OPPOSITE cell so asymmetric alts can be visually
+        // highlighted within an otherwise matching row.
         if (d.type === 'same') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-same')}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-same', d.right, 'left')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-same')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-same', d.left, 'right')}</tr>`;
         } else if (d.type === 'moved') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-moved')}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-moved', d.right, 'left')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-moved')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-moved', d.left, 'right')}</tr>`;
         } else if (d.type === 'removed') {
             return `<tr>${renderCourseCell(d.left, 'cmp-removed')}` +
                    `<td class="cmp-divider"></td>` +
@@ -2436,12 +2558,58 @@ function renderSideBySide(diff, leftLabel, rightLabel) {
     </table>`;
 }
 
+// Merge "or COURSE 1234" / "and COURSE 1234" rows into their primary's
+// `alts` array so each primary+alt(s) group becomes a single diff entry.
+// Without this, LCS can interleave unrelated left-only or right-only
+// rows between a primary and its alternative, breaking the visual
+// pairing in the rendered side-by-side table.
+//
+// Only applied to Compare's diff input — extractCourseLines itself keeps
+// or-rows as standalone entries so the Regulatory tab can still flag
+// each alternative course individually.
+function mergeAlts(lines) {
+    const ALT_RE = /^(or|and)\s+/i;
+    const out = [];
+    for (const l of lines) {
+        if (!l.isHeader && ALT_RE.test(l.code || '')) {
+            // Attach to the most recent non-header entry in `out`.
+            for (let i = out.length - 1; i >= 0; i--) {
+                if (!out[i].isHeader) {
+                    if (!out[i].alts) out[i] = {...out[i], alts: []};
+                    out[i].alts.push({code: l.code, title: l.title, hours: l.hours});
+                    break;
+                }
+            }
+            continue;  // do not push the alt as its own diff entry
+        }
+        out.push(l);
+    }
+    return out;
+}
+
 // Compare two curricula, return {identical, diff}
 function compareCurricula(refHtml, currHtml) {
-    const refLines = extractCourseLines(refHtml);
-    const currLines = extractCourseLines(currHtml);
+    const refLines = mergeAlts(extractCourseLines(refHtml));
+    const currLines = mergeAlts(extractCourseLines(currHtml));
     const diff = diffLines(refLines, currLines);
-    const identical = !diff.some(d => d.type !== 'same');
+    // identical only if every diff entry is 'same' AND each 'same' entry's
+    // combined code set (primary + alts) matches on both sides. The set-key
+    // post-pass in diffLines may have matched mirror-or pairs (proposal
+    // "DADS 6400 or MISM 6402" ≡ reference "MISM 6402 or DADS 6400") —
+    // those genuinely are identical even though the primary codes differ,
+    // so we compare the full set rather than primary-then-alts separately.
+    function entrySet(entry) {
+        if (!entry) return '';
+        const codes = [normForCompare(entry.code || '')];
+        for (const a of (entry.alts || [])) {
+            codes.push(normForCompare((a.code || '').replace(/^(or|and)\s+/i, '')));
+        }
+        return codes.filter(Boolean).sort().join('|');
+    }
+    const identical = diff.every(d => {
+        if (d.type !== 'same') return false;
+        return entrySet(d.left) === entrySet(d.right);
+    });
     return {identical, diff};
 }
 
@@ -2879,8 +3047,8 @@ const COLLEGE_ABBREVS = {
     'College of Engineering': 'COE',
     'College of Science': 'COS',
     'Coll of Professional Studies': 'CPS',
-    'Bouve College of Hlth Sciences': 'Bouve',
-    'Khoury Coll of Comp Sciences': 'Khoury',
+    'Bouve College of Hlth Sciences': 'BVE',
+    'Khoury Coll of Comp Sciences': 'KHY',
     "D'Amore-McKim School Business": 'DMSB',
     'School of Law': 'SOL',
     'Coll of Arts, Media & Design': 'CAMD',
@@ -2889,9 +3057,59 @@ const COLLEGE_ABBREVS = {
     'Office of the Provost': 'Provost',
 };
 
+const CAMPUS_ABBREVS = {
+    'Boston':          'BOS',
+    'Oakland':         'OAK',
+    'Vancouver':       'VAN',
+    'Toronto':         'TOR',
+    'Miami':           'MIA',
+    'Arlington':       'ARL',
+    'Portland':        'PTL',
+    'Silicon Valley':  'SV',
+    'Charlotte':       'CLT',
+    'Seattle':         'SEA',
+    'New York':        'NYC',
+    'London':          'LON',
+    'Online':          'ONL',
+    'Primarily Online':'POL',
+};
+
 function abbreviateCollege(college) {
     if (!college) return '—';
     return COLLEGE_ABBREVS[college] || college;
+}
+
+function abbreviateCampus(campus) {
+    if (!campus) return '—';
+    return CAMPUS_ABBREVS[campus] || campus;
+}
+
+// Strip trailing campus parenthetical from a portfolio program name for display.
+// e.g. "Analytics, MS (Oakland)" → "Analytics, MS"
+// Keeps non-campus parentheticals like "(non-degree)" intact.
+// "Bachelor of Science in Nursing" → "Nursing, BS"
+// "Bachelor of Science in Nursing, New York" → "Nursing, BS, New York"
+// "Bachelor of Science - Transfer Track, New York" → "BS—Transfer Track, New York"
+const _DEGREE_EXPAND = [
+    [/^(?:Accelerated\s+)?Bachelor of Science in (.+)$/i,  (_, s) => `${s.trim()}, BS`],
+    [/^(?:Accelerated\s+)?Bachelor of Arts in (.+)$/i,     (_, s) => `${s.trim()}, BA`],
+    [/^Bachelor of Science\s*[-–]\s*(.+)$/i,               (_, s) => `BS—${s.trim()}`],
+    [/^Bachelor['']?s Degree\b(.*)$/i,                     (_, s) => `BS${s}`],
+];
+function normalizePortfolioName(name) {
+    if (!name) return name;
+    for (const [re, fn] of _DEGREE_EXPAND) {
+        if (re.test(name)) return name.replace(re, fn);
+    }
+    return name;
+}
+
+const _CAMPUS_PARENS = new Set(Object.keys(CAMPUS_ABBREVS).map(s => s.toLowerCase()));
+function stripCampusFromName(name) {
+    if (!name) return name;
+    return name.replace(/\s*\(([^)]+)\)\s*$/, (match, inner) =>
+        _CAMPUS_PARENS.has(inner.toLowerCase()) ? '' : match
+    ).trim();
 }
 
 function extractCampus(name) {
@@ -2925,32 +3143,269 @@ function formatTime(isoString) {
 
 // ==================== Init ====================
 
-document.addEventListener('DOMContentLoaded', () => {
-    loadDashboard();
+function _initDashboard() {
+    // Restore last active view (so navigating away and back keeps your context).
+    let savedView = 'programs';
+    try { savedView = localStorage.getItem('cim-active-view') || 'programs'; } catch(e) {}
+    const validViews = ['programs', 'courses', 'catalog', 'portfolio'];
+    if (!validViews.includes(savedView)) savedView = 'programs';
+    if (savedView === 'programs') {
+        loadDashboard();
+    } else {
+        switchView(savedView);
+    }
     // Fast CourseLeaf session health probe so user sees "please log in" quickly,
     // not after a 10-minute scan that silently does nothing.
     // Only do this when the server is the Flask local server (not the static site).
     if (typeof window._staticMode === 'undefined') {
         checkSessionHealth();
     }
-});
+}
 
-// Auto-refresh every 2 minutes (data display only, not scanning)
-setInterval(loadDashboard, 120000);
+document.addEventListener('DOMContentLoaded', _initDashboard);
+
+// Auto-refresh every 2 minutes — refreshes whichever view is active
+setInterval(() => {
+    if (currentView === 'programs') loadDashboard();
+    else if (currentView === 'courses') loadCoursesDashboard();
+    else if (currentView === 'catalog') loadCatalogDashboard();
+    else if (currentView === 'portfolio') loadPortfolioDashboard();
+}, 120000);
 
 // ==================== Portfolio view ====================
 
-let allPortfolioPrograms = [];
-let portfolioCollegeFilter = '';
-let portfolioCampusFilter  = '';
-let portfolioOtpFilter     = '';
-let portfolioIpdFilter     = '';
+const PORTFOLIO_COLUMNS = [
+    {key: 'degree',       label: 'Degree'},
+    {key: 'college',      label: 'College'},
+    {key: 'campus',       label: 'Campus'},
+    {key: 'market2025',      label: '2025 Market Category'},
+    {key: 'perf2025',        label: '2025 Performance Category'},
+    {key: 'marketscore2025', label: '2025 Market Score'},
+    {key: 'perfscore2025',   label: '2025 Performance Score'},
+    {key: 'otp',          label: 'OTP Status'},
+    {key: 'ipd',          label: 'IPD Status'},
+    {key: 'svt',          label: 'SVT Status'},
+    {key: 'gls',          label: 'GLS Status'},
+    {key: 'launch',       label: 'Launch Date'},
+    {key: 'cim',          label: 'CIM Step'},
+    {key: 'cimchange',    label: 'CIM Change'},
+    {key: 'inworkflow',   label: 'In Workflow'},
+    {key: 'inactadmit',  label: 'Inactivation of Admission'},
+    {key: 'inacttoday',  label: 'Admitting Today'},
+    {key: 'notes',        label: 'Notes'},
+];
+
+function _loadPortfolioCols() {
+    try {
+        const stored = JSON.parse(localStorage.getItem('cim-portfolio-cols') || 'null');
+        if (Array.isArray(stored)) return new Set(stored);
+    } catch(e) {}
+    return new Set(PORTFOLIO_COLUMNS.map(c => c.key));
+}
+let portfolioVisibleCols = _loadPortfolioCols();
+
+function _rebuildColDropdownItems(dd) {
+    dd.innerHTML =
+        `<div class="portfolio-col-selectall">
+            <button onclick="toggleAllPortfolioCols(true)">Select All</button>
+            <button onclick="toggleAllPortfolioCols(false)">Unselect All</button>
+        </div>` +
+        PORTFOLIO_COLUMNS.map(c => `
+        <label class="portfolio-col-check">
+            <input type="checkbox" ${portfolioVisibleCols.has(c.key) ? 'checked' : ''}
+                   onchange="togglePortfolioCol('${c.key}',this.checked)">
+            ${c.label}
+        </label>`).join('');
+}
+
+function toggleAllPortfolioCols(visible) {
+    if (visible) PORTFOLIO_COLUMNS.forEach(c => portfolioVisibleCols.add(c.key));
+    else portfolioVisibleCols.clear();
+    localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols]));
+    const dd = document.getElementById('portfolio-col-dropdown');
+    if (dd && dd.classList.contains('open')) _rebuildColDropdownItems(dd);
+    renderPortfolioTable();
+}
+
+function togglePortfolioColPicker(e) {
+    e.stopPropagation();
+    const dd = document.getElementById('portfolio-col-dropdown');
+    if (!dd) return;
+    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+    _rebuildColDropdownItems(dd);
+    dd.classList.add('open');
+}
+
+function togglePortfolioCol(key, visible) {
+    if (visible) portfolioVisibleCols.add(key);
+    else portfolioVisibleCols.delete(key);
+    localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols]));
+    renderPortfolioTable();
+}
+
+document.addEventListener('click', e => {
+    // Close multi-select filter dropdowns on outside click
+    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => {
+        const wrap = el.closest('.filter-multi-wrap');
+        if (wrap && !wrap.contains(e.target)) el.classList.remove('open');
+    });
+    // Close column picker dropdown on outside click
+    const picker = document.getElementById('portfolio-col-picker');
+    if (picker && !picker.contains(e.target)) {
+        const dd = document.getElementById('portfolio-col-dropdown');
+        if (dd) dd.classList.remove('open');
+    }
+});
+
+// Returns <td> for a portfolio column, or '' if hidden.
+function _pc(key, content, cls) {
+    if (!portfolioVisibleCols.has(key)) return '';
+    return cls ? `<td class="${cls}">${content}</td>` : `<td>${content}</td>`;
+}
+
+let allPortfolioPrograms   = [];
+let portfolioExpandedIds   = new Set();
+let portfolioCollegeFilter   = new Set();
+let portfolioCampusFilter    = new Set();
+let portfolioOtpFilter       = new Set();
+let portfolioIpdFilter       = new Set();
+let portfolioRosterFilter    = new Set();  // SVT Status filter
+let portfolioGlsFilter       = new Set();
+let portfolioCimFilter       = new Set();
+let portfolioCimChangeFilter  = new Set();
+let portfolioInWorkflowFilter = new Set();
+let portfolioInactAdmitFilter = new Set();
+let portfolioInactTodayFilter = '';
+
+// "Fall 2026" → Date object for Sep 1 of that year (approximate start of Fall semester).
+function _semesterToDate(s) {
+    if (!s) return null;
+    const m = s.match(/^(Fall|Spring|Summer)\s+(\d{4})$/i);
+    if (!m) return null;
+    const year = parseInt(m[2], 10);
+    const month = /fall/i.test(m[1]) ? 8 : /spring/i.test(m[1]) ? 0 : 5; // Sep=8, Jan=0, Jun=5
+    return new Date(year, month, 1);
+}
+
+// Returns 'Yes' if the program is still admitting today, 'No' if admission has closed,
+// or '' if there is no inactivation admission date.
+function _inactAdmittingToday(p) {
+    if (!p.inactivation_admission) return '';
+    const cutoff = _semesterToDate(p.inactivation_admission);
+    if (!cutoff) return '';
+    return cutoff > new Date() ? 'Yes' : 'No';
+}
+
+// A program is only "Inactive" once its inactivation workflow has fully completed.
+// While an inactivation proposal is still moving through CIM (cim_step is set),
+// the program is still running (teach-out phase) and should show as "Active".
+let portfolioLevelFilter   = '';
+let portfolioDegreeFilter  = '';
+let portfolioSortKey = '';   // '' = default (college/name), or a PORTFOLIO_COLUMNS key or 'name'
+let portfolioSortDir = 1;    // 1 = asc, -1 = desc
 let portfolioSearch        = '';
 
+function classifyPortfolioLevel(name) {
+    const n = name || '';
+    if (/\b(MS|MA|MBA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSFMBA|MSEnvE|MSSBS|DNP|DPT|DMSC|EdD|PhD|LLM|JD|CERTG)\b/.test(n) ||
+        /\b(Master|Doctor|Graduate)\b/i.test(n)) return 'Graduate';
+    if (/\b(BS|BA|BFA|BArch|BSN|BSBA|BSCF)\b/.test(n) ||
+        /\b(Bachelor|Undergrad|Minor)\b/i.test(n)) return 'Undergraduate';
+    return null;
+}
+
+function extractPortfolioDegree(name) {
+    const n = (name || '').replace(/\s*\([^)]*\)\s*/g, '').replace(/\s*—.*$/, '').trim();
+    // Multi-word patterns first
+    if (/\b(Graduate\s+Certificate|CERTG)\b/i.test(n)) return 'Certificate';
+    if (/\bUndergraduate\s+Certificate\b/i.test(n))    return 'Certificate';
+    if (/\bCertificate\b/i.test(n))                    return 'Certificate';
+    if (/\bBachelor\b/i.test(n))                       return "Bachelor's";
+    // Degree abbreviation after last comma
+    const m = n.match(/,\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*$/);
+    if (m) {
+        const raw = m[1].trim().toUpperCase();
+        if (raw === 'PHD' || raw === 'PH.D') return 'PhD';
+        if (raw === 'CAGS')                  return 'CAGS';
+        // Professional doctorates
+        if (['DNP','DPT','DPS','DLP','EDD','DMSC','PHARMD',
+             'JD','JSSD'].includes(raw))     return 'Prof Doctorate';
+        // Master's: M-prefix or known abbrevs
+        if (raw.startsWith('M') || ['LLM','MAT','MED'].includes(raw))
+                                             return "Master's";
+        // Bachelor's: B-prefix
+        if (raw.startsWith('B') || raw === 'AA')
+                                             return "Bachelor's";
+        // Catch-all certificate codes
+        if (raw.startsWith('CERT') || raw === 'CERTG')
+                                             return 'Certificate';
+    }
+    // No comma fallbacks
+    if (/\bMinor\b/i.test(n))    return 'Minor';
+    if (/\bDoctorate\b/i.test(n)) return 'Prof Doctorate';
+    if (/\bPlusOne\b|4\+1/i.test(n)) return "Master's";
+    return '';
+}
+
+function classifyPortfolioDegree(name) {
+    const n = name || '';
+    if (/\bDual.?Degree\b/i.test(n) ||
+        /\b(MS|MPH|MA|MBA|PharmD)\b.{1,20}&.{1,20}\b(MS|MPH|MA|MBA|PharmD|DNP)\b/.test(n)) return 'Dual Degree';
+    if (/\b(PhD|Ph\.D|EdD|DPT|DNP|DMSC)\b/.test(n) || /\bDoctor(ate)?\b/i.test(n)) return 'Doctorate';
+    if (/\b(BS|BA|BFA|BArch|BSN|BSBA|BSCF)\b/.test(n) || /\bBachelor/i.test(n)) return "Bachelor's";
+    if (/\b(MS|MA|MBA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSFMBA|MSEnvE|MSSBS)\b/.test(n) ||
+        /\bMaster/i.test(n)) return "Master's";
+    if (/\b(CERT|CERTG)\b/i.test(n) || /\bCertificate\b/i.test(n)) return 'Certificate';
+    if (/\bMinor\b/i.test(n)) return 'Minor';
+    if (/\bPlus.?One\b|\b4\+1\b/i.test(n)) return 'Plus One';
+    if (/\bConcentration\b/i.test(n)) return 'Concentration';
+    return null;
+}
+
+function setPortfolioLevel(btn, val) {
+    portfolioLevelFilter = (portfolioLevelFilter === val) ? '' : val;
+    document.querySelectorAll('.portfolio-lvl-btn').forEach(b => b.classList.toggle('active', b.dataset.lvl === portfolioLevelFilter && portfolioLevelFilter !== ''));
+    renderPortfolioTable();
+}
+
+function setPortfolioDegree(btn, val) {
+    portfolioDegreeFilter = (portfolioDegreeFilter === val) ? '' : val;
+    document.querySelectorAll('.portfolio-deg-btn').forEach(b => b.classList.toggle('active', b.dataset.deg === portfolioDegreeFilter && portfolioDegreeFilter !== ''));
+    renderPortfolioTable();
+}
+
+function sortPortfolioBy(key) {
+    if (portfolioSortKey === key) {
+        portfolioSortDir *= -1;
+    } else {
+        portfolioSortKey = key;
+        portfolioSortDir = 1;
+    }
+    renderPortfolioTable();
+}
+
+function togglePortfolioConcentrations(id) {
+    if (portfolioExpandedIds.has(id)) {
+        portfolioExpandedIds.delete(id);
+    } else {
+        portfolioExpandedIds.add(id);
+    }
+    renderPortfolioTable();
+}
+
 async function loadPortfolioDashboard() {
+    const container = document.getElementById('programs-table-container');
+    if (container) container.innerHTML = '';
     try {
-        const res = await fetch('/api/portfolio');
+        const [res] = await Promise.all([
+            fetch('/api/portfolio'),
+            loadScanStatus(),
+        ]);
         allPortfolioPrograms = (await res.json()).programs || [];
+        allPortfolioPrograms.forEach(p => {
+            p.concentrations = p.concentrations_json ? JSON.parse(p.concentrations_json) : [];
+        });
+        portfolioExpandedIds = new Set();
         populatePortfolioFilters();
         renderPortfolioTable();
     } catch(e) {
@@ -2958,32 +3413,165 @@ async function loadPortfolioDashboard() {
     }
 }
 
-function populatePortfolioFilters() {
+function _getPortfolioFilterValues() {
     const programs = allPortfolioPrograms;
+    return {
+        'portfolio-filter-college':    [...new Set(programs.map(p => p.college).filter(Boolean))].sort(),
+        'portfolio-filter-campus':     [...new Set(programs.map(p => p.campus).filter(Boolean))].sort(),
+        'portfolio-filter-otp':        [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort(),
+        'portfolio-filter-ipd':        [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort(),
+        'portfolio-filter-roster':     [...new Set(programs.map(p => p.svt_status).filter(Boolean))].sort(),
+        'portfolio-filter-gls':        [...new Set(programs.map(p => p.gls_status).filter(Boolean))].sort(),
+        'portfolio-filter-cim':        [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort(),
+        'portfolio-filter-cimchange':  [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort(),
+        'portfolio-filter-inworkflow': ['Yes', 'No'],
+        'portfolio-filter-inactadmit': [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
+            (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0)),
+    };
+}
 
-    const colleges = [...new Set(programs.map(p => p.college).filter(Boolean))].sort();
-    const campuses  = [...new Set(programs.map(p => p.campus).filter(Boolean))].sort();
-    const otpStatuses = [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort();
-    const ipdStatuses = [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort();
-
-    function populate(id, values, current) {
-        const sel = document.getElementById(id);
-        if (!sel) return;
-        sel.innerHTML = `<option value="">All</option>` +
-            values.map(v => `<option value="${escapeHtml(v)}" ${v === current ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+function _updateMultiFilterBtn(id, filterSet) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const wrap = document.getElementById('fmw-' + id);
+    if (filterSet.size === 0) {
+        btn.textContent = '— select — ▾';
+        if (wrap) wrap.classList.remove('has-value');
+    } else if (filterSet.size === 1) {
+        btn.textContent = [...filterSet][0] + ' ▾';
+        if (wrap) wrap.classList.add('has-value');
+    } else {
+        btn.textContent = filterSet.size + ' selected ▾';
+        if (wrap) wrap.classList.add('has-value');
     }
-    populate('portfolio-filter-college', colleges, portfolioCollegeFilter);
-    populate('portfolio-filter-campus',  campuses,  portfolioCampusFilter);
-    populate('portfolio-filter-otp',     otpStatuses, portfolioOtpFilter);
-    populate('portfolio-filter-ipd',     ipdStatuses, portfolioIpdFilter);
+}
+
+function populatePortfolioFilters() {
+    const multiIds = [
+        'portfolio-filter-college', 'portfolio-filter-campus',
+        'portfolio-filter-otp', 'portfolio-filter-ipd', 'portfolio-filter-roster',
+        'portfolio-filter-gls',
+        'portfolio-filter-cim', 'portfolio-filter-cimchange',
+        'portfolio-filter-inworkflow', 'portfolio-filter-inactadmit',
+    ];
+    const filterSetMap = {
+        'portfolio-filter-college':    portfolioCollegeFilter,
+        'portfolio-filter-campus':     portfolioCampusFilter,
+        'portfolio-filter-otp':        portfolioOtpFilter,
+        'portfolio-filter-ipd':        portfolioIpdFilter,
+        'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-gls':        portfolioGlsFilter,
+        'portfolio-filter-cim':        portfolioCimFilter,
+        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+    };
+    multiIds.forEach(id => _updateMultiFilterBtn(id, filterSetMap[id] || new Set()));
+
+    // Admitting Today stays as single-select
+    const inactTodayVals = [...new Set(allPortfolioPrograms.map(p => _inactAdmittingToday(p)).filter(Boolean))].sort();
+    const sel = document.getElementById('portfolio-filter-inacttoday');
+    if (sel) {
+        sel.innerHTML = `<option value="" disabled${portfolioInactTodayFilter ? '' : ' selected'}> — select — </option>` +
+            inactTodayVals.map(v => `<option value="${escapeHtml(v)}" ${v === portfolioInactTodayFilter ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+        sel.closest('.filter-select-wrap').classList.toggle('has-value', !!portfolioInactTodayFilter);
+    }
+}
+
+const _portfolioFilterVars = {
+    'portfolio-filter-college':    () => { portfolioCollegeFilter.clear();    _updateMultiFilterBtn('portfolio-filter-college',    portfolioCollegeFilter); },
+    'portfolio-filter-campus':     () => { portfolioCampusFilter.clear();     _updateMultiFilterBtn('portfolio-filter-campus',     portfolioCampusFilter); },
+    'portfolio-filter-otp':        () => { portfolioOtpFilter.clear();        _updateMultiFilterBtn('portfolio-filter-otp',        portfolioOtpFilter); },
+    'portfolio-filter-ipd':        () => { portfolioIpdFilter.clear();        _updateMultiFilterBtn('portfolio-filter-ipd',        portfolioIpdFilter); },
+    'portfolio-filter-roster':     () => { portfolioRosterFilter.clear();     _updateMultiFilterBtn('portfolio-filter-roster',     portfolioRosterFilter); },
+    'portfolio-filter-gls':        () => { portfolioGlsFilter.clear();        _updateMultiFilterBtn('portfolio-filter-gls',        portfolioGlsFilter); },
+    'portfolio-filter-cim':        () => { portfolioCimFilter.clear();        _updateMultiFilterBtn('portfolio-filter-cim',        portfolioCimFilter); },
+    'portfolio-filter-cimchange':  () => { portfolioCimChangeFilter.clear();  _updateMultiFilterBtn('portfolio-filter-cimchange',  portfolioCimChangeFilter); },
+    'portfolio-filter-inworkflow': () => { portfolioInWorkflowFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inworkflow', portfolioInWorkflowFilter); },
+    'portfolio-filter-inactadmit': () => { portfolioInactAdmitFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inactadmit', portfolioInactAdmitFilter); },
+    'portfolio-filter-inacttoday': () => { portfolioInactTodayFilter = ''; },
+};
+
+function clearPortfolioFilter(id) {
+    // Close any open dropdown for this filter
+    const dd = document.getElementById('fmd-' + id);
+    if (dd) dd.classList.remove('open');
+    // For single-select (inacttoday), reset the <select> value
+    const sel = document.getElementById(id);
+    if (sel && sel.tagName === 'SELECT') sel.value = '';
+    if (_portfolioFilterVars[id]) _portfolioFilterVars[id]();
+    updateClearButtons();
+    renderPortfolioTable();
+}
+
+function togglePortfolioMultiFilter(id, e) {
+    e.stopPropagation();
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) return;
+    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+    // Close other open dropdowns
+    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => el.classList.remove('open'));
+    const filterSetMap = {
+        'portfolio-filter-college':    portfolioCollegeFilter,
+        'portfolio-filter-campus':     portfolioCampusFilter,
+        'portfolio-filter-otp':        portfolioOtpFilter,
+        'portfolio-filter-ipd':        portfolioIpdFilter,
+        'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-gls':        portfolioGlsFilter,
+        'portfolio-filter-cim':        portfolioCimFilter,
+        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+    };
+    const filterSet = filterSetMap[id];
+    const valuesMap = _getPortfolioFilterValues();
+    const vals = valuesMap[id] || [];
+    dd.innerHTML = vals.map(v => `
+        <label class="portfolio-col-check">
+            <input type="checkbox" ${filterSet && filterSet.has(v) ? 'checked' : ''}
+                   onchange="togglePortfolioMultiValue(${JSON.stringify(id)}, ${JSON.stringify(v)}, this.checked)">
+            ${escapeHtml(v)}
+        </label>`).join('');
+    dd.classList.add('open');
+}
+
+function togglePortfolioMultiValue(id, value, checked) {
+    const filterSetMap = {
+        'portfolio-filter-college':    portfolioCollegeFilter,
+        'portfolio-filter-campus':     portfolioCampusFilter,
+        'portfolio-filter-otp':        portfolioOtpFilter,
+        'portfolio-filter-ipd':        portfolioIpdFilter,
+        'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-gls':        portfolioGlsFilter,
+        'portfolio-filter-cim':        portfolioCimFilter,
+        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+    };
+    const filterSet = filterSetMap[id];
+    if (!filterSet) return;
+    if (checked) filterSet.add(value);
+    else filterSet.delete(value);
+    _updateMultiFilterBtn(id, filterSet);
+    updateClearButtons();
+    renderPortfolioTable();
 }
 
 function getPortfolioFiltered() {
     let rows = allPortfolioPrograms.slice();
-    if (portfolioCollegeFilter) rows = rows.filter(p => p.college === portfolioCollegeFilter);
-    if (portfolioCampusFilter)  rows = rows.filter(p => p.campus  === portfolioCampusFilter);
-    if (portfolioOtpFilter)     rows = rows.filter(p => p.otp_status === portfolioOtpFilter);
-    if (portfolioIpdFilter)     rows = rows.filter(p => p.ipd_status === portfolioIpdFilter);
+    if (portfolioLevelFilter)   rows = rows.filter(p => classifyPortfolioLevel(p.program_name)  === portfolioLevelFilter);
+    if (portfolioDegreeFilter)  rows = rows.filter(p => classifyPortfolioDegree(p.program_name) === portfolioDegreeFilter);
+    if (portfolioCollegeFilter.size)    rows = rows.filter(p => portfolioCollegeFilter.has(p.college || ''));
+    if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
+    if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
+    if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
+    if (portfolioRosterFilter.size)     rows = rows.filter(p => portfolioRosterFilter.has(p.svt_status || ''));
+    if (portfolioGlsFilter.size)        rows = rows.filter(p => portfolioGlsFilter.has(p.gls_status || ''));
+    if (portfolioCimFilter.size)        rows = rows.filter(p => portfolioCimFilter.has(p.cim_step || ''));
+    if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
+    if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? (p.cim_step ? 'Yes' : 'No') : ''));
+    if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
+    if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
         rows = rows.filter(p =>
@@ -2998,59 +3586,222 @@ function getPortfolioFiltered() {
 function renderPortfolioTable() {
     const container = document.getElementById('programs-table-container');
     if (!container) return;
-    const rows = getPortfolioFiltered();
+
+    const filtered = getPortfolioFiltered();
+
+    // Index all programs by id for parent lookups
+    const allById = {};
+    allPortfolioPrograms.forEach(p => { allById[p.id] = p; });
+
+    // Index portfolio concentration rows (concentration_of links) by parent
+    const allConcsByParent = {};
+    allPortfolioPrograms.forEach(p => {
+        if (p.concentration_of) {
+            if (!allConcsByParent[p.concentration_of]) allConcsByParent[p.concentration_of] = [];
+            allConcsByParent[p.concentration_of].push(p);
+        }
+    });
+
+    // Split filtered rows into top-level and portfolio concentration rows
+    const topLevel = [];
+    const topLevelIds = new Set();
+    const matchingConcsByParent = {};
+
+    filtered.forEach(p => {
+        if (p.concentration_of && allById[p.concentration_of]) {
+            if (!matchingConcsByParent[p.concentration_of]) matchingConcsByParent[p.concentration_of] = [];
+            matchingConcsByParent[p.concentration_of].push(p);
+        } else {
+            topLevel.push(p);
+            topLevelIds.add(p.id);
+        }
+    });
+
+    // Force-include parents of matching portfolio concentration rows
+    Object.keys(matchingConcsByParent).forEach(parentId => {
+        if (!topLevelIds.has(parentId) && allById[parentId]) {
+            topLevel.push(allById[parentId]);
+            topLevelIds.add(parentId);
+        }
+    });
+
+    topLevel.sort((a, b) => {
+        let av = '', bv = '';
+        if (!portfolioSortKey || portfolioSortKey === 'name') {
+            return ((a.college || '').localeCompare(b.college || '') ||
+                    (a.program_name || '').localeCompare(b.program_name || '')) * portfolioSortDir;
+        }
+        switch (portfolioSortKey) {
+            case 'degree':    av = extractPortfolioDegree(a.program_name); bv = extractPortfolioDegree(b.program_name); break;
+            case 'college':   av = a.college || '';  bv = b.college || '';  break;
+            case 'campus':    av = a.campus  || '';  bv = b.campus  || '';  break;
+            case 'otp':       av = a.otp_status || ''; bv = b.otp_status || ''; break;
+            case 'ipd':       av = a.ipd_status || ''; bv = b.ipd_status || ''; break;
+            case 'svt':       av = a.svt_status || ''; bv = b.svt_status || ''; break;
+            case 'gls':       av = a.gls_status || ''; bv = b.gls_status || ''; break;
+            case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
+            case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
+            case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
+            case 'inworkflow':  av = a.cim_step ? 'Yes' : ''; bv = b.cim_step ? 'Yes' : ''; break;
+            case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
+            case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
+            case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
+            case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
+            case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
+                return (av - bv) * portfolioSortDir;
+            case 'perfscore2025':   av = parseFloat(a.performance_score_2025) || 0; bv = parseFloat(b.performance_score_2025) || 0;
+                return (av - bv) * portfolioSortDir;
+            default: av = a.program_name || ''; bv = b.program_name || '';
+        }
+        return av.localeCompare(bv) * portfolioSortDir;
+    });
+
+    const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter ||
+        portfolioCollegeFilter.size || portfolioCampusFilter.size ||
+        portfolioOtpFilter.size || portfolioIpdFilter.size ||
+        portfolioRosterFilter.size || portfolioGlsFilter.size || portfolioCimFilter.size ||
+        portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
+        portfolioInactAdmitFilter.size || portfolioInactTodayFilter || portfolioSearch;
+
+    // Determine which programs should be auto-expanded (search matches a curriculum concentration)
+    const autoExpand = new Set();
+    if (portfolioSearch) {
+        const q = portfolioSearch.toLowerCase();
+        allPortfolioPrograms.forEach(p => {
+            if (p.concentrations && p.concentrations.some(c => c.toLowerCase().includes(q))) {
+                autoExpand.add(p.id);
+            }
+        });
+    }
 
     const countEl = document.getElementById('portfolio-result-count');
-    if (countEl) countEl.textContent = `${rows.length} programs`;
+    if (countEl) countEl.textContent = `${topLevel.length} programs`;
 
-    if (rows.length === 0) {
+    if (topLevel.length === 0 && Object.keys(matchingConcsByParent).length === 0) {
         container.innerHTML = '<p class="empty-state">No programs match your filters.</p>';
         return;
     }
 
-    const html = `
+    const rowHtml = [];
+    topLevel.forEach(p => {
+        const portfolioConcs = anyFilterActive
+            ? (matchingConcsByParent[p.id] || [])
+            : (allConcsByParent[p.id] || []);
+        const curriculumConcs = p.concentrations || [];
+        const isExpanded = portfolioExpandedIds.has(p.id) || autoExpand.has(p.id);
+
+        rowHtml.push(renderPortfolioRow(p, {
+            hasConcentrations: curriculumConcs.length > 0,
+            isExpanded,
+        }));
+
+        // Curriculum concentrations (expand/collapse)
+        if (curriculumConcs.length > 0 && isExpanded) {
+            curriculumConcs.forEach(name => {
+                rowHtml.push(renderPortfolioConcRow(name, portfolioSearch));
+            });
+        }
+
+        // Portfolio concentration rows (always shown under parent)
+        portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
+    });
+
+    const visibleHeaders = PORTFOLIO_COLUMNS
+        .filter(c => portfolioVisibleCols.has(c.key))
+        .map(c => {
+            const active = portfolioSortKey === c.key;
+            const arrow = active ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
+            return `<th class="sortable-header${active ? ' sort-active' : ''}" onclick="sortPortfolioBy('${c.key}')">${c.label}${arrow}</th>`;
+        }).join('');
+    const nameArrow = (!portfolioSortKey || portfolioSortKey === 'name') ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
+    const nameActive = !portfolioSortKey || portfolioSortKey === 'name';
+    container.innerHTML = `
         <table class="program-table">
             <thead><tr>
-                <th>Program</th>
-                <th>College</th>
-                <th>Campus</th>
-                <th>OTP Status</th>
-                <th>IPD Status</th>
-                <th>CIM Step</th>
-                <th>Notes</th>
+                <th class="sortable-header${nameActive ? ' sort-active' : ''}" onclick="sortPortfolioBy('name')">Program${nameArrow}</th>
+                ${visibleHeaders}
             </tr></thead>
-            <tbody>
-            ${rows.map(p => renderPortfolioRow(p)).join('')}
-            </tbody>
+            <tbody>${rowHtml.join('')}</tbody>
         </table>`;
-    container.innerHTML = html;
 }
 
-function renderPortfolioRow(p) {
-    const otpBadge = p.otp_status
+function renderPortfolioConcRow(name, search) {
+    const hl = search
+        ? escapeHtml(name).replace(new RegExp(`(${escapeHtml(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
+            '<mark>$1</mark>')
+        : escapeHtml(name);
+    const blankCells = PORTFOLIO_COLUMNS
+        .filter(c => portfolioVisibleCols.has(c.key))
+        .map(() => '<td>—</td>').join('');
+    return `<tr class="portfolio-row portfolio-curriculum-conc-row">
+        <td class="program-name-cell"><span class="portfolio-curriculum-conc-indent">↳</span>${hl}</td>
+        ${blankCells}
+    </tr>`;
+}
+
+function renderPortfolioRow(p, opts = {}) {
+    const {hasConcentrations = false, isExpanded = false, isPortfolioConc = false} = opts;
+
+    const otpBadge    = p.otp_status
         ? `<span class="portfolio-badge otp-badge">${escapeHtml(p.otp_status)}</span>` : '—';
-    const ipdBadge = p.ipd_status
+    const ipdBadge    = p.ipd_status
         ? `<span class="portfolio-badge ipd-badge">${escapeHtml(p.ipd_status)}</span>` : '—';
-    const cimStep  = p.cim_completion_date
-        ? `<span class="days-at-step complete">Approved</span>`
-        : (p.cim_step ? escapeHtml(p.cim_step) : '—');
+    const svtBadge = p.svt_status
+        ? `<span class="portfolio-badge roster-badge">${escapeHtml(p.svt_status)}</span>
+           ${p.roster_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.roster_sub_status)}</span>` : ''}` : '—';
+    const glsBadge = p.gls_status
+        ? `<span class="portfolio-badge gls-badge">${escapeHtml(p.gls_status)}</span>` : '—';
+    const cimStep  = p.cim_step ? escapeHtml(p.cim_step) : '';
     const note = escapeHtml(p.note || '');
     const isStatic = typeof window._staticMode !== 'undefined';
     const noteCell = isStatic
         ? `<span class="portfolio-note-text">${note || '<span class="muted">—</span>'}</span>`
         : `<span class="portfolio-note-text" onclick="editPortfolioNote(this, '${escapeHtml(p.id)}')">${note || '<span class="muted add-note">+ add note</span>'}</span>`;
 
-    const subStatus = p.otp_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.otp_sub_status)}</span>` : '';
-    const marketSignal = p.otp_market_signal ? `<br><span class="muted" style="font-size:0.78em">${escapeHtml(p.otp_market_signal)} / ${escapeHtml(p.otp_internal_performance)}</span>` : '';
+    const subStatus    = '';  // subtitles removed per user request
+    const market2025Badge = p.market_2025
+        ? `<span class="portfolio-badge ${p.market_2025 === 'Good' ? 'badge-good' : 'badge-bad'}">${escapeHtml(p.market_2025)}</span>` : '—';
+    const perf2025Badge = p.performance_2025
+        ? `<span class="portfolio-badge ${p.performance_2025 === 'Good' ? 'badge-good' : 'badge-bad'}">${escapeHtml(p.performance_2025)}</span>` : '—';
 
-    return `<tr class="portfolio-row" title="${escapeHtml(p.program_name)}">
-        <td class="program-name-cell">${escapeHtml(p.program_name)}${subStatus}${marketSignal}</td>
-        <td>${escapeHtml(p.college) || '—'}</td>
-        <td>${escapeHtml(p.campus)  || '—'}</td>
-        <td>${otpBadge}</td>
-        <td>${ipdBadge}</td>
-        <td class="step-cell">${cimStep}</td>
-        <td class="portfolio-note-cell">${noteCell}</td>
+    const isSynthetic = (p.id || '').startsWith('synth_');
+    const concBadge = isPortfolioConc
+        ? `<span class="portfolio-conc-badge">Conc.</span> ` : '';
+    const rowClass = isPortfolioConc
+        ? 'portfolio-row portfolio-concentration-row'
+        : isSynthetic ? 'portfolio-row portfolio-synthetic-row' : 'portfolio-row';
+
+    const toggleBtn = hasConcentrations
+        ? `<button class="portfolio-conc-toggle${isExpanded ? ' expanded' : ''}"
+               onclick="event.stopPropagation();togglePortfolioConcentrations('${escapeHtml(p.id)}')"
+               title="${isExpanded ? 'Collapse' : 'Show'} concentrations">${isExpanded ? '▼' : '▶'}</button>`
+        : '';
+
+    const displayName = normalizePortfolioName(stripCampusFromName(p.program_name));
+    return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
+        <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}</td>
+        ${_pc('degree',     extractPortfolioDegree(p.program_name))}
+        ${_pc('college',    abbreviateCollege(p.college))}
+        ${_pc('campus',     abbreviateCampus(p.campus))}
+        ${_pc('market2025',      market2025Badge)}
+        ${_pc('perf2025',        perf2025Badge)}
+        ${_pc('marketscore2025', escapeHtml(p.market_score_2025 || ''))}
+        ${_pc('perfscore2025',   escapeHtml(p.performance_score_2025 || ''))}
+        ${_pc('otp',        otpBadge)}
+        ${_pc('ipd',     ipdBadge)}
+        ${_pc('svt',     svtBadge)}
+        ${_pc('gls',     glsBadge)}
+        ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
+        ${_pc('cim',       cimStep, 'step-cell')}
+        ${_pc('cimchange',   p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
+        ${_pc('inworkflow',  p.cim_program_id ? (p.cim_step ? 'Yes' : '') : '')}
+        ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
+        ${_pc('inacttoday', (() => {
+            const v = _inactAdmittingToday(p);
+            if (!v) return '';
+            return `<span class="portfolio-badge ${v === 'Yes' ? 'badge-good' : 'badge-bad'}">${v}</span>`;
+        })())}
+        ${_pc('notes',   noteCell, 'portfolio-note-cell')}
     </tr>`;
 }
 
@@ -3101,193 +3852,4 @@ async function refreshPortfolio() {
     } finally {
         if (btn) { btn.textContent = 'Refresh Data'; btn.disabled = false; }
     }
-}
-
-// ── Console modal ──────────────────────────────────────────────────────────────
-
-function openConsoleModal() {
-    const modal = document.getElementById('console-modal');
-    if (!modal) return;
-    modal.style.display = 'flex';
-    loadConsoleData();
-}
-
-function closeConsoleModal() {
-    const modal = document.getElementById('console-modal');
-    if (modal) modal.style.display = 'none';
-}
-
-function closeConsoleModalIfBackdrop(event) {
-    if (event.target.id === 'console-modal') closeConsoleModal();
-}
-
-async function loadConsoleData() {
-    const body = document.getElementById('console-modal-body');
-    body.innerHTML = 'Loading…';
-    try {
-        const resp = await fetch('/api/console');
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
-        body.innerHTML = renderConsoleContent(data);
-    } catch (e) {
-        body.innerHTML = `<p style="color:#b91c1c">Could not load console data: ${e.message}</p>`;
-    }
-}
-
-function renderConsoleContent(data) {
-    const scanLog    = (data.scan_log || []).slice().reverse();
-    const mm         = data.mismatches || {};
-    const updatedAt  = mm.updated_at;
-    const nonPrograms   = mm.non_programs   || [];
-    const ipdAdded      = mm.ipd_added      || [];
-    const svtMismatches = mm.svt_mismatches || [];
-    const ipdMismatches = mm.ipd_mismatches || [];
-    const otpMismatches = mm.otp_mismatches || [];
-    const glsMismatches = mm.gls_mismatches || [];
-
-    // ── Scan History ──────────────────────────────────────────────────────────
-    let html = '<h3 style="margin:0 0 10px">Scan History</h3>';
-    if (!scanLog.length) {
-        html += '<p class="empty-state">No scans recorded yet.</p>';
-    } else {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-        html += '<thead><tr style="background:#f1f5f9;text-align:left">'
-             + '<th style="padding:5px 8px">Started</th>'
-             + '<th style="padding:5px 8px">Completed</th>'
-             + '<th style="padding:5px 8px">Duration</th>'
-             + '<th style="padding:5px 8px">Programs</th>'
-             + '<th style="padding:5px 8px">Changes</th>'
-             + '<th style="padding:5px 8px">Status</th>'
-             + '</tr></thead><tbody>';
-        for (const entry of scanLog) {
-            const started   = entry.started_at   ? new Date(entry.started_at)   : null;
-            const completed = entry.completed_at ? new Date(entry.completed_at) : null;
-            const dur = (started && completed)
-                ? Math.round((completed - started) / 60000) + ' min' : '—';
-            const fmtDate = d => d ? d.toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
-            const rowColor = entry.error ? '#fff5f5' : '';
-            html += `<tr style="border-top:1px solid #e2e8f0;background:${rowColor}">
-                <td style="padding:5px 8px;white-space:nowrap">${fmtDate(started)}</td>
-                <td style="padding:5px 8px;white-space:nowrap">${fmtDate(completed)}</td>
-                <td style="padding:5px 8px">${dur}</td>
-                <td style="padding:5px 8px">${entry.programs_scanned ?? '—'}</td>
-                <td style="padding:5px 8px">${entry.changes ?? '—'}</td>
-                <td style="padding:5px 8px;color:${entry.error ? '#b91c1c' : '#15803d'}">${entry.error ? '✗ ' + escapeHtml(entry.error) : '✓ OK'}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-    }
-
-    // ── Portfolio Ingest Report ───────────────────────────────────────────────
-    html += '<h3 style="margin:20px 0 6px">Portfolio Ingest Report</h3>';
-    if (updatedAt) {
-        html += `<p style="color:#64748b;font-size:11px;margin:0 0 12px">Last ingest: ${new Date(updatedAt).toLocaleString()}</p>`;
-    }
-
-    // Helper: render a simple mismatch table with Source, Name, Campus, Best Guess columns
-    function _mismatchTable(rows, bgColor) {
-        if (!rows.length) return '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
-        let t = `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">`;
-        t += `<thead><tr style="background:${bgColor};text-align:left">`
-           + '<th style="padding:4px 8px">Name</th>'
-           + '<th style="padding:4px 8px">Campus</th>'
-           + '<th style="padding:4px 8px">Best Guess</th>'
-           + '</tr></thead><tbody>';
-        for (const m of rows) {
-            const name   = m.source_name || m.name || '';
-            const campus = m.source_campus || m.campus || '';
-            const guess  = m.best_guess ? escapeHtml(m.best_guess) : '<span style="color:#94a3b8">—</span>';
-            t += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(name)}</td>
-                <td style="padding:4px 8px;color:#64748b">${escapeHtml(campus)}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${guess}</td>
-            </tr>`;
-        }
-        t += '</tbody></table>';
-        return t;
-    }
-
-    // Section: Added to portfolio from SVT (new programs not in CIM)
-    const svtAdded = mm.svt_added || [];
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from SVT (${svtAdded.length})</h4>`;
-    if (!svtAdded.length) {
-        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
-    } else {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
-        html += '<thead><tr style="background:#eff6ff;text-align:left">'
-             + '<th style="padding:4px 8px">SVT Name</th>'
-             + '<th style="padding:4px 8px">SVT Campus</th>'
-             + '<th style="padding:4px 8px">CIM Format</th>'
-             + '</tr></thead><tbody>';
-        for (const p of svtAdded) {
-            html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(p.original_name || '')}</td>
-                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || '')}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-    }
-
-    // Section: Added to portfolio from IPD (new programs not in CIM)
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from IPD (${ipdAdded.length})</h4>`;
-    if (!ipdAdded.length) {
-        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
-    } else {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
-        html += '<thead><tr style="background:#eff6ff;text-align:left">'
-             + '<th style="padding:4px 8px">IPD Name</th>'
-             + '<th style="padding:4px 8px">IPD Campus</th>'
-             + '<th style="padding:4px 8px">CIM Format</th>'
-             + '<th style="padding:4px 8px">Proposal Type</th>'
-             + '</tr></thead><tbody>';
-        for (const p of ipdAdded) {
-            html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(p.original_name || p.name || '')}</td>
-                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || p.name || '')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.proposal_type || '')}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-    }
-
-    // Section: SVT mismatches
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">SVT entries with no CIM match (${svtMismatches.length})</h4>`;
-    html += _mismatchTable(svtMismatches, '#fff1f2');
-
-    // Section: IPD mismatches
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">IPD entries with no CIM match (${ipdMismatches.length})</h4>`;
-    html += _mismatchTable(ipdMismatches, '#fff1f2');
-
-    // Section: OTP mismatches
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">OTP entries with no CIM match (${otpMismatches.length})</h4>`;
-    html += _mismatchTable(otpMismatches, '#fff1f2');
-
-    // Section: GLS mismatches (usually empty)
-    if (glsMismatches.length) {
-        html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">GLS entries with no match (${glsMismatches.length})</h4>`;
-        html += _mismatchTable(glsMismatches, '#fff1f2');
-    }
-
-    // Section: Non-programs (collapsed by default; grouped by source)
-    if (nonPrograms.length) {
-        const bySource = {};
-        for (const e of nonPrograms) {
-            (bySource[e.source] = bySource[e.source] || []).push(e);
-        }
-        html += `<details style="margin-top:16px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:#64748b">Non-program entries (${nonPrograms.length})</summary>`;
-        for (const [src, rows] of Object.entries(bySource)) {
-            html += `<h5 style="margin:10px 0 4px;font-size:12px;color:#64748b">${escapeHtml(src)} (${rows.length})</h5>`;
-            html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">';
-            html += '<thead><tr style="background:#f8fafc;text-align:left"><th style="padding:3px 8px">Name</th></tr></thead><tbody>';
-            for (const e of rows) {
-                html += `<tr style="border-top:1px solid #e2e8f0"><td style="padding:3px 8px;color:#64748b">${escapeHtml(e.source_name)}</td></tr>`;
-            }
-            html += '</tbody></table>';
-        }
-        html += '</details>';
-    }
-
-    return html;
 }
