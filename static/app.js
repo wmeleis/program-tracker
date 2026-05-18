@@ -3239,14 +3239,14 @@ function renderConsoleContent(data) {
         html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
         html += '<thead><tr style="background:#eff6ff;text-align:left">'
              + '<th style="padding:4px 8px">SVT Name</th>'
+             + '<th style="padding:4px 8px">SVT Campus</th>'
              + '<th style="padding:4px 8px">CIM Format</th>'
-             + '<th style="padding:4px 8px">Campus</th>'
              + '</tr></thead><tbody>';
         for (const p of svtAdded) {
             html += `<tr style="border-top:1px solid #e2e8f0">
                 <td style="padding:4px 8px">${escapeHtml(p.original_name || '')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || '')}</td>
                 <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || '')}</td>
             </tr>`;
         }
         html += '</tbody></table>';
@@ -3260,15 +3260,15 @@ function renderConsoleContent(data) {
         html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
         html += '<thead><tr style="background:#eff6ff;text-align:left">'
              + '<th style="padding:4px 8px">IPD Name</th>'
+             + '<th style="padding:4px 8px">IPD Campus</th>'
              + '<th style="padding:4px 8px">CIM Format</th>'
-             + '<th style="padding:4px 8px">Campus</th>'
              + '<th style="padding:4px 8px">Proposal Type</th>'
              + '</tr></thead><tbody>';
         for (const p of ipdAdded) {
             html += `<tr style="border-top:1px solid #e2e8f0">
                 <td style="padding:4px 8px">${escapeHtml(p.original_name || p.name || '')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || p.name || '')}</td>
                 <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || p.name || '')}</td>
                 <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.proposal_type || '')}</td>
             </tr>`;
         }

@@ -578,6 +578,13 @@ _DEGREE_IMPLICIT_SUBJECT = {
     'DNP': 'Nursing Practice',
 }
 
+# Deployment suffix on subject after short-prefix parse: "MS Data Science - Align" →
+# subject="Data Science", degree="MS-Align" (matches CIM's "Data Science, MS—Align")
+_DEPLOYMENT_SUFFIX_RE = re.compile(
+    r'\s*[-–—]\s*(align|connect|bridge|accelerated|part[\s\-]?time|online|full[\s\-]?time)\s*$',
+    re.I
+)
+
 # Short degree prefix pattern (e.g. "MS Computer Science", "PhD Biology")
 _SHORT_DEGREE_PREFIX_RE = re.compile(
     r'^(MS|MA|MBA|MFA|MPH|MPS|MPA|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSFMBA|MSECE|'
@@ -955,6 +962,13 @@ def _parse_external_name(name_raw):
     if mm:
         deg  = _norm_degree(mm.group(1))
         subj = mm.group(2).strip().strip(',').strip()
+        # Move deployment suffix from subject to degree:
+        # "Data Science - Align" + "MS" → subject="Data Science", degree="MS-Align"
+        deploy_m = _DEPLOYMENT_SUFFIX_RE.search(subj)
+        if deploy_m:
+            dep = deploy_m.group(1).capitalize()
+            subj = subj[:deploy_m.start()].strip()
+            deg = f"{deg}-{dep}"
         return subj, deg, campus
 
     # CIM format: "Subject, Degree" (also handles "Degree, Subject" swap)
@@ -1014,22 +1028,25 @@ def _jaccard_subject(subj_a, subj_b):
     return len(wa & wb) / len(wa | wb)
 
 
-def _best_guess(subject, degree, cim_entries):
+def _best_guess(subject, degree, cim_entries, prefer_campus=''):
     """Find the best CIM candidate by word-overlap on subject. Returns name or ''."""
     norm_deg = _norm_degree(degree).lower()
+    norm_pref = _norm_campus(prefer_campus) if prefer_campus else ''
     best_name, best_score = '', 0.0
     for entry in cim_entries:
-        # Prefer same degree
         if entry['degree_norm'] != norm_deg and norm_deg:
             continue
         score = _jaccard_subject(subject, entry['subject'])
+        if norm_pref and _norm_campus(entry.get('campus', '')) == norm_pref:
+            score += 0.01  # prefer matching campus when tied
         if score > best_score and score >= 0.4:
             best_score = score
             best_name = entry['program_name']
     if not best_name:
-        # Relax degree constraint
         for entry in cim_entries:
             score = _jaccard_subject(subject, entry['subject'])
+            if norm_pref and _norm_campus(entry.get('campus', '')) == norm_pref:
+                score += 0.01
             if score > best_score and score >= 0.4:
                 best_score = score
                 best_name = entry['program_name']
@@ -1244,8 +1261,6 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                         tracker[pid] = new_row
                         n_svt_added += 1
                         cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
-                        if campus_store not in ('', 'Boston'):
-                            cim_fmt += f" ({campus_store})"
                         svt_added_log.append({
                             'original_name': p['program_name'],
                             'cim_format':    cim_fmt,
@@ -1274,7 +1289,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                         row['roster_launch_date']   = p['roster_launch_date']
                 else:
                     n_svt_mismatch += 1
-                    best = _best_guess(subject, degree, cim_entries_list)
+                    best = _best_guess(subject, degree, cim_entries_list,
+                                       prefer_campus=campus_from_name or '')
                     svt_mismatches.append({
                         'source_name':   p['program_name'],
                         'source_campus': _svt_campus_override or p['campus'],
@@ -1363,7 +1379,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                             'source_name':   p['program_name'],
                             'source_campus': campus_from_name or '',
                             'reason':        'no recognizable degree',
-                            'best_guess':    _best_guess(subject, degree, cim_entries_list),
+                            'best_guess':    _best_guess(subject, degree, cim_entries_list,
+                                                        prefer_campus=campus_from_name or ''),
                         })
                         continue
                     # Add new tracker entry
@@ -1374,8 +1391,6 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                                             p.get('ipd_college', ''), campus_store)
                         tracker[pid] = new_row
                         cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
-                        if campus_store not in ('', 'Boston'):
-                            cim_fmt += f" ({campus_store})"
                         ipd_added_log.append({
                             'name':          p['program_name'],
                             'original_name': p['program_name'],
@@ -1392,7 +1407,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     continue
                 else:
                     n_ipd_mismatch += 1
-                    best = _best_guess(subject, degree, cim_entries_list)
+                    best = _best_guess(subject, degree, cim_entries_list,
+                                       prefer_campus=campus_from_name or '')
                     ipd_mismatches.append({
                         'source_name':   p['program_name'],
                         'source_campus': campus_from_name,
@@ -1420,7 +1436,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     'source_name':   p['program_name'],
                     'source_campus': campus_from_name or '',
                     'reason':        'no recognizable degree',
-                    'best_guess':    _best_guess(subject, degree, cim_entries_list),
+                    'best_guess':    _best_guess(subject, degree, cim_entries_list,
+                                                prefer_campus=campus_from_name or ''),
                 })
             else:
                 campus_store = campus_from_name or 'Boston'
@@ -1430,8 +1447,6 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                                         p.get('ipd_college', ''), campus_store)
                     tracker[pid] = new_row
                     cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
-                    if campus_store not in ('', 'Boston'):
-                        cim_fmt += f" ({campus_store})"
                     ipd_added_log.append({
                         'name':          p['program_name'],
                         'original_name': p['program_name'],
@@ -1447,7 +1462,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     row['ipd_additional_college'] = p.get('ipd_additional_college', '')
         else:
             n_ipd_mismatch += 1
-            best = _best_guess(subject, degree, cim_entries_list)
+            best = _best_guess(subject, degree, cim_entries_list,
+                               prefer_campus=campus_from_name or '')
             ipd_mismatches.append({
                 'source_name':   p['program_name'],
                 'source_campus': campus_from_name or '',
@@ -1488,7 +1504,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 row['college'] = p['college']
         else:
             n_otp_mismatch += 1
-            best = _best_guess(subject, degree, cim_entries_list)
+            best = _best_guess(subject, degree, cim_entries_list, prefer_campus='Boston')
             otp_mismatches.append({
                 'source_name':   otp_name,
                 'source_campus': 'Boston',
