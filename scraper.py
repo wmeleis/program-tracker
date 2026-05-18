@@ -240,6 +240,7 @@ CATALOG_ROLE_SHORT_NAMES = {
 }
 
 
+
 def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     """Execute JavaScript in a Chrome tab via AppleScript using a temp file for complex JS."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
@@ -272,7 +273,7 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     # while, the first call wakes the tab up.
     applescript_fast = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
-    tell application "{BROWSER_APP}"
+    tell application "{BROWSER_APP}" without activating
         set tabIdx to 0
         set n to count of tabs of window 1
         repeat with i from 1 to n
@@ -286,10 +287,14 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
         return result
     end tell
     '''
+    # Wakeup path: switches to the target tab, runs JS, then switches back.
+    # Focus-save/restore is done INSIDE the script (atomic) so there is no
+    # Python-level timing gap where Chrome can grab the screen.
     applescript_wakeup = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
-    tell application "{BROWSER_APP}"
-        activate
+    -- Save frontmost app before touching Chrome
+    set prevApp to name of (info for (path to frontmost application))
+    tell application "{BROWSER_APP}" without activating
         set tabIdx to 0
         set n to count of tabs of window 1
         repeat with i from 1 to n
@@ -309,8 +314,12 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
         if prevIdx is not tabIdx then
             set active tab index of window 1 to prevIdx
         end if
-        return jsResult
     end tell
+    -- Restore focus to whatever was frontmost before (without activating Chrome)
+    if prevApp is not "{BROWSER_APP}" then
+        tell application prevApp to activate
+    end if
+    return jsResult
     '''
     def _run(script, tmo):
         return subprocess.run(
@@ -319,15 +328,13 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
         )
 
     try:
-        # Cheap path: no activation, no tab switching. Works when Edge
+        # Cheap path: no activation, no tab switching. Works when Chrome
         # is already the user's active app and the target tab is
         # currently active (or recently was).
         result = _run(applescript_fast, timeout)
-        # Common Edge-throttle symptom: AppleEvent timed out (-1712)
-        # caused by stuck JS engine on a backgrounded tab. Retry with
-        # the wakeup path, which activates the browser and switches to
-        # the tab. One retry is enough — if that fails, something else
-        # is wrong (session expired, tab really missing, etc.).
+        # Common throttle symptom: AppleEvent timed out (-1712) caused by
+        # stuck JS engine on a backgrounded tab. Retry with the wakeup
+        # path, which switches to the tab and retries.
         if result.returncode != 0 and 'AppleEvent timed out' in (result.stderr or ''):
             result = _run(applescript_wakeup, timeout)
         os.unlink(js_file)
@@ -1893,16 +1900,27 @@ def sweep_all_course_ids(start_id=1, end_id=25000, batch_size=25, log=True):
         is_complete = no_workflow or all_approved
 
         # Course code/title from XML.  CIM exposes a pre-formatted "ARAB 1101"
-        # in <code>; fall back to subject+number if missing.
+        # in <code>; fall back to subject+number, then HTML scan, if missing or
+        # purely numeric (some CIM courses return the CIM ID in <code>).
         course_code = (meta.get('course_code') or '').strip()
+        if course_code.isdigit():
+            course_code = ''  # treat numeric-only <code> as missing
         if not course_code:
             subject = (meta.get('subject') or '').strip()
             number = (meta.get('course_number') or '').strip()
             course_code = (subject + ' ' + number).strip() if (subject and number) else ''
+        if not course_code:
+            course_code = (meta.get('html_course_code') or '').strip()
         title = meta.get('course_title') or course_code or f"Course {cid}"
         if not course_code:
-            # Best-effort fallback: use existing DB code
-            course_code = existing.get(cid, {}).get('code') or cid
+            # Use existing DB code if it's a real letter code; otherwise leave
+            # empty rather than locking in the numeric CIM ID as the code.
+            existing_code = existing.get(cid, {}).get('code') or ''
+            course_code = existing_code if existing_code and not existing_code.isdigit() else ''
+            # DEBUG: log all meta fields for first missing-code course
+            if not course_code and not getattr(process_course_scans, '_debug_logged', False):
+                process_course_scans._debug_logged = True
+                print(f"DEBUG course {cid} meta fields: {dict(meta)}")
 
         college_code = meta.get('college', '')
         college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
@@ -3871,6 +3889,11 @@ def batch_fetch_course_details(course_ids, batch_size=25):
                     }});
                 }}
                 var stripTags = function(s) {{ return s.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\\s+/g, " ").trim(); }};
+                // Extract course code from page title or h1 (e.g. "ABRD 1001").
+                // Only look in <title>/<h1> to avoid false matches in approval logs.
+                var titleMatch = html.match(/<title[^>]*>[^<]*?([A-Z]{{2,6}}\\s+\\d{{4}})[^<]*<\/title>/i)
+                             || html.match(/<h1[^>]*>[^<]*?([A-Z]{{2,6}}\\s+\\d{{4}})[^<]*<\/h1>/i);
+                if (titleMatch) result.meta.html_course_code = titleMatch[1];
                 var dsMatch = html.match(/Date Submitted:[\\s\\S]{{0,120}}?([A-Z][a-z]{{2}},\\s*\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}[\\d:\\s]*GMT)/i);
                 if (dsMatch) result.meta.date_submitted = dsMatch[1].replace(/\\s+/g, " ").trim();
                 var leMatch = html.match(/Last edit[\\s\\S]{{0,300}}?([A-Z][a-z]{{2}},\\s*\\d+\\s+[A-Z][a-z]+\\s+\\d{{4}}[\\d:\\s]*GMT)/i);
@@ -4233,16 +4256,36 @@ def process_course_scans(courses, force_fetch_only=False):
         if cid not in active_ids:
             continue
         name = c['name']
-        course_code = cid
         title = name
         m = re.match(r'^([A-Z]+\s+\d+):\s*(.+)$', name)
         if m:
             course_code = m.group(1)
             title = m.group(2)
+        else:
+            course_code = ''
 
         detail = details.get(cid, {})
         steps = detail.get('steps', [])
         meta = detail.get('meta', {})
+
+        # Resolve course code from XML metadata when the name didn't have it.
+        # CIM's <code> element is pre-formatted "ARAB 1101" but can return the
+        # numeric CIM ID for some courses — treat that as missing.
+        if not course_code:
+            xml_code = (meta.get('course_code') or '').strip()
+            if xml_code and not xml_code.isdigit():
+                course_code = xml_code
+        if not course_code:
+            subject = (meta.get('subject') or '').strip()
+            number = (meta.get('course_number') or '').strip()
+            course_code = (subject + ' ' + number).strip() if (subject and number) else ''
+        if not course_code:
+            course_code = (meta.get('html_course_code') or '').strip()
+        if not course_code:
+            existing_code = existing.get(cid, {}).get('code') or ''
+            course_code = existing_code if existing_code and not existing_code.isdigit() else ''
+        if not course_code:
+            course_code = cid  # last resort: numeric CIM ID
 
         total_steps = len(steps)
         completed_steps = sum(1 for s in steps if s.get('status') == 'approved')
