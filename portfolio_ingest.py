@@ -1484,15 +1484,20 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     row['college'] = _new_col
             else:
                 if _is_valid_degree(degree):
-                    # Add new tracker entry from SVT
+                    # Add new tracker entry from SVT — store the program_name
+                    # in CIM canonical format "Subject, Degree (Campus)" so
+                    # the Portfolio's credential-extraction and display logic
+                    # works the same on external-added rows as on CIM-seeded rows.
                     campus_store = campus_from_name or 'Boston'
-                    pid = _make_id(_svt_name, campus_store)
+                    cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+                    cim_display = (cim_fmt if campus_store == 'Boston'
+                                   else f"{cim_fmt} ({campus_store})")
+                    pid = _make_id(cim_display, campus_store)
                     if pid not in tracker:
-                        new_row = _make_row(pid, _svt_name,
+                        new_row = _make_row(pid, cim_display,
                                             p.get('college', ''), campus_store)
                         tracker[pid] = new_row
                         n_svt_added += 1
-                        cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
                         svt_added_log.append({
                             'original_name': p['program_name'],
                             'cim_format':    cim_fmt,
@@ -1618,16 +1623,18 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                                                         prefer_campus=campus_from_name or ''),
                         })
                         continue
-                    # Add new tracker entry
+                    # Add new tracker entry — use CIM canonical name format
                     campus_store = campus_from_name
-                    pid = _make_id(p['program_name'], campus_store)
+                    cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+                    cim_display = (cim_fmt if campus_store == 'Boston'
+                                   else f"{cim_fmt} ({campus_store})")
+                    pid = _make_id(cim_display, campus_store)
                     if pid not in tracker:
-                        new_row = _make_row(pid, p['program_name'],
+                        new_row = _make_row(pid, cim_display,
                                             p.get('ipd_college', ''), campus_store)
                         tracker[pid] = new_row
-                        cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
                         ipd_added_log.append({
-                            'name':          p['program_name'],
+                            'name':          cim_display,
                             'original_name': p['program_name'],
                             'cim_format':    cim_fmt,
                             'campus':        campus_store,
@@ -1677,14 +1684,16 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 })
             else:
                 campus_store = campus_from_name or 'Boston'
-                pid = _make_id(p['program_name'], campus_store)
+                cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+                cim_display = (cim_fmt if campus_store == 'Boston'
+                               else f"{cim_fmt} ({campus_store})")
+                pid = _make_id(cim_display, campus_store)
                 if pid not in tracker:
-                    new_row = _make_row(pid, p['program_name'],
+                    new_row = _make_row(pid, cim_display,
                                         p.get('ipd_college', ''), campus_store)
                     tracker[pid] = new_row
-                    cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
                     ipd_added_log.append({
-                        'name':          p['program_name'],
+                        'name':          cim_display,
                         'original_name': p['program_name'],
                         'cim_format':    cim_fmt,
                         'campus':        campus_store,

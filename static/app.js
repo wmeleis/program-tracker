@@ -3434,8 +3434,8 @@ setInterval(() => {
 // ==================== Portfolio view ====================
 
 const PORTFOLIO_COLUMNS = [
-    {key: 'degree',       label: 'Degree',
-        help: 'Degree level (BS / MS / PhD / Certificate / Minor / PlusOne / Concentration / Dual). Detected from the program name and CIM degree code.'},
+    {key: 'degree',       label: 'Credential',
+        help: 'Academic credential the program leads to (BS / MS / PhD / Prof Doctorate / CAGS / Certificate / Minor / Dual Degree / Concentration). Detected from the program name in CIM "Subject, Degree" format; SVT/IPD-added rows are normalized to that format at ingest so this column is filled for every program.'},
     {key: 'college',      label: 'College',
         help: 'Owning college. From CIM XML for tracked programs; SVT/IPD-supplied values are normalized to the canonical CIM name so duplicates and abbreviations are merged.'},
     {key: 'campus',       label: 'Campus',
@@ -3608,52 +3608,94 @@ function classifyPortfolioLevel(name) {
     return null;
 }
 
+// Credential = the academic award the program leads to (BS, MS, PhD, CAGS,
+// Graduate Certificate, etc.). Field on the Portfolio used to be called
+// "Degree"; it is now displayed as "Credential" everywhere but the internal
+// key stays 'degree' so column-visibility localStorage entries continue to work.
+
+// _CRED_SETS group every known degree abbreviation into one of the
+// dashboard's filter buckets. Used by both extract (per-row label) and
+// classify (filter-button match).
+const _CRED_SETS = {
+    "Bachelor's":    new Set(['BS','BA','BFA','BARCH','BSN','BSBA','BSCF','BACS','BSCS','BSCE','BSCHE','BSCMPE','BSIE','BSME','BSIS','AA']),
+    "Master's":      new Set(['MS','MA','MBA','MFA','MPS','MPA','MPP','MPH','MED','MARCH','MDES','MSCS','MSIS','MSOR','MSCP','MSML','MSBA','MENG','MSJ','MSW','MAT','MSCIVE','MSECE','MSCH E','MSFMBA','MSENVE','MSSBS','LLM']),
+    "PhD":           new Set(['PHD','PH.D']),
+    "Prof Doctorate":new Set(['DNP','DPT','DPS','DLP','EDD','DMSC','PHARMD','JD','JSSD','LLM']),
+    "CAGS":          new Set(['CAGS']),
+    "Certificate":   new Set(['CERTG','CERTU','CERTP','CERT']),
+};
+
+function _credentialFromCode(rawIn) {
+    const raw = (rawIn || '').toUpperCase().replace(/\./g, '');
+    if (_CRED_SETS["CAGS"].has(raw))           return 'CAGS';
+    if (_CRED_SETS["PhD"].has(raw))            return 'PhD';
+    if (_CRED_SETS["Prof Doctorate"].has(raw)) return 'Prof Doctorate';
+    if (_CRED_SETS["Master's"].has(raw))       return "Master's";
+    if (_CRED_SETS["Bachelor's"].has(raw))     return "Bachelor's";
+    if (_CRED_SETS["Certificate"].has(raw) || raw.startsWith('CERT')) return 'Certificate';
+    // Heuristic fallbacks for unknown but pattern-consistent codes
+    if (raw.startsWith('M') && raw.length >= 2 && raw.length <= 10) return "Master's";
+    if (raw.startsWith('B') && raw.length >= 2 && raw.length <= 10) return "Bachelor's";
+    return '';
+}
+
 function extractPortfolioDegree(name) {
-    const n = (name || '').replace(/\s*\([^)]*\)\s*/g, '').replace(/\s*—.*$/, '').trim();
-    // Multi-word patterns first
-    if (/\b(Graduate\s+Certificate|CERTG)\b/i.test(n)) return 'Certificate';
-    if (/\bUndergraduate\s+Certificate\b/i.test(n))    return 'Certificate';
-    if (/\bCertificate\b/i.test(n))                    return 'Certificate';
-    if (/\bBachelor\b/i.test(n))                       return "Bachelor's";
-    // Degree abbreviation after last comma
-    const m = n.match(/,\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*$/);
+    // Strip campus parentheticals.  DO NOT strip em-dash here because many
+    // legitimate CIM names use em-dash mid-string (e.g.
+    // "Nursing—Adult-Gerontology Nurse Practitioner, Acute Care, MS").
+    // Em-dash deployment suffixes ("MSCS—Align") are handled later when
+    // matching the trailing degree code.
+    const n = (name || '').replace(/\s*\([^)]*\)\s*/g, '').trim();
+    // 1) Multi-word phrases (most specific first)
+    if (/\bCertificate of Advanced Graduate Study|\bCAGS\b/i.test(n)) return 'CAGS';
+    if (/\b(Graduate\s+Certificate|CERTG|Undergraduate\s+Certificate|Certificate)\b/i.test(n)) return 'Certificate';
+    if (/\bMaster\s+of\s+(Science|Arts|Public\s+Health|Public\s+Administration|Public\s+Policy|Fine\s+Arts|Education|Architecture|Design|Business\s+Administration|Professional\s+Studies)\b/i.test(n)) return "Master's";
+    if (/\bMasters?\s+(of|in)\b|\bMastes\s+of\b/i.test(n)) return "Master's";
+    if (/\bBachelor\s+of\b|\bBachelors?\b/i.test(n)) return "Bachelor's";
+    if (/\bDoctor\s+of\s+Philosophy\b/i.test(n)) return 'PhD';
+    if (/\bDoctor\s+of\b/i.test(n))              return 'Prof Doctorate';
+    if (/\bDoctorate\b/i.test(n))                return 'Prof Doctorate';
+    // 2) Degree code AFTER last comma — primary CIM convention.
+    // Allow optional em-dash/hyphen deployment suffix (Align / Connect /
+    // Post-Master's / Bridge—Online / etc.).
+    const m = n.match(/,\s*([A-Za-z][A-Za-z0-9\.]{0,9})\s*(?:[—\-]\s*[A-Za-z][A-Za-z\-'’ ]*)*\s*$/);
     if (m) {
-        const raw = m[1].trim().toUpperCase();
-        if (raw === 'PHD' || raw === 'PH.D') return 'PhD';
-        if (raw === 'CAGS')                  return 'CAGS';
-        // Professional doctorates
-        if (['DNP','DPT','DPS','DLP','EDD','DMSC','PHARMD',
-             'JD','JSSD'].includes(raw))     return 'Prof Doctorate';
-        // Master's: M-prefix or known abbrevs
-        if (raw.startsWith('M') || ['LLM','MAT','MED'].includes(raw))
-                                             return "Master's";
-        // Bachelor's: B-prefix
-        if (raw.startsWith('B') || raw === 'AA')
-                                             return "Bachelor's";
-        // Catch-all certificate codes
-        if (raw.startsWith('CERT') || raw === 'CERTG')
-                                             return 'Certificate';
+        const out = _credentialFromCode(m[1]);
+        if (out) return out;
     }
-    // No comma fallbacks
-    if (/\bMinor\b/i.test(n))    return 'Minor';
-    if (/\bDoctorate\b/i.test(n)) return 'Prof Doctorate';
-    if (/\bPlusOne\b|4\+1/i.test(n)) return "Master's";
+    // 2b) Slash-joined dual codes: ", MS/MBA" → Master's
+    const md = n.match(/,\s*([A-Z]{2,6})\s*\/\s*([A-Z]{2,6})\s*$/);
+    if (md) {
+        const a = _credentialFromCode(md[1]);
+        const b = _credentialFromCode(md[2]);
+        if (a || b) return 'Dual Degree';
+    }
+    // 2c) Hyphen-joined codes: "RN-to-BSN" → Bachelor's; capture the last code
+    const mh = n.match(/[\s,]([A-Z]{2,6})(?:\s*$)/);
+    if (mh) {
+        const out = _credentialFromCode(mh[1]);
+        if (out) return out;
+    }
+    // 3) Degree code at START of name (external feeds: "MS Genetic Counseling", "LLM International Law")
+    const m2 = n.match(/^\s*(LLM|MS|MA|MBA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSCP|MSML|MSBA|MEng|MSW|MAT|BS|BA|BFA|BSN|BArch|PhD|EdD|DNP|DPT|JD|CAGS|CERTG|Cert)\b/i);
+    if (m2) {
+        const out = _credentialFromCode(m2[1]);
+        if (out) return out;
+    }
+    // 4) Other word patterns
+    if (/\bMinor\b/i.test(n))         return 'Minor';
+    if (/\bConcentration\b/i.test(n)) return 'Concentration';
+    if (/\bPlusOne\b|4\+1/i.test(n))  return "Master's";
     return '';
 }
 
 function classifyPortfolioDegree(name) {
+    // Same logic as extract, so the filter button matches the column value
+    // exactly. Dual-Degree detection added as an override.
     const n = name || '';
     if (/\bDual.?Degree\b/i.test(n) ||
         /\b(MS|MPH|MA|MBA|PharmD)\b.{1,20}&.{1,20}\b(MS|MPH|MA|MBA|PharmD|DNP)\b/.test(n)) return 'Dual Degree';
-    if (/\b(PhD|Ph\.D|EdD|DPT|DNP|DMSC)\b/.test(n) || /\bDoctor(ate)?\b/i.test(n)) return 'Doctorate';
-    if (/\b(BS|BA|BFA|BArch|BSN|BSBA|BSCF)\b/.test(n) || /\bBachelor/i.test(n)) return "Bachelor's";
-    if (/\b(MS|MA|MBA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSFMBA|MSEnvE|MSSBS)\b/.test(n) ||
-        /\bMaster/i.test(n)) return "Master's";
-    if (/\b(CERT|CERTG)\b/i.test(n) || /\bCertificate\b/i.test(n)) return 'Certificate';
-    if (/\bMinor\b/i.test(n)) return 'Minor';
-    if (/\bPlus.?One\b|\b4\+1\b/i.test(n)) return 'Plus One';
-    if (/\bConcentration\b/i.test(n)) return 'Concentration';
-    return null;
+    return extractPortfolioDegree(name) || null;
 }
 
 function setPortfolioLevel(btn, val) {
