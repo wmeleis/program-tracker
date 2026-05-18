@@ -491,6 +491,52 @@ A third entity type alongside programs and courses. Catalog pages are individual
   - The "Complete" button is hidden on catalog view (no completion concept).
 - **Static export:** `data.json` includes `catalog_pages` and `catalog_pipeline`. The static-mode `loadCatalogDashboard` override calls both `populateCatalogCollegeFilter` and `populateCatalogApproverFilter` so the GitHub Pages site behaves identically to the Flask version.
 
+### Portfolio View
+Fourth tab alongside CIM Programs / Courses / Catalog. A cross-system program portfolio that merges four data sources and surfaces tracking status, market scoring, and CIM workflow state for every program in the university's portfolio.
+
+**Data sources (merged by `portfolio_ingest.py`):**
+1. **CIM programs table** — ALL programs (active + completed history); the authoritative seed
+2. **SVT Roster TSV** — GLS/SVT Roster of Record statuses; fetched live from Smartsheet via Chrome
+3. **IPD Smartsheet TSV** — IPD development status; fetched live from Smartsheet via Chrome
+4. **OTP Excel** (sheet "OTP Program Tracking") — market/approval status; Boston-only; will be deprecated
+5. **GLS Tableau CSV** — GLS per-campus status data; fetched live from Smartsheet via Chrome
+6. **2025 Scoring Excel** — market/performance scoring; Boston-only; supplementary
+
+All feed files are saved to `data/portfolio_feeds/` inside the project directory (never `~/Downloads/`).
+
+**Automatic update after every scan:** `fetch_portfolio_data.py` runs first (re-downloads all feeds via Chrome), then `portfolio_ingest()` is called inside `do_scan()` after the scraper completes, *before* the fingerprint check. `portfolio_programs` is included in `compute_db_fingerprint()` so portfolio changes trigger a static re-export + git push.
+
+**Ingest algorithm (CIM-seed approach):**
+1. **Step 0 — CIM seed**: Query all programs WHERE `current_step IS NOT NULL` OR `completion_date IS NOT NULL`. Deduplicate by name (prefer active proposal, then highest id). Build `cim_exact_index` keyed by (norm_subject, norm_degree, norm_campus) and `cim_nameDeg_index` keyed by (norm_subject, norm_degree). This is the complete portfolio — external sources only update existing entries or add genuinely new programs.
+2. **Step 1 — SVT overlay**: For each SVT entry, look up CIM by (subject, degree, campus). Match → update `svt_status`/`roster_*` fields. No match AND valid degree → add new tracker entry. No match AND no valid degree → mismatch. Multi-campus entries (e.g. "X, Boston and Oakland, GC") are expanded into one virtual entry per campus via `_expand_multi_campus` before matching.
+3. **Step 2 — IPD overlay**: Exact match → update `ipd_status`. Name+degree match with campus in tracker → update. Name+degree match with campus NOT in tracker + proposal is Launch/Deploy → add new entry. Otherwise → mismatch. Multi-campus names are expanded similarly.
+4. **Step 3 — OTP overlay (Boston-only)**: Match → update `otp_*` fields. No match → mismatch. OTP names are pre-processed by `_preprocess_otp_name()` to expand abbreviations (Mgmt→management, &→and, Quant→quantitative, etc.) before matching.
+5. **Step 4 — GLS overlay**: Campus-aware Jaccard word-overlap matching against tracker rows.
+6. **Step 5 — 2025 scoring**: Boston-only; supplementary; no mismatch logging.
+
+**Non-program detection:** `_is_non_program(name)` checks entries from SVT and IPD before matching. Entries matching `_NON_PROGRAM_RE` (boot camps, badges, non-credit, chaplaincy, pilot AI coaches, apprenticeships, workforce re-entry, etc.) or `_COURSE_CODE_RE` (e.g. "ALY 6040") or containing semicolons or matching `_MULTI_PROG_DEGREE_RE` (two degree tokens around "and", e.g. "MSIS and MSIS Bridge In Miami", "MS CEE and MS BIOE in TOR") are routed to a separate `non_programs` list in `portfolio_mismatches.json`.
+
+**Key columns in `portfolio_programs` table:** `id` (TEXT PK, either `cim_{id}` or a name-based slug for SVT/IPD-added entries), `program_name`, `college`, `campus`, `cim_program_id` (FK into `programs.id`), `cim_step`, `cim_change_type` (New/Change/Inactivation), `cim_completion_date`, `otp_status`, `ipd_status`, `roster_status`, `roster_launch_date`, `market_2025`, `performance_2025`, `market_score_2025`, `performance_score_2025`.
+
+**Matching logic:**
+- CIM names are in `"Subject, Degree (Campus)"` format. Both exact (3-tuple subject/degree/campus) and name+degree-only (2-tuple) indexes are built.
+- `_norm_subject()` normalizes dashes, converts `&` → `and`, collapses whitespace.
+- `_norm_degree()` handles long-form ("Master of Science" → "MS"), removes dots ("M.S." → "MS"), and preserves specific codes (MSCS ≠ MS).
+- External source names are parsed by `_parse_external_name()` which tries in order: long-form prefix ("Master of Science in X" → MS + X), short prefix ("MS X"), CIM format ("X, MS"), trailing Graduate Certificate, trailing short degree, fallback. Additional normalizations: strips `"at Roux"` suffix and sets campus=Portland; strips leading `"- descriptor"` from subject after long-form match (e.g. "Doctor of Professional Studies - New Concentrations" → subject="" → implicit "Professional Studies"); strips `"- descriptor"` from degree in CIM-format path (e.g. "MS - new CAMD concentration" → "MS"); detects "DEGREE, Subject" swap (e.g. "MS, Occupational Therapy" → subject="Occupational Therapy", degree="MS").
+- `_LONG_DEGREE_MAP` includes DPS (Doctor of Professional Studies) and DLP (Doctor of Law and Policy). `_DEGREE_IMPLICIT_SUBJECT` maps degree codes to implicit subjects when the source name has no subject (DPS → "Professional Studies", DLP → "Law and Policy").
+- `_is_valid_degree()` rejects campus names (Boston, Oakland, etc.) via `_DEGREE_BLOCKLIST` even if they're all-caps and would otherwise pass the `^[A-Z][A-Z0-9]{1,9}$` regex.
+- `_is_non_program()` also flags multi-program bundles via `_MULTI_PROG_DEGREE_RE` — entries where two distinct degree tokens appear around "and".
+- `_expand_multi_campus(name, source_campus)` splits entries with multiple campus names into one `(skeleton_name, campus)` pair per campus. E.g. "Urban Analytics, Boston, Arlington and Oakland, Graduate Certificate" → 3 entries, one per campus.
+- `_best_guess()` uses Jaccard word-overlap (≥0.4 threshold) on the subject to find the closest CIM match for mismatch reporting.
+
+**`portfolio_mismatches.json` output:** `{updated_at, non_programs, svt_mismatches, svt_added, ipd_mismatches, ipd_added, otp_mismatches, gls_mismatches}`. Read by `/api/console` and rendered in the Console modal's Portfolio Ingest Report section.
+
+**Frontend badge logic:** `cim_program_id` set + `cim_change_type = 'Inactivation'` → red "Inactive" badge; `cim_program_id` set + other type → green "Active" badge; no `cim_program_id` → blank.
+
+**Name normalization for display:** `normalizePortfolioName()` in `static/app.js` converts "Bachelor of Science in X" → "X, BS" etc.
+
+**View persistence:** The active view (CIM Programs / Courses / Catalog / Portfolio) is saved to `localStorage['cim-active-view']` and restored on page load, so navigating away and back keeps the user's context.
+
 ### Courses View
 Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggled via the Courses/Programs buttons in the header (Courses is now first).
 
