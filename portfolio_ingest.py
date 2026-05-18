@@ -986,6 +986,210 @@ def _best_eff_cat(eff_cat, completion_date, cim_step=''):
     return ''
 
 
+# ── Portfolio data-quality framework ──────────────────────────────────────
+# Restored from commit 9fbab3e (and its predecessors) which was wiped by the
+# 79de674 ingest rewrite. Drives REMOVE / RENAME / Roux-strip / explicit
+# concentration parent-linking / synthetic-parent creation so every
+# concentration row ends up nested under a real or synthesized parent.
+
+_ABBREV_MAP = [
+    (r'\s*&\s*',      ' and '),
+    (r'\bmgmt\b',     'management'),
+    (r'\bsci\b',      'science'),
+    (r'\bsciences\b', 'science'),
+    (r'\bsvcs\b',     'services'),
+    (r'\badmin\b',    'administration'),
+    (r'\benvrnt\b',   'environment'),
+    (r'\benv\b',      'environment'),
+    (r'\bsustain\b',  'sustainable'),
+    (r'\bapp\b',      'applied'),
+    (r'\brehab\b',    'rehabilitation'),
+    (r'\binfo\b',     'information'),
+    (r'\bintl\b',     'international'),
+    (r'\bsoc\b',      'social'),
+    (r'\beduc\b',     'education'),
+    (r'\bquant\b',    'quantitative'),
+    (r'\binnov\b',    'innovation'),
+    (r'\bcomm\b',     'communication'),
+    (r'\bchem\b',     'chemistry'),
+    (r'\bsystems\b',  'system'),
+]
+_ABBREV_RE = [(re.compile(p, re.I), r) for p, r in _ABBREV_MAP]
+
+# Deployment-variant suffixes to strip before core comparison
+_DEPLOY_SUFFIX = re.compile(
+    r'[\s,]*[-—]?\s*(align|connect|bridge|accelerated|part.?time)\b.*$', re.I)
+
+# Leading "DEGREE in/of X" form
+_DEGREE_PREFIX = re.compile(
+    r'^(ms|ma|mps|mpa|mph|mba|mfa|med|mem|march|mdes|mscs|msis|msor|msfmba|msece|'
+    r'msene|mssbs|dnp|dpt|dmsc|edd|phd|jd|llm|dlp|bs|ba|bfa|barch|bsn|bsba|bscf|'
+    r'certg?|mat|mbe)\s+(?:in\s+|of\s+)?(.+)$', re.I)
+
+# Concentration parent-name patterns
+_CONC_WITH = re.compile(
+    r'^(.+?)\s+with\s+(?:a\s+)?Concentration\s+in\s+[^,]+,\s+([A-Z][^\s(,]+(?:\s*\([^)]+\))?)\s*$',
+    re.I)
+_CONC_DASH = re.compile(
+    r'^(.+?)\s*[-—]\s*[^-—,]+?\s+Concentration,?\s+([A-Z][^\s(,]+(?:\s*\([^)]+\))?)\s*$',
+    re.I)
+
+
+def _expand_abbrevs(s):
+    for pat, repl in _ABBREV_RE:
+        s = pat.sub(repl, s)
+    return s
+
+
+def _degree_core(name):
+    """Normalized key with degree but no campus/deployment suffix.
+    'MS Computer Science' and 'Computer Science, MS (Boston)' both produce
+    'computer science, ms'."""
+    s = _norm(name).replace('—', '-').replace('–', '-')
+    s = re.sub(r'\([^)]*\)', '', s)
+    s = _DEPLOY_SUFFIX.sub('', s)
+    s = re.sub(r'\bgraduate\s+certificate\b', 'certg', s, flags=re.I)
+    s = re.sub(r'\bmaster\s+of\s+\w+(\s+(in|of))?\s*', 'ms ', s, flags=re.I)
+    s = _expand_abbrevs(s)
+    m = _DEGREE_PREFIX.match(s.strip())
+    if m:
+        deg, rest = m.group(1).lower(), m.group(2).strip()
+        s = f"{rest}, {deg}"
+    return re.sub(r'\s+', ' ', s).strip().rstrip(',').strip()
+
+
+def _extract_parent_name(name):
+    """Extract a parent program name from a concentration name, or None."""
+    m = _CONC_WITH.match(name)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    m = _CONC_DASH.match(name)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    # "X with <Anything> Concentration, DEG" — adjective form
+    # e.g. "International Affairs with African Studies Concentration, BA"
+    m = re.match(
+        r'^(.+?)\s+with\s+[^,]+?\s+Concentration,?\s+([A-Z][A-Za-z0-9\-]*)\s*(?:\([^)]+\))?\s*$',
+        name, re.I)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    # "Concentration in X - DEG" / "Concentration in X, DEG"
+    # e.g. "Concentration in Health Care Management & Policy - MPP"
+    m = re.match(
+        r'^Concentration\s+in\s+(.+?)\s*[-—,]\s*([A-Z][A-Za-z0-9\-]*)\s*$',
+        name, re.I)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    # "X and concentrations, DEG" / "X and concentration, DEG"
+    m = re.match(
+        r'^(.+?)\s+and\s+concentrations?,\s+([A-Z][A-Za-z0-9\-]*)\s*$',
+        name, re.I)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    # "X, concentration in Y, DEG" (with extra comma)
+    # e.g. "Journalism and Art, with a concentration in Visual Studies"
+    m = re.match(
+        r'^(.+?)\s*,\s*with\s+(?:a\s+)?concentration\s+in\s+',
+        name, re.I)
+    if m:
+        return m.group(1).strip()
+    # "X (... concentration ...), DEG" / "X (new concentration in Y), DEG"
+    m = re.match(
+        r'^(.+?)\s*\(\s*[^)]*concentration[^)]*\)\s*,\s*([A-Z][A-Za-z0-9\-]*)\s*$',
+        name, re.I)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    # "X, ... concentration, DEG" / "X concentration Bridge Program, MS"
+    m = re.match(
+        r'^(.+?)[\s,]+[^,]+?\s+concentration\b[^,]*,\s+([A-Z][A-Za-z0-9\-]*)\s*(?:\([^)]+\))?\s*$',
+        name, re.I)
+    if m:
+        return f"{m.group(1).strip()}, {m.group(2).strip()}"
+    return None
+
+
+# Program names to exclude entirely (descriptive notes, course codes, fragments).
+_PORTFOLIO_REMOVE = frozenset({
+    'AI (New COE Concentration in High Performance and Edge AI), MS',
+    'Healthcare program expansion to Saudi Arabia',
+    'Half-Major in Sustainability Studies',
+    'Jewish Community Chaplaincy on Campus',
+    'Queens University Gift City India Expansion',
+    'Research-aligned MSs at Roux: MS Robotics',
+    'and Concentration, Medical Science Liaison, Graduate Certificate',
+    'INPR 0399 : Leadership for Sustainability',
+    'ALY 6983 Special Topics: AI for Cybersecurity',
+    'RGA 0500 : Artificial Intelligence (AI) in Regulatory Sciences',
+    'Cybersecurity Microcredential Badges (non-credit levels 1-3)',
+    'Future You: Leveraging AI for Success - EM EDGE Badge',
+    'Global Leadership Summit badging',
+    'Entrepreneurship Boot Camp',
+    'Global Pathways in Portland (Khoury, CPS)',
+    'Pre-College Online Program',
+    'SummerIn Portland: Innovating to Address Complex Health Challenges',
+    'University of Philippines Global Campus partnership',
+    'AI CERT in SV',
+})
+
+# Exact name → (corrected_name, college_override, campus_override). '' keeps existing.
+_PORTFOLIO_RENAME = {
+    'Data Science, MS - new CAMD concentration':
+        ('Data Science, MS', 'Office of the Provost', ''),
+    'AI (New COE Concentration in Human-AI Collaboration), MS':
+        ('Artificial Intelligence, MS', 'College of Engineering', ''),
+    'Computational Creativity Concentration for UIP Masters in AI':
+        ('Computational Creativity, MS', 'Office of the Provost', ''),
+    'Doctor of Professional Studies at Roux':
+        ('Professional Studies, DPS', 'Coll of Professional Studies', 'Portland'),
+    'at Roux, EDD':
+        ('Education, EdD', '', 'Portland'),
+    'and MSIS Bridge In Miami, MSIS':
+        ('Information Systems, MSIS (Bridge)', '', 'Miami'),
+    'Artificial Intelligence - Omics Concentration (COS), MS':
+        ('Omics', 'College of Science', 'Boston'),
+    'AI (new concentration) Bouve, MS':
+        ('Bouve Health AI', 'Bouve College of Hlth Sciences', 'Boston'),
+    'Data Science - CAMD Concentration, MS':
+        ('Data Science, MS', 'Coll of Arts, Media & Design', 'Boston'),
+    'Data Science - Health Data concentration, MS':
+        ('Data Science, MS', 'Office of the Provost', 'Boston'),
+}
+
+_ROUX_RE = re.compile(r'\s+at\s+Roux\b|\s*,?\s*\(for\s+Maine\)\s*', re.I)
+
+# Explicit concentration-parent regex mappings.
+# (pattern, parent_program_name, campus_override_or_None)
+_EXPLICIT_CONC_PARENTS = [
+    (re.compile(r'^Business Concentration in ', re.I),
+     'Business Administration, BSBA', 'Boston'),
+    (re.compile(r'^Political Science Concentration in ', re.I),
+     'Political Science, BA', 'Boston'),
+    (re.compile(r'^Electrical and Computer Engineering with Concentration in .+MSECE', re.I),
+     'Electrical and Computer Engineering, MSECE', None),
+    (re.compile(r'^Mechanical Engineering with Concentration in .+MSME', re.I),
+     'Mechanical Engineering, MSME', None),
+    (re.compile(r'^Electrical Engineering and Music with Concentration in .+BSEE', re.I),
+     'Electrical Engineering and Music, BSEE', 'Boston'),
+    # Bioengineering concentration variants — both the "Master of Science in
+    # Bioengineering, concentration in X" and "Bioengineering, concentration
+    # in X" forms (also "Bioengineering X Concentration Bridge Program").
+    (re.compile(r'^(?:Master of Science in\s+)?Bioengineering[,\s]+concentration in ', re.I),
+     'Bioengineering, MS', None),
+    (re.compile(r'^Bioengineering\s+.+?\s+Concentration\b', re.I),
+     'Bioengineering, MS', None),
+    # Civil Engineering MSCivE concentrations whose concentration phrase has
+    # internal commas (regex extraction fails on these).
+    (re.compile(r'^Civil Engineering with Concentration in .+,\s*MSCivE\b', re.I),
+     'Civil Engineering, MSCivE', None),
+    (re.compile(r'^UG Concentration in ', re.I),
+     'Regulatory Affairs, BS', 'Boston'),
+    (re.compile(r'^Omics$', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
+    (re.compile(r'^Bouve Health AI$', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
+]
+
+
 # Concentration headings to skip — purely structural / generic.
 _CONC_SKIP = re.compile(
     r'^concentrations?$'
@@ -2017,101 +2221,199 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     n_with_concs += 1
         print(f"  Curriculum concentrations: {n_with_concs} programs have named concentrations")
 
+    # ── Step 5.6: Portfolio data-quality overrides ───────────────────────────
+    # REMOVE definitively-non-program entries; RENAME well-known canonical
+    # mismatches; strip "at Roux" / "for Maine" suffixes (those indicate
+    # Portland deployment). The REMOVE check ignores trailing (Campus).
+    def _strip_paren(s):
+        return re.sub(r'\s*\([^)]*\)\s*$', '', s or '').strip()
+    for _pid_remove in [_p for _p, _r in tracker.items()
+                        if _r.get('program_name') in _PORTFOLIO_REMOVE
+                        or _strip_paren(_r.get('program_name','')) in _PORTFOLIO_REMOVE]:
+        del tracker[_pid_remove]
+    for _pid in list(tracker):
+        if _pid not in tracker:
+            continue
+        _row = tracker[_pid]
+        _name = _row.get('program_name') or ''
+        if _name in _PORTFOLIO_RENAME:
+            _new_name, _new_college, _new_campus = _PORTFOLIO_RENAME[_name]
+            _row['program_name'] = _new_name
+            if _new_college:
+                _row['college'] = _normalize_college(_new_college)
+            if _new_campus:
+                _row['campus'] = _new_campus
+        elif _ROUX_RE.search(_name):
+            _row['program_name'] = _ROUX_RE.sub('', _name).strip().rstrip(',').strip()
+            if not _row.get('campus') or _row['campus'] in ('', 'Boston'):
+                _row['campus'] = 'Portland'
+
     # ── Step 6: Link concentration rows to their parent program ──────────────
-    # Concentrations are stored as their own portfolio_programs rows (the
-    # CIM-side records exist that way). Set concentration_of so the frontend
-    # nests them under their parent program instead of listing them as
-    # standalone top-level rows.
-    #
-    # Patterns handled:
-    #   - "X with Concentration in Y, DEGREE"      → parent = "X, DEGREE"
-    #   - "X Concentration in Y" (no degree code)  → parent has subject "X-Y"
-    #     (CIM names parents with an em-dash, e.g. "Nursing—X, MS").
-    #   - "Subject - Concentration Name, DEG"      → parent = "Subject, DEG"
-    _CONC_WITH = re.compile(
-        r'^(.+?)\s+with\s+Concentration\s+in\s+[^,]+,\s+([A-Z][A-Za-z0-9\-]*)\s*$',
-        re.I)
-    _CONC_DASH = re.compile(
-        r'^(.+?)\s*[-—]\s*[^-—,]+?\s+Concentration,?\s+([A-Z][A-Za-z0-9\-]*)\s*$',
-        re.I)
-    _CONC_SUBJ_IN = re.compile(
-        r'^([^,]+?)\s+Concentration\s+in\s+(.+)$',
-        re.I)
-    # Indexes for parent lookup
-    name_idx = {}         # normalized full name → pid
-    subject_idx = {}      # normalized subject (no degree/campus) → list of pids
+    # Concentrations must NEVER appear as standalone top-level rows. Algorithm:
+    #   1. Explicit-parent overrides (_EXPLICIT_CONC_PARENTS) — for patterns
+    #      whose parent isn't discoverable by regex extraction (Business
+    #      Concentration in X, Political Science Concentration in X, etc.).
+    #      Synthesize the parent if it doesn't exist.
+    #   2. Regex extraction (_extract_parent_name) for "X with Concentration
+    #      in Y, DEG" and "X - Y Concentration, DEG". Synthesize parent if
+    #      missing in CIM.
+    #   3. Em-dash convention: "Subject Concentration in Rest" → "Subject-Rest"
+    #      (the Nursing—X, MS form).
+    # Build name index using both _norm (campus-aware) and _degree_core
+    # (campus-stripped, abbreviation-expanded) so concentration parent lookups
+    # find the right row regardless of how the parent was registered.
+    name_to_pid = {}
     for pid, row in tracker.items():
-        full = row.get('program_name') or ''
-        nf = _norm(full)
-        if nf and nf not in name_idx:
-            name_idx[nf] = pid
-        subj, _deg, _cmp = _parse_cim_name(full)
-        ns = _norm_subject(subj)
-        if ns:
-            subject_idx.setdefault(ns, []).append(pid)
-    n_linked = 0
-    for pid, row in tracker.items():
+        for key in (_norm(row.get('program_name') or ''),
+                    _degree_core(row.get('program_name') or '')):
+            if key and key not in name_to_pid:
+                name_to_pid[key] = pid
+
+    # Stage 1: Explicit concentration parents (regex → known parent name).
+    # If the parent row doesn't exist, create a synthetic parent so the
+    # concentration never ends up orphaned.
+    n_explicit = 0
+    _synth_explicit = {}  # (parent_name|campus) → synth_pid
+    for pid, row in list(tracker.items()):
+        if row.get('concentration_of'):
+            continue
         name = row.get('program_name') or ''
-        if 'concentration' not in name.lower():
+        for pattern, parent_name, campus_override in _EXPLICIT_CONC_PARENTS:
+            if not pattern.search(name):
+                continue
+            lookup_campus = campus_override if campus_override else row.get('campus', '')
+            found_pid = None
+            if lookup_campus:
+                key = _norm(f'{parent_name} ({lookup_campus})')
+                if key in name_to_pid and name_to_pid[key] != pid:
+                    found_pid = name_to_pid[key]
+            if not found_pid and not campus_override:
+                for key in (_norm(parent_name), _degree_core(parent_name)):
+                    if key and key in name_to_pid and name_to_pid[key] != pid:
+                        found_pid = name_to_pid[key]
+                        break
+            if not found_pid:
+                synth_key = f'{parent_name}|{lookup_campus}'
+                if synth_key not in _synth_explicit:
+                    new_synth_pid = 'synth_' + re.sub(
+                        r'[^a-z0-9]+', '_',
+                        _norm(f'{parent_name} {lookup_campus}'))[:60]
+                    conc_college = row.get('college', '')
+                    tracker[new_synth_pid] = dict(_EMPTY_TRACKING, **{
+                        'id': new_synth_pid,
+                        'program_name': (parent_name + (f' ({lookup_campus})'
+                                                        if lookup_campus else '')),
+                        'college': _normalize_college(conc_college),
+                        'campus': lookup_campus or row.get('campus', ''),
+                        'cim_program_id': None,
+                        'cim_step': '',
+                        'cim_completion_date': '',
+                    })
+                    for key in (_norm(parent_name), _degree_core(parent_name)):
+                        if key and key not in name_to_pid:
+                            name_to_pid[key] = new_synth_pid
+                    _synth_explicit[synth_key] = new_synth_pid
+                found_pid = _synth_explicit[synth_key]
+            row['concentration_of'] = found_pid
+            n_explicit += 1
+            break
+
+    # Stage 2: Regex-extracted parent — collect concentrations whose extracted
+    # parent doesn't exist as a row, then synthesize parents for them.
+    n_synthetic = 0
+    pending = []  # (pid, parent_raw)
+    for pid, row in tracker.items():
+        if 'concentration' not in (row.get('program_name') or '').lower():
             continue
         if row.get('concentration_of'):
             continue
-        # Pattern A: "X with Concentration in Y, DEGREE"
-        m = _CONC_WITH.match(name)
-        if m:
-            parent = f"{m.group(1).strip()}, {m.group(2).strip()}"
-            key = _norm(parent)
-            if key in name_idx and name_idx[key] != pid:
-                row['concentration_of'] = name_idx[key]
-                n_linked += 1
-                continue
-        # Pattern B: "X - Y Concentration, DEGREE"
-        m = _CONC_DASH.match(name)
-        if m:
-            parent = f"{m.group(1).strip()}, {m.group(2).strip()}"
-            key = _norm(parent)
-            if key in name_idx and name_idx[key] != pid:
-                row['concentration_of'] = name_idx[key]
-                n_linked += 1
-                continue
-        # Pattern C: "Subject Concentration in Rest" — parent subject is
-        # "Subject-Rest" (em-dash; the CIM convention for nurse-practitioner
-        # tracks under Nursing). Only the dash-joined parent is safe — the
-        # plain "Rest" subject would wrongly link "Political Science
-        # Concentration in Public Policy" to a stand-alone "Public Policy"
-        # program. Concentrations whose parent isn't dash-named (Business
-        # Concentration, Political Science Concentration, etc.) fall through
-        # to the explicit map below.
-        m = _CONC_SUBJ_IN.match(name)
-        if m:
-            base = m.group(1).strip()
-            rest = m.group(2).strip()
-            linked = False
-            for cand_subj in (f"{base}-{rest}", f"{base}—{rest}"):
-                cands = subject_idx.get(_norm_subject(cand_subj), [])
-                hit = next((c for c in cands if c != pid), None)
-                if hit:
-                    row['concentration_of'] = hit
-                    n_linked += 1
-                    linked = True
-                    break
-            if linked:
-                continue
-        # Pattern D: explicit prefix → parent name mapping for CIM
-        # concentration records whose parent isn't discoverable by pattern
-        # (Business / Political Science concentration sub-records).
-        _EXPLICIT_PARENT = [
-            ('business concentration in ',         'business administration, bsba (boston)'),
-            ('political science concentration in ','political science, ba (boston)'),
-        ]
-        lname = name.lower()
-        for prefix, parent_name in _EXPLICIT_PARENT:
-            if lname.startswith(prefix):
-                key = _norm(parent_name)
-                if key in name_idx and name_idx[key] != pid:
-                    row['concentration_of'] = name_idx[key]
-                    n_linked += 1
+        parent_raw = _extract_parent_name(row['program_name'])
+        if not parent_raw:
+            continue
+        # Strip the LEGACY RECORD prefix when present (e.g. "LEGACY RECORD
+        # Regulatory Affairs ... with Concentration in X, MS" → parent is the
+        # base "Regulatory Affairs ..., MS").
+        parent_clean = re.sub(r'^LEGACY\s+RECORD\s+', '', parent_raw, flags=re.I).strip()
+        found = any(k in name_to_pid for k in
+                    (_norm(parent_clean), _degree_core(parent_clean)))
+        if found:
+            continue
+        pending.append((pid, parent_clean))
+
+    # Create one synthetic parent per unique normalized parent name.
+    synth_created = {}
+    for pid, parent_raw in pending:
+        norm_key = _norm(parent_raw)
+        if norm_key in synth_created:
+            continue
+        synth_pid = 'synth_' + re.sub(r'[^a-z0-9]+', '_', norm_key)[:60]
+        conc_row = tracker[pid]
+        tracker[synth_pid] = dict(_EMPTY_TRACKING, **{
+            'id':             synth_pid,
+            'program_name':   parent_raw,
+            'college':        conc_row.get('college', ''),
+            'campus':         conc_row.get('campus', ''),
+            'cim_program_id': None,
+            'cim_step':       '',
+            'cim_completion_date': '',
+        })
+        name_to_pid[norm_key] = synth_pid
+        dk = _degree_core(parent_raw)
+        if dk and dk not in name_to_pid:
+            name_to_pid[dk] = synth_pid
+        synth_created[norm_key] = synth_pid
+        n_synthetic += 1
+
+    # Stage 3: Link every concentration to its parent.
+    n_regex_linked = 0
+    for pid, row in tracker.items():
+        if 'concentration' not in (row.get('program_name') or '').lower():
+            continue
+        if row.get('concentration_of'):
+            continue
+        parent_raw = _extract_parent_name(row['program_name'])
+        if not parent_raw:
+            continue
+        parent_clean = re.sub(r'^LEGACY\s+RECORD\s+', '', parent_raw, flags=re.I).strip()
+        for key in (_norm(parent_clean), _degree_core(parent_clean)):
+            if key and key in name_to_pid and name_to_pid[key] != pid:
+                row['concentration_of'] = name_to_pid[key]
+                n_regex_linked += 1
                 break
+
+    # Stage 4: "Subject Concentration in Rest" → em-dash parent
+    # (Nursing Concentration in X → Nursing—X, MS).
+    _CONC_SUBJ_IN = re.compile(r'^([^,]+?)\s+Concentration\s+in\s+(.+)$', re.I)
+    subj_idx = {}
+    for pid, row in tracker.items():
+        full = row.get('program_name') or ''
+        subj, _deg, _cmp = _parse_cim_name(full)
+        ns = _norm_subject(subj)
+        if ns:
+            subj_idx.setdefault(ns, []).append(pid)
+    n_dash_linked = 0
+    for pid, row in tracker.items():
+        if 'concentration' not in (row.get('program_name') or '').lower():
+            continue
+        if row.get('concentration_of'):
+            continue
+        m = _CONC_SUBJ_IN.match(row.get('program_name') or '')
+        if not m:
+            continue
+        base = m.group(1).strip()
+        rest = m.group(2).strip()
+        for cand_subj in (f"{base}-{rest}", f"{base}—{rest}"):
+            cands = subj_idx.get(_norm_subject(cand_subj), [])
+            hit = next((c for c in cands if c != pid), None)
+            if hit:
+                row['concentration_of'] = hit
+                n_dash_linked += 1
+                break
+    n_linked = n_explicit + n_regex_linked + n_dash_linked
+    if n_linked or n_synthetic:
+        print(f"  Concentration linking: {n_explicit} explicit + {n_regex_linked} regex + "
+              f"{n_dash_linked} em-dash = {n_linked} linked, "
+              f"{n_synthetic} synthetic parents created")
     if n_linked:
         print(f"  Linked {n_linked} concentration rows to parents")
 
