@@ -287,40 +287,6 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
         return result
     end tell
     '''
-    # Wakeup path: switches to the target tab, runs JS, then switches back.
-    # Focus-save/restore is done INSIDE the script (atomic) so there is no
-    # Python-level timing gap where Chrome can grab the screen.
-    applescript_wakeup = f'''
-    set jsCode to (read POSIX file "{js_file}" as text)
-    -- Save frontmost app before touching Chrome
-    set prevApp to name of (info for (path to frontmost application))
-    tell application "{BROWSER_APP}"
-        set tabIdx to 0
-        set n to count of tabs of window 1
-        repeat with i from 1 to n
-            if {match_predicate} then
-                set tabIdx to i
-                exit repeat
-            end if
-        end repeat
-        if tabIdx = 0 then return "TAB_NOT_FOUND"
-        set prevIdx to active tab index of window 1
-        if prevIdx is not tabIdx then
-            set active tab index of window 1 to tabIdx
-            delay 0.2
-        end if
-        tell tab tabIdx of window 1 to execute javascript jsCode
-        set jsResult to result
-        if prevIdx is not tabIdx then
-            set active tab index of window 1 to prevIdx
-        end if
-    end tell
-    -- Restore focus to whatever was frontmost before (without activating Chrome)
-    if prevApp is not "{BROWSER_APP}" then
-        tell application prevApp to activate
-    end if
-    return jsResult
-    '''
     def _run(script, tmo):
         return subprocess.run(
             ['osascript', '-e', script],
@@ -328,15 +294,17 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
         )
 
     try:
-        # Cheap path: no activation, no tab switching. Works when Chrome
-        # is already the user's active app and the target tab is
-        # currently active (or recently was).
+        # Fast path only — never wake up Chrome's foreground.
+        # The wakeup-path fallback (which switched the active tab inside
+        # Chrome) was the source of continuous focus-stealing: Chrome's
+        # background throttle made the fast path time out on most JS
+        # calls during a scan, every fallback brought Chrome forward
+        # for ~1s of JS execution, and across hundreds of calls per scan
+        # the user experienced this as Chrome continuously stealing focus.
+        # Dropping the fallback gives up at most one round-trip per
+        # throttled tab; the scraper already handles None returns and the
+        # next scan re-tries.
         result = _run(applescript_fast, timeout)
-        # Common throttle symptom: AppleEvent timed out (-1712) caused by
-        # stuck JS engine on a backgrounded tab. Retry with the wakeup
-        # path, which switches to the tab and retries.
-        if result.returncode != 0 and 'AppleEvent timed out' in (result.stderr or ''):
-            result = _run(applescript_wakeup, timeout)
         os.unlink(js_file)
         if result.returncode != 0:
             return None
