@@ -1032,6 +1032,15 @@ def _norm_degree(degree_str):
     # Special case: "GRADUATE CERTIFICATE" → "Graduate Certificate"
     if upper in ('GRADUATE CERTIFICATE', 'GRADCERT', 'CERTG', 'CERT'):
         return 'Graduate Certificate'
+    # Canonical mixed case for degrees CIM displays that way.
+    # Keeps SVT/IPD-added rows reading "X, PhD (Oakland)" instead of "X, PHD".
+    _CASE_MAP = {
+        'PHD': 'PhD', 'EDD': 'EdD', 'MED': 'MEd', 'MARCH': 'MArch',
+        'MDES': 'MDes', 'MENG': 'MEng', 'BARCH': 'BArch',
+        'PHARMD': 'PharmD', 'DMSC': 'DMSc',
+    }
+    if upper in _CASE_MAP:
+        return _CASE_MAP[upper]
     return upper if upper else s
 
 
@@ -1058,8 +1067,11 @@ def _is_valid_degree(degree_str):
     # Reject campus/location/descriptor names that happen to be all-caps letters
     if normed.lower() in _DEGREE_BLOCKLIST:
         return False
-    # Allow hyphenated deployment suffixes like "MS-ALIGN", "MPS-CONNECT", "MSIS-BRIDGE"
-    return bool(re.match(r'^[A-Z][A-Z0-9]{1,9}(-[A-Za-z][A-Za-z0-9-]*)?$', normed))
+    # Allow hyphenated deployment suffixes like "MS-ALIGN", "MPS-CONNECT", "MSIS-BRIDGE".
+    # Accept mixed-case CIM convention degrees (PhD, EdD, MEd, MArch, MDes, MEng,
+    # BArch, PharmD, DMSc) by matching case-insensitively but requiring a leading
+    # uppercase letter.
+    return bool(re.match(r'^[A-Z][A-Za-z0-9]{1,9}(-[A-Za-z][A-Za-z0-9-]*)?$', normed))
 
 
 def _norm_subject(subject_str):
@@ -1145,8 +1157,11 @@ def _parse_external_name(name_raw):
         s = s[:roux_m.start()] + s[roux_m.end():]
         campus = 'Portland'
 
-    # Pre-normalize: remove dots from leading degree tokens (handles "Ph.D." → "PhD")
-    s_nodot = re.sub(r'^([A-Za-z]{1,6}(?:\.[A-Za-z]{1,3})+)(\s)', lambda m: re.sub(r'\.', '', m.group(1)) + m.group(2), s)
+    # Pre-normalize: remove dots from leading degree tokens.
+    # Handles both "Ph.D" and "Ph.D." (trailing dot optional) so the
+    # subsequent _SHORT_DEGREE_PREFIX_RE can recognise "Ph.D. in X".
+    s_nodot = re.sub(r'^([A-Za-z]{1,6}(?:\.[A-Za-z]{1,3})+\.?)(\s)',
+                     lambda m: re.sub(r'\.', '', m.group(1)) + m.group(2), s)
     if s_nodot != s:
         s = s_nodot
 
@@ -1202,8 +1217,9 @@ def _parse_external_name(name_raw):
                 subj = rest if rest else emb.group(1)
         return subj, deg, campus
 
-    # "Subject Graduate Certificate" format (degree at end without a comma)
-    _gc_trail = re.search(r'\s+(Graduate\s+Certificate)\s*$', s, re.I)
+    # "Subject Graduate Certificate" / "Subject Certificate" format (degree at end without a comma).
+    # NU's "Graduate Certificate" credential is often referred to externally as just "Certificate".
+    _gc_trail = re.search(r'\s+(Graduate\s+Certificate|Certificate)\s*$', s, re.I)
     if _gc_trail:
         subj = s[:_gc_trail.start()].strip()
         return subj, 'Graduate Certificate', campus
@@ -1422,8 +1438,19 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 return cim_exact_index[k3], 'exact'
             k2 = (norm_subj, norm_deg_lower)
             cands = cim_nameDeg_index.get(k2, [])
+            # Single-candidate name+degree match: only return it when the
+            # caller's campus matches the candidate's campus, or when no
+            # campus was specified (defaults to Boston). Avoids cases like
+            # "Ph.D. in Computer Engineering, Oakland" being misattributed
+            # to the Boston PhD when no Oakland version exists in CIM —
+            # caller should then add a new Oakland portfolio row instead.
             if len(cands) == 1:
-                return cands[0], 'name_deg'
+                cand_camp = _norm_campus(cands[0].get('campus', ''))
+                if cand_camp == norm_campus_str:
+                    return cands[0], 'name_deg'
+                if norm_campus_str == 'boston':
+                    return cands[0], 'name_deg'
+                return None, None
             if len(cands) > 1:
                 for c in cands:
                     if _norm_campus(c['campus']) == norm_campus_str:
