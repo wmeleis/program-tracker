@@ -139,13 +139,14 @@ function switchView(view) {
     const subjectGroup = document.getElementById('filter-group-subject');
     // Portfolio view uses its own filter bar; hide all standard filters
     const portfolioFilters = document.getElementById('portfolio-filters');
+    const pipelineSection = document.getElementById('pipeline');
     const pipelineBar = document.getElementById('pipeline-bar');
     const standardFilters = document.getElementById('filter-bar');
     const proposalRow = document.getElementById('proposal-row');
 
     if (view === 'portfolio') {
         if (portfolioFilters) portfolioFilters.style.display = 'flex';
-        if (pipelineBar) pipelineBar.style.display = 'none';
+        if (pipelineSection) pipelineSection.style.display = 'none';
         if (standardFilters) standardFilters.style.display = 'none';
         if (proposalRow) proposalRow.style.display = 'none';
         typeSection.style.display = 'none';
@@ -153,6 +154,7 @@ function switchView(view) {
         if (subjectGroup) subjectGroup.style.display = 'none';
     } else {
         if (portfolioFilters) portfolioFilters.style.display = 'none';
+        if (pipelineSection) pipelineSection.style.display = '';
         if (pipelineBar) pipelineBar.style.display = 'flex';
         if (standardFilters) standardFilters.style.display = 'flex';
         if (proposalRow) proposalRow.style.display = 'flex';

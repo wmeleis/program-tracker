@@ -1140,11 +1140,17 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                OR (completion_date IS NOT NULL AND completion_date != '')
         """).fetchall()
 
-    # Deduplicate by name: prefer active, then highest id
+    # Deduplicate by name: prefer active, then highest id.
+    # Skip TEMPLATE entries — these are CIM scaffolding rows ("TEMPLATE: PhD Program …",
+    # "Half Major Template: …") that are never real programs and have been removed from
+    # the portfolio repeatedly. Filter them out at ingest so they can't re-seed.
+    _TEMPLATE_RE = re.compile(r'^\s*(template\s*:|half\s+major\s+template\s*:)', re.I)
     by_name = {}  # name → row
     for r in raw_rows:
         name = (r['name'] or '').strip()
         if not name:
+            continue
+        if _TEMPLATE_RE.match(name):
             continue
         existing = by_name.get(name)
         if existing is None:
