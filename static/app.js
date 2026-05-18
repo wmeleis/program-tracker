@@ -151,8 +151,10 @@ function switchView(view) {
     const smartActionsSection = document.querySelector('.smart-actions-section');
     const filtersSection    = document.querySelector('.filters-section');
 
+    const portfolioToolbar = document.getElementById('portfolio-table-toolbar');
     if (view === 'portfolio') {
         if (portfolioFilters)    portfolioFilters.style.display = 'flex';
+        if (portfolioToolbar)    portfolioToolbar.style.display = 'flex';
         if (pipelineSection)     pipelineSection.style.display = 'none';
         if (smartViewsSection)   smartViewsSection.style.display = 'none';
         if (kindFilterRow)       kindFilterRow.style.display = 'none';
@@ -161,6 +163,7 @@ function switchView(view) {
         if (subjectGroup)        subjectGroup.style.display = 'none';
     } else {
         if (portfolioFilters)    portfolioFilters.style.display = 'none';
+        if (portfolioToolbar)    portfolioToolbar.style.display = 'none';
         if (pipelineSection)     pipelineSection.style.display = 'block';
         if (smartViewsSection)   smartViewsSection.style.display = 'flex';
         if (kindFilterRow)       kindFilterRow.style.display = view === 'programs' ? 'flex' : 'none';
@@ -3217,12 +3220,23 @@ const PORTFOLIO_COLUMNS = [
         help: 'Free-form notes from the source feeds (CIM justification, IPD comments, etc.).'},
 ];
 
+// Tracks which column keys have ever existed in PORTFOLIO_COLUMNS at the
+// time a user last saved their picker selection. When new columns are added
+// to PORTFOLIO_COLUMNS, they default to visible (rather than being
+// silently hidden because the stored Set didn't list them yet).
 function _loadPortfolioCols() {
-    try {
-        const stored = JSON.parse(localStorage.getItem('cim-portfolio-cols') || 'null');
-        if (Array.isArray(stored)) return new Set(stored);
-    } catch(e) {}
-    return new Set(PORTFOLIO_COLUMNS.map(c => c.key));
+    let stored = null;
+    try { stored = JSON.parse(localStorage.getItem('cim-portfolio-cols') || 'null'); } catch(e) {}
+    let known = [];
+    try { known = JSON.parse(localStorage.getItem('cim-portfolio-cols-known') || '[]'); } catch(e) {}
+    const knownSet = new Set(known);
+
+    const visible = Array.isArray(stored)
+        ? new Set(stored)
+        : new Set(PORTFOLIO_COLUMNS.map(c => c.key));
+    // Any column key the user has never seen before defaults to visible.
+    PORTFOLIO_COLUMNS.forEach(c => { if (!knownSet.has(c.key)) visible.add(c.key); });
+    return visible;
 }
 let portfolioVisibleCols = _loadPortfolioCols();
 
@@ -3240,10 +3254,16 @@ function _rebuildColDropdownItems(dd) {
         </label>`).join('');
 }
 
+function _savePortfolioCols() {
+    localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols]));
+    localStorage.setItem('cim-portfolio-cols-known',
+        JSON.stringify(PORTFOLIO_COLUMNS.map(c => c.key)));
+}
+
 function toggleAllPortfolioCols(visible) {
     if (visible) PORTFOLIO_COLUMNS.forEach(c => portfolioVisibleCols.add(c.key));
     else portfolioVisibleCols.clear();
-    localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols]));
+    _savePortfolioCols();
     const dd = document.getElementById('portfolio-col-dropdown');
     if (dd && dd.classList.contains('open')) _rebuildColDropdownItems(dd);
     renderPortfolioTable();
@@ -3261,7 +3281,7 @@ function togglePortfolioColPicker(e) {
 function togglePortfolioCol(key, visible) {
     if (visible) portfolioVisibleCols.add(key);
     else portfolioVisibleCols.delete(key);
-    localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols]));
+    _savePortfolioCols();
     renderPortfolioTable();
 }
 
