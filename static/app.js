@@ -3599,13 +3599,15 @@ function togglePortfolioMultiFilter(id, e) {
         ? vals.slice().sort((a, b) => labelFor(a).localeCompare(labelFor(b)))
         : vals;
     // JSON.stringify emits double-quoted strings, which would terminate the
-    // outer onchange="..." attribute. escapeHtml() turns those " into &quot;
-    // so the attribute parses correctly; the browser decodes the entities
-    // back to " before evaluating the handler at click time.
+    // outer onchange="..." HTML attribute prematurely. The existing
+    // escapeHtml() only escapes <,>,& (not "), so it doesn't help here.
+    // _attr() escapes " → &quot; for HTML attribute context; the browser
+    // decodes the entity back to " before evaluating the handler at click time.
+    const _attr = s => s.replace(/"/g, '&quot;');
     dd.innerHTML = display.map(v => `
         <label class="portfolio-col-check">
             <input type="checkbox" ${filterSet && filterSet.has(v) ? 'checked' : ''}
-                   onchange="togglePortfolioMultiValue(${escapeHtml(JSON.stringify(id))}, ${escapeHtml(JSON.stringify(v))}, this.checked)">
+                   onchange="togglePortfolioMultiValue(${_attr(JSON.stringify(id))}, ${_attr(JSON.stringify(v))}, this.checked)">
             ${escapeHtml(labelFor(v))}
         </label>`).join('');
     dd.classList.add('open');
