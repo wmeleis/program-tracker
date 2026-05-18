@@ -824,6 +824,106 @@ def _normalize_campus(campus):
     return _CAMPUS_NAMES.get(c, c) or 'Boston'
 
 
+# Canonical college names used in CIM's XML <college> field. External feeds
+# (SVT roster, IPD smartsheet, OTP) often supply abbreviated forms or—worse—
+# leak unrelated column values into the college slot. _normalize_college()
+# rewrites known abbreviations to the canonical full name and drops obvious
+# garbage so the Portfolio College dropdown stops accumulating duplicates and
+# bogus options like "Deploy Program to Network".
+_COLLEGE_ALIASES = {
+    # Khoury
+    'khoury':                                'Khoury Coll of Comp Sciences',
+    'khoury college':                        'Khoury Coll of Comp Sciences',
+    'khoury college of computer sciences':   'Khoury Coll of Comp Sciences',
+    'khoury coll of comp sciences':          'Khoury Coll of Comp Sciences',
+    'khy':                                   'Khoury Coll of Comp Sciences',
+    # Bouve
+    'bouve':                                 'Bouve College of Hlth Sciences',
+    'bouve college':                         'Bouve College of Hlth Sciences',
+    'bouve college of health sciences':      'Bouve College of Hlth Sciences',
+    'bouve college of hlth sciences':        'Bouve College of Hlth Sciences',
+    'bve':                                   'Bouve College of Hlth Sciences',
+    # CPS
+    'cps':                                   'Coll of Professional Studies',
+    'college of professional studies':       'Coll of Professional Studies',
+    'coll of professional studies':          'Coll of Professional Studies',
+    # CSSH
+    'cssh':                                  'Coll of Soc Sci & Humanities',
+    'college of social sciences and humanities': 'Coll of Soc Sci & Humanities',
+    'coll of soc sci & humanities':          'Coll of Soc Sci & Humanities',
+    # CAMD
+    'camd':                                  'Coll of Arts, Media & Design',
+    'college of arts media and design':      'Coll of Arts, Media & Design',
+    'coll of arts, media & design':          'Coll of Arts, Media & Design',
+    # COS
+    'cos':                                   'College of Science',
+    'college of science':                    'College of Science',
+    # COE
+    'coe':                                   'College of Engineering',
+    'college of engineering':                'College of Engineering',
+    # DMSB
+    'dmsb':                                  "D'Amore-McKim School Business",
+    'damore-mckim':                          "D'Amore-McKim School Business",
+    "d'amore-mckim school business":         "D'Amore-McKim School Business",
+    "d'amore-mckim school of business":      "D'Amore-McKim School Business",
+    # School of Law
+    'sol':                                   'School of Law',
+    'law':                                   'School of Law',
+    'school of law':                         'School of Law',
+    # Mills
+    'mcnu':                                  'Mills College at NU',
+    'mills':                                 'Mills College at NU',
+    'mills college at nu':                   'Mills College at NU',
+    'mills college at northeastern':         'Mills College at NU',
+    # Provost
+    'provost':                               'Office of the Provost',
+    'office of the provost':                 'Office of the Provost',
+}
+
+# Values that are definitely NOT colleges — IPD proposal-type values, campus
+# names, and similar mismaps that have leaked into the college field. These
+# are blanked at normalization time so they never reach the dropdown.
+_COLLEGE_BLOCKLIST = {
+    'deploy program to network',
+    'launch term change request',
+    'new program',
+    'change',
+    'inactivation',
+    'nu-london',
+    'london',
+    'boston',
+    'oakland',
+    'portland',
+    'seattle',
+    'miami',
+    'charlotte',
+    'arlington',
+    'toronto',
+    'vancouver',
+    'silicon valley',
+    'new york',
+}
+
+
+def _normalize_college(college):
+    """Canonicalize a college name.
+
+    - Maps known abbreviations and variant spellings to the canonical full
+      name used by CIM's XML <college> field.
+    - Returns '' for values on the blocklist (IPD proposal-type leaks, campus
+      names, etc.) so they don't appear in the College filter dropdown.
+    - Returns the input unchanged for anything else (e.g.
+      "University Interdisciplinary Program (UIP)" which is legitimate).
+    """
+    c = (college or '').strip()
+    if not c:
+        return ''
+    key = c.lower()
+    if key in _COLLEGE_BLOCKLIST:
+        return ''
+    return _COLLEGE_ALIASES.get(key, c)
+
+
 def _norm_campus(campus):
     """Normalized campus for index key (lowercase)."""
     return _normalize_campus(campus).lower()
@@ -1119,7 +1219,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         return dict(_EMPTY_TRACKING, **{
             'id':                  pid,
             'program_name':        program_name,
-            'college':             college,
+            'college':             _normalize_college(college),
             'campus':              campus or 'Boston',
             'cim_program_id':      cim_id,
             'cim_step':            cim_step,
@@ -1184,7 +1284,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         row = _make_row(
             pid=pid,
             program_name=name,
-            college=r['college'] or '',
+            college=_normalize_college(r['college'] or ''),
             campus=campus_resolved,
             cim_id=r['id'],
             cim_step=r['current_step'] or '',
@@ -1301,8 +1401,9 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     row['roster_sub_status']    = p['roster_sub_status']
                     row['roster_proposal_type'] = p['roster_proposal_type']
                     row['roster_launch_date']   = p['roster_launch_date']
-                if not row.get('college') and p.get('college'):
-                    row['college'] = p['college']
+                _new_col = _normalize_college(p.get('college') or '')
+                if not row.get('college') and _new_col:
+                    row['college'] = _new_col
             else:
                 if _is_valid_degree(degree):
                     # Add new tracker entry from SVT
@@ -1403,8 +1504,9 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 row['ipd_status']             = p['ipd_status']
                 row['ipd_proposal_type']      = p['ipd_proposal_type']
                 row['ipd_additional_college'] = p.get('ipd_additional_college', '')
-            if not row.get('college') and p.get('ipd_college'):
-                row['college'] = p['ipd_college']
+            _new_col = _normalize_college(p.get('ipd_college') or '')
+            if not row.get('college') and _new_col:
+                row['college'] = _new_col
             continue
 
         # Name+degree match (campus differs or absent)
@@ -1422,8 +1524,9 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                         r['ipd_status']             = p['ipd_status']
                         r['ipd_proposal_type']      = p['ipd_proposal_type']
                         r['ipd_additional_college'] = p.get('ipd_additional_college', '')
-                    if not r.get('college') and p.get('ipd_college'):
-                        r['college'] = p['ipd_college']
+                    _new_col = _normalize_college(p.get('ipd_college') or '')
+                    if not r.get('college') and _new_col:
+                        r['college'] = _new_col
                     continue
                 # Campus NOT in tracker
                 if is_launch_deploy:
@@ -1478,8 +1581,9 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     r['ipd_status']             = p['ipd_status']
                     r['ipd_proposal_type']      = p['ipd_proposal_type']
                     r['ipd_additional_college'] = p.get('ipd_additional_college', '')
-                if not r.get('college') and p.get('ipd_college'):
-                    r['college'] = p['ipd_college']
+                _new_col = _normalize_college(p.get('ipd_college') or '')
+                if not r.get('college') and _new_col:
+                    r['college'] = _new_col
                 continue
 
         # No name+degree match at all
