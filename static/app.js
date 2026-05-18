@@ -3133,14 +3133,15 @@ async function loadConsoleData() {
 }
 
 function renderConsoleContent(data) {
-    const scanLog = (data.scan_log || []).slice().reverse();
-    const mm = data.mismatches || {};
-    const ipdAdded    = mm.ipd_added    || [];
-    const ipdSkipped  = mm.ipd_skipped  || {};
-    const ipdRedesigns = (mm.ipd_redesigns || []).filter(r => r.matched);
-    const rosterAdded = mm.roster_added || [];
-    const mismatches  = mm.mismatches   || [];
-    const updatedAt   = mm.updated_at;
+    const scanLog    = (data.scan_log || []).slice().reverse();
+    const mm         = data.mismatches || {};
+    const updatedAt  = mm.updated_at;
+    const nonPrograms   = mm.non_programs   || [];
+    const ipdAdded      = mm.ipd_added      || [];
+    const svtMismatches = mm.svt_mismatches || [];
+    const ipdMismatches = mm.ipd_mismatches || [];
+    const otpMismatches = mm.otp_mismatches || [];
+    const glsMismatches = mm.gls_mismatches || [];
 
     // ── Scan History ──────────────────────────────────────────────────────────
     let html = '<h3 style="margin:0 0 10px">Scan History</h3>';
@@ -3181,138 +3182,91 @@ function renderConsoleContent(data) {
         html += `<p style="color:#64748b;font-size:11px;margin:0 0 12px">Last ingest: ${new Date(updatedAt).toLocaleString()}</p>`;
     }
 
-    // Section A: Added to portfolio from IPD
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from IPD (${ipdAdded.length})</h4>`;
-    if (!ipdAdded.length) {
-        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
-    } else {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
-        html += '<thead><tr style="background:#eff6ff;text-align:left">'
-             + '<th style="padding:4px 8px">IPD Name</th>'
-             + '<th style="padding:4px 8px">Added As</th>'
-             + '</tr></thead><tbody>';
-        for (const p of ipdAdded) {
-            const inpName = p.input_campus && p.input_campus !== 'Boston'
-                ? `${p.input_name || p.name} (${p.input_campus})` : (p.input_name || p.name);
-            const stdName = p.campus && p.campus !== 'Boston'
-                ? `${p.name} (${p.campus})` : p.name;
-            const nameChanged = p.input_name !== p.name || (p.input_campus||'') !== (p.campus||'');
-            html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(inpName)}</td>
-                <td style="padding:4px 8px${nameChanged ? ';color:#1e40af' : ''}">${escapeHtml(stdName)}</td>
+    // Helper: render a simple mismatch table with Source, Name, Campus, Best Guess columns
+    function _mismatchTable(rows, bgColor) {
+        if (!rows.length) return '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+        let t = `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">`;
+        t += `<thead><tr style="background:${bgColor};text-align:left">`
+           + '<th style="padding:4px 8px">Name</th>'
+           + '<th style="padding:4px 8px">Campus</th>'
+           + '<th style="padding:4px 8px">Best Guess</th>'
+           + '</tr></thead><tbody>';
+        for (const m of rows) {
+            const name   = m.source_name || m.name || '';
+            const campus = m.source_campus || m.campus || '';
+            const guess  = m.best_guess ? escapeHtml(m.best_guess) : '<span style="color:#94a3b8">—</span>';
+            t += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(name)}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(campus)}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${guess}</td>
             </tr>`;
         }
-        html += '</tbody></table>';
+        t += '</tbody></table>';
+        return t;
     }
 
-    // Section A2: Added to portfolio from Roster
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from Roster (${rosterAdded.length})</h4>`;
-    if (!rosterAdded.length) {
-        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
-    } else {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
-        html += '<thead><tr style="background:#eff6ff;text-align:left">'
-             + '<th style="padding:4px 8px">Roster Name</th>'
-             + '<th style="padding:4px 8px">Added As</th>'
-             + '</tr></thead><tbody>';
-        for (const p of rosterAdded) {
-            const inpName = p.input_campus && p.input_campus !== 'Boston'
-                ? `${p.input_name || p.name} (${p.input_campus})` : (p.input_name || p.name);
-            const stdName = p.campus && p.campus !== 'Boston'
-                ? `${p.name} (${p.campus})` : p.name;
-            const nameChanged = p.input_name !== p.name || (p.input_campus||'') !== (p.campus||'');
-            html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(inpName)}</td>
-                <td style="padding:4px 8px${nameChanged ? ';color:#1e40af' : ''}">${escapeHtml(stdName)}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
+    // Section: Non-programs (SVT + IPD entries that are clearly not degree programs)
+    // Group by source for display
+    const nonBySource = {};
+    for (const e of nonPrograms) {
+        (nonBySource[e.source] = nonBySource[e.source] || []).push(e);
     }
-
-    // Section B: IPD entries not added to portfolio (grouped by reason)
-    // ipdSkipped is now a flat list of {input_name, input_campus, reason}
-    const ipdSkippedArr = Array.isArray(ipdSkipped) ? ipdSkipped : [];
-    const skippedByReason = {};
-    for (const s of ipdSkippedArr) {
-        (skippedByReason[s.reason] = skippedByReason[s.reason] || []).push(s);
-    }
-    const skippedReasons = Object.keys(skippedByReason).sort();
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">IPD entries not added to portfolio (${ipdSkippedArr.length})</h4>`;
-    if (!ipdSkippedArr.length) {
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#64748b">Non-program entries (${nonPrograms.length})</h4>`;
+    if (!nonPrograms.length) {
         html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
     } else {
         html += '<div style="margin-bottom:14px">';
-        for (const reason of skippedReasons) {
-            const entries = skippedByReason[reason];
+        for (const src of Object.keys(nonBySource).sort()) {
+            const entries = nonBySource[src];
             html += `<details style="margin:3px 0">
                 <summary style="cursor:pointer;font-size:12px;color:#64748b;padding:2px 0">
-                    <strong>${escapeHtml(reason)}</strong> (${entries.length})
+                    <strong>${escapeHtml(src)}</strong> (${entries.length})
                 </summary>
                 <ul style="margin:2px 0 4px 20px;padding:0;font-size:11px;color:#64748b">
-                    ${entries.map(e => {
-                        const label = e.input_campus && e.input_campus !== 'Boston'
-                            ? `${e.input_name} (${e.input_campus})` : e.input_name;
-                        return `<li>${escapeHtml(label)}</li>`;
-                    }).join('')}
+                    ${entries.map(e => `<li>${escapeHtml(e.source_name)}</li>`).join('')}
                 </ul>
             </details>`;
         }
         html += '</div>';
     }
 
-    // Section C: IPD redesigns (matched only)
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Program redesigns from IPD (${ipdRedesigns.length})</h4>`;
-    if (!ipdRedesigns.length) {
+    // Section: Added to portfolio from IPD (new programs not in CIM)
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from IPD (${ipdAdded.length})</h4>`;
+    if (!ipdAdded.length) {
         html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
     } else {
         html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
         html += '<thead><tr style="background:#eff6ff;text-align:left">'
-             + '<th style="padding:4px 8px">IPD Name</th>'
+             + '<th style="padding:4px 8px">Name</th>'
              + '<th style="padding:4px 8px">Campus</th>'
-             + '<th style="padding:4px 8px">Matched To</th>'
+             + '<th style="padding:4px 8px">Proposal Type</th>'
              + '</tr></thead><tbody>';
-        for (const r of ipdRedesigns) {
+        for (const p of ipdAdded) {
             html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(r.input_name)}</td>
-                <td style="padding:4px 8px;color:#64748b">${escapeHtml(r.campus || 'Boston')}</td>
-                <td style="padding:4px 8px;color:#15803d">${escapeHtml(r.matched_name || '')}</td>
+                <td style="padding:4px 8px">${escapeHtml(p.name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.proposal_type || '')}</td>
             </tr>`;
         }
         html += '</tbody></table>';
     }
 
-    // Section D: Unmatched programs (from mismatch report)
-    const reportEntries = data.mismatch_report ? (data.mismatch_report.entries || []) : mismatches;
-    const srcOrder = { IPD: 0, OTP: 1, Roster: 2, Scoring: 3 };
-    const sorted = [...reportEntries].sort((a, b) => {
-        const so = (srcOrder[a.source] ?? 9) - (srcOrder[b.source] ?? 9);
-        if (so !== 0) return so;
-        const ua = (a.unit || '').localeCompare(b.unit || '');
-        if (ua !== 0) return ua;
-        return (a.input_name || a.name || '').localeCompare(b.input_name || b.name || '');
-    });
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">Unmatched programs from IPD, OTP, and GLS (${sorted.length})</h4>`;
-    if (!sorted.length) {
-        html += '<p style="color:#15803d;font-size:12px;margin:0 0 12px">All entries matched.</p>';
-    } else {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
-        html += '<thead><tr style="background:#fff1f2;text-align:left">'
-             + '<th style="padding:4px 8px">Source</th>'
-             + '<th style="padding:4px 8px">Name</th>'
-             + '<th style="padding:4px 8px">Campus</th>'
-             + '<th style="padding:4px 8px">Best Guess</th>'
-             + '</tr></thead><tbody>';
-        for (const m of sorted) {
-            const name = m.input_name || m.name || '';
-            const guess = m.guess_name ? `${escapeHtml(m.guess_name)}${m.guess_score ? ` <span style="color:#94a3b8">(${Math.round(m.guess_score*100)}%)</span>` : ''}` : '—';
-            html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px;color:#64748b">${escapeHtml(m.source || '')}</td>
-                <td style="padding:4px 8px">${escapeHtml(name)}</td>
-                <td style="padding:4px 8px;color:#64748b">${escapeHtml(m.campus || '')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${guess}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
+    // Section: SVT mismatches
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">SVT entries with no CIM match (${svtMismatches.length})</h4>`;
+    html += _mismatchTable(svtMismatches, '#fff1f2');
+
+    // Section: IPD mismatches
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">IPD entries with no CIM match (${ipdMismatches.length})</h4>`;
+    html += _mismatchTable(ipdMismatches, '#fff1f2');
+
+    // Section: OTP mismatches
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">OTP entries with no CIM match (${otpMismatches.length})</h4>`;
+    html += _mismatchTable(otpMismatches, '#fff1f2');
+
+    // Section: GLS mismatches (usually empty)
+    if (glsMismatches.length) {
+        html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">GLS entries with no match (${glsMismatches.length})</h4>`;
+        html += _mismatchTable(glsMismatches, '#fff1f2');
     }
 
     return html;
