@@ -543,7 +543,15 @@ _CAMPUS_NAMES = {
     'SV': 'Silicon Valley', 'SJ': 'Silicon Valley', 'SEA': 'Seattle',
     'MIA': 'Miami', 'ARL': 'Arlington', 'VAN': 'Vancouver',
     'CHA': 'Charlotte', 'LON': 'London',
-    'Primarily Online - Vancouver Requirements': 'Primarily Online',
+    # All online variants collapse to a single "Online" campus. Anything that
+    # starts with "online" or "primarily online" — including suffix-tagged
+    # deployment notes like "Online - Vancouver Requirements" or
+    # "Primarily Online - Vancouver Requirements" — is one campus for the
+    # portfolio.
+    'Primarily Online': 'Online',
+    'Primarily Online - Vancouver Requirements': 'Online',
+    'Online - Vancouver Requirements': 'Online',
+    'Online - deactivated duplicate record': 'Online',
 }
 
 # Long-form degree name → short abbreviation
@@ -819,9 +827,22 @@ def _expand_multi_campus(name, source_campus=''):
 
 
 def _normalize_campus(campus):
-    """Resolve campus code abbreviations to full names."""
+    """Resolve campus code abbreviations to full names.
+
+    All online variants — 'Online', 'Primarily Online', 'Online - <anything>',
+    'Primarily Online - <anything>' — collapse to a single 'Online' campus.
+    The Portfolio treats every online deployment as one campus regardless of
+    suffix annotations; explicit map entries in _CAMPUS_NAMES handle the
+    known variants, and the lowercase prefix check below catches any new
+    online suffixes a future CIM/IPD/SVT change might introduce.
+    """
     c = (campus or '').strip()
-    return _CAMPUS_NAMES.get(c, c) or 'Boston'
+    mapped = _CAMPUS_NAMES.get(c, c)
+    if mapped:
+        low = mapped.lower()
+        if low.startswith('online') or low.startswith('primarily online'):
+            return 'Online'
+    return mapped or 'Boston'
 
 
 # Canonical college names used in CIM's XML <college> field. External feeds
