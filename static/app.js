@@ -3230,8 +3230,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Current CourseLeaf CIM workflow step (the review role currently holding the proposal). Blank when the program is not in active workflow.'},
     {key: 'cimchange',    label: 'CIM Change',
         help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
-    {key: 'inworkflow',   label: 'In Workflow',
-        help: 'Yes if the program currently has an active CIM workflow step; otherwise blank.'},
+    {key: 'inworkflow',   label: 'In CIM',
+        help: 'Yes if the program exists in CourseLeaf CIM at all — either active in workflow, or already approved/historical. No if the portfolio entry comes only from an external feed (SVT, IPD, OTP) with no CIM record.'},
     {key: 'inactadmit',  label: 'Inactivation of Admission',
         help: 'Term beginning when the program will no longer admit new students (from CIM’s inactivation proposal fields).'},
     {key: 'inacttoday',  label: 'Admitting Today',
@@ -3641,7 +3641,7 @@ function getPortfolioFiltered() {
     if (portfolioGlsFilter.size)        rows = rows.filter(p => portfolioGlsFilter.has(p.gls_status || ''));
     if (portfolioCimFilter.size)        rows = rows.filter(p => portfolioCimFilter.has(p.cim_step || ''));
     if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
-    if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? (p.cim_step ? 'Yes' : 'No') : ''));
+    if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? 'Yes' : 'No'));
     if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     if (portfolioSearch) {
@@ -3714,7 +3714,7 @@ function renderPortfolioTable() {
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
-            case 'inworkflow':  av = a.cim_step ? 'Yes' : ''; bv = b.cim_step ? 'Yes' : ''; break;
+            case 'inworkflow':  av = a.cim_program_id ? 'Yes' : 'No'; bv = b.cim_program_id ? 'Yes' : 'No'; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
             case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
@@ -3870,7 +3870,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
         ${_pc('cimchange',   p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
-        ${_pc('inworkflow',  p.cim_program_id ? (p.cim_step ? 'Yes' : '') : '')}
+        ${_pc('inworkflow',  p.cim_program_id ? 'Yes' : 'No')}
         ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
         ${_pc('inacttoday', (() => {
             const v = _inactAdmittingToday(p);
