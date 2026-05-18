@@ -1577,6 +1577,16 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     _LAUNCH_DEPLOY_RE = re.compile(
         r'\b(launch|deploy|new\s+program|net\s+new|deploy\s+program)\b', re.I)
 
+    # "X Concentration in the DEGREE in Y (Campus)" — these are concentrations
+    # appended to an existing program (e.g. "AI Concentration in the MS in
+    # Health Informatics, Charlotte"). They should NOT create a standalone
+    # portfolio row; instead the IPD status overlays on the parent CIM program
+    # ("Health Informatics, MS (Charlotte)").
+    _CONC_IN_DEGREE_IN_RE = re.compile(
+        r'^.+?\s+Concentration\s+in\s+the\s+(MS|MA|PhD|MBA|MPS|MFA|MEd|MArch|DNP|DPT|EdD|MPH|MPA|MPP)\s+in\s+(.+)$',
+        re.I
+    )
+
     for p in ipd_rows_data:
         if _is_non_program(p['program_name']):
             n_ipd_nonprog += 1
@@ -1587,6 +1597,41 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     'campus':      '',
                 })
             continue
+
+        # "X Concentration in the DEGREE in Y, Campus" → overlay IPD status on
+        # the parent program ("Y, DEGREE (Campus)") instead of mismatching or
+        # creating a standalone concentration row.
+        conc_m = _CONC_IN_DEGREE_IN_RE.match(p['program_name'])
+        if conc_m:
+            parent_deg  = _norm_degree(conc_m.group(1))
+            parent_rest = conc_m.group(2).strip()
+            parent_camp = ''
+            cm = re.search(r',\s*([A-Za-z][A-Za-z\s]+?)\s*$', parent_rest)
+            if cm:
+                cand = cm.group(1).strip()
+                # A trailing ", Word" is the campus when the word resolves to a
+                # known campus (either via _CAMPUS_NAMES code→name map values
+                # or a direct case-insensitive match against full names).
+                _known = {v.lower() for v in _CAMPUS_NAMES.values()} | {
+                    'boston','oakland','portland','toronto','seattle','miami',
+                    'arlington','vancouver','charlotte','london','silicon valley',
+                    'new york','online','primarily online'}
+                if cand.lower() in _known:
+                    parent_camp = cand
+                    parent_rest = parent_rest[:cm.start()].strip()
+            row, _ = _lookup_cim(parent_rest, parent_deg, parent_camp)
+            if row:
+                n_ipd_matched += 1
+                if not row.get('ipd_status'):
+                    row['ipd_status']             = p['ipd_status']
+                    row['ipd_proposal_type']      = p['ipd_proposal_type']
+                    row['ipd_additional_college'] = p.get('ipd_additional_college', '')
+                if not row.get('college'):
+                    nc = _normalize_college(p.get('ipd_college') or '')
+                    if nc:
+                        row['college'] = nc
+                continue
+            # Parent not found; fall through to normal handling
         # Expand multi-campus entries (e.g. "X in Boston and Oakland") into one per campus.
         # For simplicity, process each expansion independently using the same matching logic.
         _ipd_expansions = _expand_multi_campus(p['program_name'], '')
