@@ -3671,9 +3671,17 @@ function extractPortfolioDegree(name) {
         if (a || b) return 'Dual Degree';
     }
     // 2c) Hyphen-joined codes: "RN-to-BSN" → Bachelor's; capture the last code
-    const mh = n.match(/[\s,]([A-Z]{2,6})(?:\s*$)/);
+    const mh = n.match(/[\s,\-]([A-Z]{2,6})(?:\s*$)/);
     if (mh) {
         const out = _credentialFromCode(mh[1]);
+        if (out) return out;
+    }
+    // 2d) Comma-degree followed by "with"/"—"/"/" extras:
+    // "Marine Biology, BS with Three Seas", "Management, MS with Major in …",
+    // "Finance, MSF—Evening / Part-Time Program"
+    const mw = n.match(/,\s*([A-Z]{2,6})\b/);
+    if (mw) {
+        const out = _credentialFromCode(mw[1]);
         if (out) return out;
     }
     // 3) Degree code at START of name (external feeds: "MS Genetic Counseling", "LLM International Law")
