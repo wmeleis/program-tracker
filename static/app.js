@@ -3205,31 +3205,6 @@ function renderConsoleContent(data) {
         return t;
     }
 
-    // Section: Non-programs (SVT + IPD entries that are clearly not degree programs)
-    // Group by source for display
-    const nonBySource = {};
-    for (const e of nonPrograms) {
-        (nonBySource[e.source] = nonBySource[e.source] || []).push(e);
-    }
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#64748b">Non-program entries (${nonPrograms.length})</h4>`;
-    if (!nonPrograms.length) {
-        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
-    } else {
-        html += '<div style="margin-bottom:14px">';
-        for (const src of Object.keys(nonBySource).sort()) {
-            const entries = nonBySource[src];
-            html += `<details style="margin:3px 0">
-                <summary style="cursor:pointer;font-size:12px;color:#64748b;padding:2px 0">
-                    <strong>${escapeHtml(src)}</strong> (${entries.length})
-                </summary>
-                <ul style="margin:2px 0 4px 20px;padding:0;font-size:11px;color:#64748b">
-                    ${entries.map(e => `<li>${escapeHtml(e.source_name)}</li>`).join('')}
-                </ul>
-            </details>`;
-        }
-        html += '</div>';
-    }
-
     // Section: Added to portfolio from SVT (new programs not in CIM)
     const svtAdded = mm.svt_added || [];
     html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from SVT (${svtAdded.length})</h4>`;
@@ -3291,6 +3266,25 @@ function renderConsoleContent(data) {
     if (glsMismatches.length) {
         html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">GLS entries with no match (${glsMismatches.length})</h4>`;
         html += _mismatchTable(glsMismatches, '#fff1f2');
+    }
+
+    // Section: Non-programs (collapsed by default; grouped by source)
+    if (nonPrograms.length) {
+        const bySource = {};
+        for (const e of nonPrograms) {
+            (bySource[e.source] = bySource[e.source] || []).push(e);
+        }
+        html += `<details style="margin-top:16px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:#64748b">Non-program entries (${nonPrograms.length})</summary>`;
+        for (const [src, rows] of Object.entries(bySource)) {
+            html += `<h5 style="margin:10px 0 4px;font-size:12px;color:#64748b">${escapeHtml(src)} (${rows.length})</h5>`;
+            html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">';
+            html += '<thead><tr style="background:#f8fafc;text-align:left"><th style="padding:3px 8px">Name</th></tr></thead><tbody>';
+            for (const e of rows) {
+                html += `<tr style="border-top:1px solid #e2e8f0"><td style="padding:3px 8px;color:#64748b">${escapeHtml(e.source_name)}</td></tr>`;
+            }
+            html += '</tbody></table>';
+        }
+        html += '</details>';
     }
 
     return html;
