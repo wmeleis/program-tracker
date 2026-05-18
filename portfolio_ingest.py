@@ -903,9 +903,13 @@ _COLLEGE_ALIASES = {
     'mills':                                 'Mills College at NU',
     'mills college at nu':                   'Mills College at NU',
     'mills college at northeastern':         'Mills College at NU',
-    # Provost
+    # Provost — includes University Interdisciplinary Program (UIP), which
+    # is administratively housed under the Provost's office.
     'provost':                               'Office of the Provost',
     'office of the provost':                 'Office of the Provost',
+    'uip':                                                'Office of the Provost',
+    'university interdisciplinary program':               'Office of the Provost',
+    'university interdisciplinary program (uip)':         'Office of the Provost',
 }
 
 # Values that are definitely NOT colleges — IPD proposal-type values, campus
