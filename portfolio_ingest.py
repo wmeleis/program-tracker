@@ -661,6 +661,26 @@ _NON_PROGRAM_RE = re.compile(
     r'|3[\-\s]year\s+apprenticeship'
     r'|concentration\s+in\s+the\s'           # "AI Concentration in the MS in X"
     r'|converted\s+to\s+fully\s+online'       # "CPS Degrees converted to fully online via EDGE"
+    r'|\bminor\s+in\b'                        # "Minor in Creative Writing"
+    r'|\bhalf[\s-]?major\b'                   # "Half Major, Applied Creative Writing"
+    r'|\bpost[\s-]?baccalaureate\b'           # "Post Baccalaureate Certificate – Pre-Dental"
+    r'|\bug\s+concentration\b'               # "UG Concentration in Regulatory Affairs"
+    r'|\bundergrad\s+(certificate|concentration)\b'  # "Undergrad Certificate in Addiction Counseling"
+    r'|\bcredentialed?\s+learning\b'         # "Participatory Practices credentialed learning pathway"
+    r'|\bexit[\s-]?only\s+degree\b'          # "Proposal for an Exit-Only Degree Program"
+    r'|pre[\s-]?dental\b'                    # "Pre-Dental" (extends pre-nursing/college/med)
+    r'|\bgis\s+at\b'                         # "GIS at Northeastern"
+    r'|badging\b'                            # "Global Leadership Summit badging"
+    r'|\binactivate\b'                       # "Inactivate EdD in Workplace Learning"
+    r'|\bsuspension\s+of\b'                  # "Suspension of MPS Insurance Analytics"
+    r'|\bdeactivation\b'                     # "Global Health and Nutrition Cert deactivation"
+    r'|\bworkforce\s+development\b'          # "Energy workforce development"
+    r'|\bsummer[\s-]?in\b'                   # "SummerIn Portland"
+    r'|\bproficiency\s+course\b'             # "Online English Proficiency Course"
+    r'|\bcourses\s*\('                       # "Security Ops Center Courses (AAI 0500-0509)"
+    r'|\bpre[\s-]?college\b'                 # "Pre-College" / "Pre-CollEDGE"
+    r'|\bsurvey\b'                           # "Doctor of Law & Policy Survey"
+    r'|\blaunch\s+of\s+the\b'               # "Launch of the MFA in X" (status update, not program)
     r')\b',
     re.I
 )
@@ -717,6 +737,19 @@ def _norm_degree(degree_str):
     if upper in ('GRADUATE CERTIFICATE', 'GRADCERT', 'CERTG', 'CERT'):
         return 'Graduate Certificate'
     return upper if upper else s
+
+
+def _is_valid_degree(degree_str):
+    """Return True only for recognizable academic degree codes or Graduate Certificate.
+
+    Valid: 'MS', 'PhD', 'LLM', 'BS', 'MFA', 'MSCS', 'Graduate Certificate', 'DNP'
+    Invalid: '' (empty), 'NEW CAMD CONCENTRATION', 'OCCUPATIONAL THERAPY',
+             'APPLIED CREATIVE WRITING', 'OAKLAND AND BOSTON', 'STEM DESIGNATED'
+    """
+    normed = _norm_degree(degree_str)
+    if normed.lower() == 'graduate certificate':
+        return True
+    return bool(re.match(r'^[A-Z][A-Z0-9]{1,9}$', normed))
 
 
 def _norm_subject(subject_str):
@@ -796,18 +829,23 @@ def _parse_external_name(name_raw):
             campus = mt.group(1)
             s = s[:mt.start()].strip()
 
+    # Pre-normalize: remove dots from leading degree tokens (handles "Ph.D." → "PhD")
+    s_nodot = re.sub(r'^([A-Za-z]{1,6}(?:\.[A-Za-z]{1,3})+)(\s)', lambda m: re.sub(r'\.', '', m.group(1)) + m.group(2), s)
+    if s_nodot != s:
+        s = s_nodot
+
     # Try long-form degree prefix
     for pat, short_deg in _LONG_DEGREE_MAP:
         mm = pat.match(s)
         if mm:
-            subj = s[mm.end():].strip().rstrip(',').strip()
+            subj = s[mm.end():].strip().strip(',').strip()
             return subj, short_deg, campus
 
     # Try short degree prefix: "MS Computer Science"
     mm = _SHORT_DEGREE_PREFIX_RE.match(s)
     if mm:
         deg  = _norm_degree(mm.group(1))
-        subj = mm.group(2).strip().rstrip(',').strip()
+        subj = mm.group(2).strip().strip(',').strip()
         return subj, deg, campus
 
     # CIM format: "Subject, Degree"
@@ -816,6 +854,22 @@ def _parse_external_name(name_raw):
         subj = s[:idx].strip()
         deg  = _norm_degree(s[idx+1:].strip())
         return subj, deg, campus
+
+    # "Subject Graduate Certificate" format (degree at end without a comma)
+    _gc_trail = re.search(r'\s+(Graduate\s+Certificate)\s*$', s, re.I)
+    if _gc_trail:
+        subj = s[:_gc_trail.start()].strip()
+        return subj, 'Graduate Certificate', campus
+
+    # "Subject DEGREE" format — degree at end without comma (e.g. "Network Science PhD")
+    _trail_deg = re.search(
+        r'\s+(PhD|PharmD|EdD|DNP|DPT|DPS|DLP|JD|LLM|MD|MBA|MFA|MPH|MPS|MPA|'
+        r'MEd|MArch|MDes|MSCS|MSIS|MSECE|MSCP|MS|MA|BS|BA|BFA|BArch)\s*$', s, re.I)
+    if _trail_deg:
+        deg  = _norm_degree(_trail_deg.group(1))
+        subj = s[:_trail_deg.start()].strip()
+        if subj:
+            return subj, deg, campus
 
     return s, '', campus
 
@@ -1020,6 +1074,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
 
     # Mismatch accumulators
     svt_mismatches = []
+    svt_added_log  = []
     ipd_mismatches = []
     ipd_added_log  = []
     otp_mismatches = []
@@ -1029,6 +1084,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # ── Step 1: Overlay SVT Roster ────────────────────────────────────────────
     roster_rows_data = parse_roster(roster_path)
     n_svt_matched = 0
+    n_svt_added   = 0
     n_svt_mismatch = 0
     n_svt_nonprog = 0
     for p in roster_rows_data:
@@ -1057,17 +1113,56 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             if not row.get('college') and p.get('college'):
                 row['college'] = p['college']
         else:
-            n_svt_mismatch += 1
-            best = _best_guess(subject, degree, cim_entries_list)
-            svt_mismatches.append({
-                'source_name':   p['program_name'],
-                'source_campus': p['campus'],
-                'reason':        'no CIM match',
-                'best_guess':    best,
-            })
+            if _is_valid_degree(degree):
+                # Add new tracker entry from SVT
+                campus_store = campus_from_name or 'Boston'
+                pid = _make_id(p['program_name'], campus_store)
+                if pid not in tracker:
+                    new_row = _make_row(pid, p['program_name'],
+                                        p.get('college', ''), campus_store)
+                    tracker[pid] = new_row
+                    n_svt_added += 1
+                    cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+                    if campus_store not in ('', 'Boston'):
+                        cim_fmt += f" ({campus_store})"
+                    svt_added_log.append({
+                        'original_name': p['program_name'],
+                        'cim_format':    cim_fmt,
+                        'campus':        campus_store,
+                    })
+                    # Also index the new row so later IPD step can find it
+                    key3 = _cim_index_keys(subject, degree, campus_store)
+                    if key3 not in cim_exact_index:
+                        cim_exact_index[key3] = tracker[pid]
+                    key2 = _subject_degree_keys(subject, degree)
+                    cim_nameDeg_index.setdefault(key2, []).append(tracker[pid])
+                    cim_entries_list.append({
+                        'pid': pid,
+                        'program_name': p['program_name'],
+                        'subject': subject,
+                        'degree': degree,
+                        'degree_norm': _norm_degree(degree).lower(),
+                        'campus': campus_store,
+                        'row': tracker[pid],
+                    })
+                row = tracker[pid]
+                if not row.get('svt_status'):
+                    row['svt_status']           = p['svt_status']
+                    row['roster_sub_status']    = p['roster_sub_status']
+                    row['roster_proposal_type'] = p['roster_proposal_type']
+                    row['roster_launch_date']   = p['roster_launch_date']
+            else:
+                n_svt_mismatch += 1
+                best = _best_guess(subject, degree, cim_entries_list)
+                svt_mismatches.append({
+                    'source_name':   p['program_name'],
+                    'source_campus': p['campus'],
+                    'reason':        'no CIM match' if not degree else 'no recognizable degree',
+                    'best_guess':    best,
+                })
 
     print(f"  SVT Roster: {len(roster_rows_data)} entries, {n_svt_matched} matched, "
-          f"{n_svt_mismatch} mismatches, {n_svt_nonprog} non-programs")
+          f"{n_svt_added} added, {n_svt_mismatch} mismatches, {n_svt_nonprog} non-programs")
 
     # ── Step 2: Overlay IPD ───────────────────────────────────────────────────
     ipd_rows_data = parse_smartsheet(tsv_path)
@@ -1123,15 +1218,30 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     continue
                 # Campus NOT in tracker
                 if is_launch_deploy:
+                    if not _is_valid_degree(degree):
+                        n_ipd_mismatch += 1
+                        ipd_mismatches.append({
+                            'source_name':   p['program_name'],
+                            'source_campus': campus_from_name or '',
+                            'reason':        'no recognizable degree',
+                            'best_guess':    _best_guess(subject, degree, cim_entries_list),
+                        })
+                        continue
                     # Add new tracker entry
-                    pid = _make_id(p['program_name'], campus_from_name)
+                    campus_store = campus_from_name
+                    pid = _make_id(p['program_name'], campus_store)
                     if pid not in tracker:
                         new_row = _make_row(pid, p['program_name'],
-                                            p.get('ipd_college', ''), campus_from_name)
+                                            p.get('ipd_college', ''), campus_store)
                         tracker[pid] = new_row
+                        cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+                        if campus_store not in ('', 'Boston'):
+                            cim_fmt += f" ({campus_store})"
                         ipd_added_log.append({
-                            'name': p['program_name'],
-                            'campus': campus_from_name,
+                            'name':          p['program_name'],
+                            'original_name': p['program_name'],
+                            'cim_format':    cim_fmt,
+                            'campus':        campus_store,
                             'proposal_type': proposal_type,
                         })
                         n_ipd_added += 1
@@ -1165,23 +1275,37 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
 
         # No name+degree match at all
         if is_launch_deploy:
-            campus_store = campus_from_name or 'Boston'
-            pid = _make_id(p['program_name'], campus_store)
-            if pid not in tracker:
-                new_row = _make_row(pid, p['program_name'],
-                                    p.get('ipd_college', ''), campus_store)
-                tracker[pid] = new_row
-                ipd_added_log.append({
-                    'name': p['program_name'],
-                    'campus': campus_store,
-                    'proposal_type': proposal_type,
+            if not _is_valid_degree(degree):
+                n_ipd_mismatch += 1
+                ipd_mismatches.append({
+                    'source_name':   p['program_name'],
+                    'source_campus': campus_from_name or '',
+                    'reason':        'no recognizable degree',
+                    'best_guess':    _best_guess(subject, degree, cim_entries_list),
                 })
-                n_ipd_added += 1
-            row = tracker[pid]
-            if not row.get('ipd_status'):
-                row['ipd_status']             = p['ipd_status']
-                row['ipd_proposal_type']      = p['ipd_proposal_type']
-                row['ipd_additional_college'] = p.get('ipd_additional_college', '')
+            else:
+                campus_store = campus_from_name or 'Boston'
+                pid = _make_id(p['program_name'], campus_store)
+                if pid not in tracker:
+                    new_row = _make_row(pid, p['program_name'],
+                                        p.get('ipd_college', ''), campus_store)
+                    tracker[pid] = new_row
+                    cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+                    if campus_store not in ('', 'Boston'):
+                        cim_fmt += f" ({campus_store})"
+                    ipd_added_log.append({
+                        'name':          p['program_name'],
+                        'original_name': p['program_name'],
+                        'cim_format':    cim_fmt,
+                        'campus':        campus_store,
+                        'proposal_type': proposal_type,
+                    })
+                    n_ipd_added += 1
+                row = tracker[pid]
+                if not row.get('ipd_status'):
+                    row['ipd_status']             = p['ipd_status']
+                    row['ipd_proposal_type']      = p['ipd_proposal_type']
+                    row['ipd_additional_college'] = p.get('ipd_additional_college', '')
         else:
             n_ipd_mismatch += 1
             best = _best_guess(subject, degree, cim_entries_list)
@@ -1325,6 +1449,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         _mismatch_data = {
             'updated_at':     now,
             'non_programs':   sorted(non_programs,   key=lambda x: (x['source'], x['source_name'])),
+            'svt_added':      sorted(svt_added_log,  key=lambda x: x['original_name']),
             'svt_mismatches': sorted(svt_mismatches, key=lambda x: x['source_name']),
             'ipd_mismatches': sorted(ipd_mismatches, key=lambda x: x['source_name']),
             'ipd_added':      sorted(ipd_added_log,  key=lambda x: x['name']),
@@ -1335,7 +1460,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             json.dump(_mismatch_data, _f, indent=2)
         print(f"  Mismatches written to {_mismatch_file}")
         print(f"  Non-programs: {len(non_programs)} | "
-              f"SVT: {len(svt_mismatches)} mismatches | IPD: {len(ipd_mismatches)} mismatches | "
+              f"SVT: {len(svt_added_log)} added, {len(svt_mismatches)} mismatches | "
+              f"IPD: {len(ipd_mismatches)} mismatches | "
               f"OTP: {len(otp_mismatches)} mismatches | GLS: {len(gls_mismatches)} mismatches")
     except Exception as e:
         print(f"  Warning: could not write portfolio_mismatches.json: {e}")

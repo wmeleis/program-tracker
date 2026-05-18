@@ -3230,6 +3230,28 @@ function renderConsoleContent(data) {
         html += '</div>';
     }
 
+    // Section: Added to portfolio from SVT (new programs not in CIM)
+    const svtAdded = mm.svt_added || [];
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from SVT (${svtAdded.length})</h4>`;
+    if (!svtAdded.length) {
+        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+    } else {
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+        html += '<thead><tr style="background:#eff6ff;text-align:left">'
+             + '<th style="padding:4px 8px">SVT Name</th>'
+             + '<th style="padding:4px 8px">CIM Format</th>'
+             + '<th style="padding:4px 8px">Campus</th>'
+             + '</tr></thead><tbody>';
+        for (const p of svtAdded) {
+            html += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(p.original_name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
     // Section: Added to portfolio from IPD (new programs not in CIM)
     html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from IPD (${ipdAdded.length})</h4>`;
     if (!ipdAdded.length) {
@@ -3237,13 +3259,15 @@ function renderConsoleContent(data) {
     } else {
         html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
         html += '<thead><tr style="background:#eff6ff;text-align:left">'
-             + '<th style="padding:4px 8px">Name</th>'
+             + '<th style="padding:4px 8px">IPD Name</th>'
+             + '<th style="padding:4px 8px">CIM Format</th>'
              + '<th style="padding:4px 8px">Campus</th>'
              + '<th style="padding:4px 8px">Proposal Type</th>'
              + '</tr></thead><tbody>';
         for (const p of ipdAdded) {
             html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(p.name || '')}</td>
+                <td style="padding:4px 8px">${escapeHtml(p.original_name || p.name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || p.name || '')}</td>
                 <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
                 <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.proposal_type || '')}</td>
             </tr>`;
