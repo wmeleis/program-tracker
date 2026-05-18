@@ -926,6 +926,55 @@ _COLLEGE_BLOCKLIST = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Inactivation-of-Admission helpers
+# ---------------------------------------------------------------------------
+# A program's "Inactivation of Admission" semester is the first term in which
+# the program will no longer admit new students — derived from the catalog
+# year of the inactivation proposal. "Catalog 2026-2027" → "Fall 2026".
+# The Portfolio's Admitting Today column compares this against today's date.
+
+def _eff_cat_to_semester(eff_cat):
+    """Convert a CIM catalog-year string to 'Fall YYYY'.
+
+    Accepts raw '2026-2027', full 'Catalog 2026-2027', or plain '2026'.
+    Returns '' when the value can't be parsed.
+    """
+    if not eff_cat:
+        return ''
+    s = re.sub(r'^[Cc]atalog\s*', '', eff_cat.strip())
+    m = re.match(r'^(\d{4})[–\-]\d{4}$', s)
+    if m:
+        return f'Fall {m.group(1)}'
+    m2 = re.match(r'^(\d{4})$', s)
+    if m2:
+        return f'Fall {m2.group(1)}'
+    return ''
+
+
+def _best_eff_cat(eff_cat, completion_date, cim_step=''):
+    """Return the best available catalog-year string from multiple sources.
+
+    Priority:
+      1. completion_date with catalog year (most authoritative — comes from
+         the actual Catalog Setup step).
+      2. Year embedded in cim_step name (used when program is still in workflow).
+      3. eff_cat from CIM XML.
+    """
+    if completion_date:
+        m = re.search(r'(\d{4}[–\-]\d{4})', completion_date)
+        if m:
+            return m.group(1)
+    if cim_step:
+        m = re.search(r'(\d{4})[–\-](\d{2,4})', cim_step)
+        if m:
+            yr = m.group(2)
+            return m.group(1) + '-' + (yr if len(yr) == 4 else str(int(m.group(1)) // 100) + yr)
+    if eff_cat:
+        return eff_cat
+    return ''
+
+
 def _normalize_college(college):
     """Canonicalize a college name.
 
@@ -1312,6 +1361,14 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             cim_completion_date=r['completion_date'] or '',
             cim_change_type=change_type,
         )
+        # Inactivation of Admission: first semester (Fall YYYY) when the
+        # program will no longer admit new students. Derived from the
+        # inactivation proposal's catalog year (CIM XML <eff_cat>, the
+        # completion date, or the catalog-setup step name).
+        if change_type == 'Inactivation':
+            row['inactivation_admission'] = _eff_cat_to_semester(
+                _best_eff_cat(r['eff_cat'] or '', r['completion_date'] or '', r['current_step'] or '')
+            )
         tracker[pid] = row
 
         # Index by (subj, deg, campus)
