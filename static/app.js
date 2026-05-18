@@ -396,6 +396,15 @@ function renderCatalogPipeline() {
     if (completeBtn) completeBtn.style.display = 'none';
 }
 
+let catalogSortKey = 'title';
+let catalogSortDir = 1;
+
+function sortCatalogBy(key) {
+    if (catalogSortKey === key) catalogSortDir *= -1;
+    else { catalogSortKey = key; catalogSortDir = 1; }
+    renderCatalogTable();
+}
+
 function renderCatalogTable() {
     const container = document.getElementById('programs-table-container');
     if (!container) return;
@@ -422,17 +431,28 @@ function renderCatalogTable() {
             (p.title || '').toLowerCase().includes(search)
         );
     }
+    pages.sort((a, b) => {
+        const av = (catalogSortKey === 'title') ? (a.title || a.id || '')
+                : (catalogSortKey === 'step')  ? (a.current_step || '')
+                : (a.user || '');
+        const bv = (catalogSortKey === 'title') ? (b.title || b.id || '')
+                : (catalogSortKey === 'step')  ? (b.current_step || '')
+                : (b.user || '');
+        return av.localeCompare(bv) * catalogSortDir;
+    });
     document.getElementById('result-count').textContent = `${pages.length} pages`;
     if (pages.length === 0) {
         container.innerHTML = '<p class="empty-state">No catalog pages match your filters.</p>';
         return;
     }
+    const arrow = k => catalogSortKey === k ? (catalogSortDir === 1 ? ' ▲' : ' ▼') : '';
+    const cls   = k => 'sortable-header' + (catalogSortKey === k ? ' sort-active' : '');
     let html = `
         <table class="program-table">
             <thead><tr>
-                <th>Title</th>
-                <th>Current Role</th>
-                <th>Approver</th>
+                <th class="${cls('title')}" onclick="sortCatalogBy('title')">Title${arrow('title')}</th>
+                <th class="${cls('step')}"  onclick="sortCatalogBy('step')">Current Role${arrow('step')}</th>
+                <th class="${cls('user')}"  onclick="sortCatalogBy('user')">Approver${arrow('user')}</th>
             </tr></thead>
             <tbody>`;
     for (const p of pages) {
