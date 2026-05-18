@@ -561,12 +561,22 @@ _LONG_DEGREE_MAP = [
     (re.compile(r'^doctor\s+of\s+education\s*(?:in\s+)?', re.I), 'EdD'),
     (re.compile(r'^doctor\s+of\s+nursing\s+practice\s*(?:in\s+)?', re.I), 'DNP'),
     (re.compile(r'^doctor\s+of\s+physical\s+therapy\s*(?:in\s+)?', re.I), 'DPT'),
+    (re.compile(r'^doctor\s+of\s+professional\s+studies\s*(?:in\s+)?', re.I), 'DPS'),
+    (re.compile(r'^doctor\s+of\s+law\s+and\s+policy\s*(?:in\s+)?', re.I), 'DLP'),
     (re.compile(r'^bachelor\s+of\s+science\s*(?:in\s+)?', re.I), 'BS'),
     (re.compile(r'^bachelor\s+of\s+arts\s*(?:in\s+)?', re.I), 'BA'),
     (re.compile(r'^bachelor\s+of\s+fine\s+arts\s*(?:in\s+)?', re.I), 'BFA'),
     (re.compile(r'^graduate\s+certificate\s*(?:in\s+)?', re.I), 'Graduate Certificate'),
     (re.compile(r'^certificate\s*(?:in\s+)?', re.I), 'Graduate Certificate'),
 ]
+
+# When a long-form degree like "Doctor of Professional Studies" has no subject
+# (e.g., "Doctor of Professional Studies - New Concentrations"), use this implicit subject.
+_DEGREE_IMPLICIT_SUBJECT = {
+    'DPS': 'Professional Studies',
+    'DLP': 'Law and Policy',
+    'DNP': 'Nursing Practice',
+}
 
 # Short degree prefix pattern (e.g. "MS Computer Science", "PhD Biology")
 _SHORT_DEGREE_PREFIX_RE = re.compile(
@@ -688,6 +698,20 @@ _NON_PROGRAM_RE = re.compile(
 # Raw course codes like "ALY 6040" or "RGA 1234"
 _COURSE_CODE_RE = re.compile(r'^[A-Z]{2,5}\s+\d{4}\b', re.I)
 
+# Multi-program bundle: two or more degree tokens around "and" (e.g. "MSIS and MSIS Bridge",
+# "MS CEE and MS BIOE in TOR").  Requires the SAME short degree token to appear at least twice,
+# OR two different well-known short degrees around "and".
+_MULTI_PROG_DEGREE_TOKENS = (
+    r'MS|MA|MBA|MFA|MPH|MPS|MPA|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSECE|MSCP|MSML|MSBA|'
+    r'DNP|DPT|EdD|PhD|JD|LLM|DPS|DLP|BS|BA|BFA|BArch|CAGS'
+)
+_MULTI_PROG_DEGREE_RE = re.compile(
+    r'\b(' + _MULTI_PROG_DEGREE_TOKENS + r')\b'
+    r'.+?\band\b.+'
+    r'\b(' + _MULTI_PROG_DEGREE_TOKENS + r')\b',
+    re.I
+)
+
 
 def _is_non_program(name):
     """Return True if the entry is clearly not an academic degree program."""
@@ -698,7 +722,68 @@ def _is_non_program(name):
     # Semicolon-separated bundle entries list multiple programs and are not a single degree
     if ';' in (name or ''):
         return True
+    # Two degree tokens with "and" between them → multi-program bundle
+    # (e.g. "MSIS and MSIS Bridge In Miami", "MS CEE and MS BIOE in TOR")
+    if _MULTI_PROG_DEGREE_RE.search(name or ''):
+        return True
     return False
+
+
+# Regex to find known campus names in a program name string
+_CAMPUS_FIND_RE = re.compile(
+    r'\b(Boston|Oakland|Portland|Toronto|Seattle|Miami|Arlington|'
+    r'Vancouver|Charlotte|London|Silicon Valley|Online)\b',
+    re.I
+)
+
+
+def _expand_multi_campus(name, source_campus=''):
+    """If a name mentions multiple campus names, return one (skeleton_name, campus) per campus.
+
+    Handles patterns like:
+      "Urban Analytics, Boston, Arlington and Oakland, Graduate Certificate"
+      → [("Urban Analytics, Graduate Certificate", "Boston"),
+         ("Urban Analytics, Graduate Certificate", "Arlington"),
+         ("Urban Analytics, Graduate Certificate", "Oakland")]
+
+    "Degree in Subject in CampusA and CampusB"
+      → [("Degree in Subject", "CampusA"), ("Degree in Subject", "CampusB")]
+
+    Returns [(name, source_campus)] unchanged if fewer than 2 campus names found.
+    """
+    s = name.strip()
+    # Don't expand if campus already in parens — that's a single campus marker
+    s_check = re.sub(r'\([^)]+\)', '', s)
+
+    hits = list(_CAMPUS_FIND_RE.finditer(s_check))
+    if len(hits) < 2:
+        return [(name, source_campus)]
+
+    campuses = [h.group(0) for h in hits]
+
+    # Remove all campus name occurrences from the string, plus adjacent connectors
+    # ("and", ",", "in") to get the program skeleton.
+    skeleton = s_check
+    # Remove ", CampusName" / "CampusName," / " and CampusName" / "in CampusName" patterns
+    for campus in campuses:
+        skeleton = re.sub(
+            r'(?:,\s*|\s+(?:and|in)\s+)' + re.escape(campus) + r'\b',
+            '', skeleton, flags=re.I)
+        skeleton = re.sub(
+            r'\b' + re.escape(campus) + r'(?:\s*,|\s+(?:and|in)\b)?',
+            '', skeleton, flags=re.I)
+    # Clean up orphaned separators and whitespace
+    skeleton = re.sub(r',\s*,', ',', skeleton)
+    skeleton = re.sub(r',\s*(and|or|in)\s*,', ',', skeleton, flags=re.I)
+    skeleton = re.sub(r'\s+(and|or|in)\s*$', '', skeleton, flags=re.I)
+    skeleton = re.sub(r'^\s*(and|or|in)\s+', '', skeleton, flags=re.I)
+    skeleton = re.sub(r'\s{2,}', ' ', skeleton)
+    skeleton = skeleton.strip(' ,').strip()
+
+    if not skeleton:
+        return [(name, source_campus)]
+
+    return [(skeleton, c) for c in campuses]
 
 
 def _normalize_campus(campus):
@@ -739,6 +824,16 @@ def _norm_degree(degree_str):
     return upper if upper else s
 
 
+# Campus names that should never be treated as degree codes (e.g., "OAKLAND" is all-caps
+# letters and would otherwise pass the degree regex).
+_DEGREE_BLOCKLIST = frozenset({
+    'boston', 'oakland', 'portland', 'toronto', 'seattle', 'miami', 'arlington',
+    'vancouver', 'charlotte', 'london', 'online', 'roux',
+    'silicon', 'valley',  # "Silicon Valley" split
+    'new', 'old', 'bridge', 'align', 'connect',  # common descriptor tokens
+})
+
+
 def _is_valid_degree(degree_str):
     """Return True only for recognizable academic degree codes or Graduate Certificate.
 
@@ -749,6 +844,9 @@ def _is_valid_degree(degree_str):
     normed = _norm_degree(degree_str)
     if normed.lower() == 'graduate certificate':
         return True
+    # Reject campus/location/descriptor names that happen to be all-caps letters
+    if normed.lower() in _DEGREE_BLOCKLIST:
+        return False
     return bool(re.match(r'^[A-Z][A-Z0-9]{1,9}$', normed))
 
 
@@ -829,6 +927,12 @@ def _parse_external_name(name_raw):
             campus = mt.group(1)
             s = s[:mt.start()].strip()
 
+    # Strip "at Roux" suffix — "Bioengineering at Roux, MS" → "Bioengineering, MS" + campus=Portland
+    roux_m = re.search(r'\s+at\s+Roux\b', s, re.I)
+    if roux_m and not campus:
+        s = s[:roux_m.start()] + s[roux_m.end():]
+        campus = 'Portland'
+
     # Pre-normalize: remove dots from leading degree tokens (handles "Ph.D." → "PhD")
     s_nodot = re.sub(r'^([A-Za-z]{1,6}(?:\.[A-Za-z]{1,3})+)(\s)', lambda m: re.sub(r'\.', '', m.group(1)) + m.group(2), s)
     if s_nodot != s:
@@ -839,6 +943,11 @@ def _parse_external_name(name_raw):
         mm = pat.match(s)
         if mm:
             subj = s[mm.end():].strip().strip(',').strip()
+            # Strip leading "- descriptor" (e.g. "- New Concentrations" → "")
+            subj = re.sub(r'^[-–—]\s*.+$', '', subj).strip()
+            # Use implicit subject for degrees that stand alone without a subject
+            if not subj and short_deg in _DEGREE_IMPLICIT_SUBJECT:
+                subj = _DEGREE_IMPLICIT_SUBJECT[short_deg]
             return subj, short_deg, campus
 
     # Try short degree prefix: "MS Computer Science"
@@ -848,11 +957,19 @@ def _parse_external_name(name_raw):
         subj = mm.group(2).strip().strip(',').strip()
         return subj, deg, campus
 
-    # CIM format: "Subject, Degree"
+    # CIM format: "Subject, Degree" (also handles "Degree, Subject" swap)
     idx = s.rfind(',')
     if idx >= 0:
-        subj = s[:idx].strip()
-        deg  = _norm_degree(s[idx+1:].strip())
+        subj    = s[:idx].strip()
+        deg_raw = s[idx+1:].strip()
+        # Strip "- descriptor" suffix from degree field
+        # e.g. "MS - new CAMD concentration" → "MS"
+        deg_clean = re.sub(r'\s*[-–—]\s*.+$', '', deg_raw).strip()
+        deg = _norm_degree(deg_clean)
+        # Detect swapped format: "DEGREE, Subject" (e.g. "MS, Occupational Therapy")
+        # If the "subject" part parses as a valid degree and the "degree" part does not, swap.
+        if _is_valid_degree(subj) and not _is_valid_degree(deg_clean):
+            subj, deg = deg_raw.strip(), _norm_degree(subj)
         return subj, deg, campus
 
     # "Subject Graduate Certificate" format (degree at end without a comma)
@@ -1097,69 +1214,73 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             })
             continue
 
-        norm_campus = _normalize_campus(p['campus'])
-        subject, degree, campus_from_name = _parse_external_name(p['program_name'])
-        if not campus_from_name and norm_campus:
-            campus_from_name = norm_campus
+        # Expand multi-campus entries (e.g. "X, Boston and Oakland, GC") into one per campus
+        _svt_expansions = _expand_multi_campus(p['program_name'], p.get('campus', ''))
 
-        row, match_type = _lookup_cim(subject, degree, campus_from_name)
-        if row:
-            n_svt_matched += 1
-            if not row.get('svt_status'):
-                row['svt_status']           = p['svt_status']
-                row['roster_sub_status']    = p['roster_sub_status']
-                row['roster_proposal_type'] = p['roster_proposal_type']
-                row['roster_launch_date']   = p['roster_launch_date']
-            if not row.get('college') and p.get('college'):
-                row['college'] = p['college']
-        else:
-            if _is_valid_degree(degree):
-                # Add new tracker entry from SVT
-                campus_store = campus_from_name or 'Boston'
-                pid = _make_id(p['program_name'], campus_store)
-                if pid not in tracker:
-                    new_row = _make_row(pid, p['program_name'],
-                                        p.get('college', ''), campus_store)
-                    tracker[pid] = new_row
-                    n_svt_added += 1
-                    cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
-                    if campus_store not in ('', 'Boston'):
-                        cim_fmt += f" ({campus_store})"
-                    svt_added_log.append({
-                        'original_name': p['program_name'],
-                        'cim_format':    cim_fmt,
-                        'campus':        campus_store,
-                    })
-                    # Also index the new row so later IPD step can find it
-                    key3 = _cim_index_keys(subject, degree, campus_store)
-                    if key3 not in cim_exact_index:
-                        cim_exact_index[key3] = tracker[pid]
-                    key2 = _subject_degree_keys(subject, degree)
-                    cim_nameDeg_index.setdefault(key2, []).append(tracker[pid])
-                    cim_entries_list.append({
-                        'pid': pid,
-                        'program_name': p['program_name'],
-                        'subject': subject,
-                        'degree': degree,
-                        'degree_norm': _norm_degree(degree).lower(),
-                        'campus': campus_store,
-                        'row': tracker[pid],
-                    })
-                row = tracker[pid]
+        for _svt_name, _svt_campus_override in _svt_expansions:
+            norm_campus = _normalize_campus(_svt_campus_override or p['campus'])
+            subject, degree, campus_from_name = _parse_external_name(_svt_name)
+            if not campus_from_name and norm_campus:
+                campus_from_name = norm_campus
+
+            row, match_type = _lookup_cim(subject, degree, campus_from_name)
+            if row:
+                n_svt_matched += 1
                 if not row.get('svt_status'):
                     row['svt_status']           = p['svt_status']
                     row['roster_sub_status']    = p['roster_sub_status']
                     row['roster_proposal_type'] = p['roster_proposal_type']
                     row['roster_launch_date']   = p['roster_launch_date']
+                if not row.get('college') and p.get('college'):
+                    row['college'] = p['college']
             else:
-                n_svt_mismatch += 1
-                best = _best_guess(subject, degree, cim_entries_list)
-                svt_mismatches.append({
-                    'source_name':   p['program_name'],
-                    'source_campus': p['campus'],
-                    'reason':        'no CIM match' if not degree else 'no recognizable degree',
-                    'best_guess':    best,
-                })
+                if _is_valid_degree(degree):
+                    # Add new tracker entry from SVT
+                    campus_store = campus_from_name or 'Boston'
+                    pid = _make_id(_svt_name, campus_store)
+                    if pid not in tracker:
+                        new_row = _make_row(pid, _svt_name,
+                                            p.get('college', ''), campus_store)
+                        tracker[pid] = new_row
+                        n_svt_added += 1
+                        cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+                        if campus_store not in ('', 'Boston'):
+                            cim_fmt += f" ({campus_store})"
+                        svt_added_log.append({
+                            'original_name': p['program_name'],
+                            'cim_format':    cim_fmt,
+                            'campus':        campus_store,
+                        })
+                        # Also index the new row so later IPD step can find it
+                        key3 = _cim_index_keys(subject, degree, campus_store)
+                        if key3 not in cim_exact_index:
+                            cim_exact_index[key3] = tracker[pid]
+                        key2 = _subject_degree_keys(subject, degree)
+                        cim_nameDeg_index.setdefault(key2, []).append(tracker[pid])
+                        cim_entries_list.append({
+                            'pid': pid,
+                            'program_name': _svt_name,
+                            'subject': subject,
+                            'degree': degree,
+                            'degree_norm': _norm_degree(degree).lower(),
+                            'campus': campus_store,
+                            'row': tracker[pid],
+                        })
+                    row = tracker[pid]
+                    if not row.get('svt_status'):
+                        row['svt_status']           = p['svt_status']
+                        row['roster_sub_status']    = p['roster_sub_status']
+                        row['roster_proposal_type'] = p['roster_proposal_type']
+                        row['roster_launch_date']   = p['roster_launch_date']
+                else:
+                    n_svt_mismatch += 1
+                    best = _best_guess(subject, degree, cim_entries_list)
+                    svt_mismatches.append({
+                        'source_name':   p['program_name'],
+                        'source_campus': _svt_campus_override or p['campus'],
+                        'reason':        'no CIM match' if not degree else 'no recognizable degree',
+                        'best_guess':    best,
+                    })
 
     print(f"  SVT Roster: {len(roster_rows_data)} entries, {n_svt_matched} matched, "
           f"{n_svt_added} added, {n_svt_mismatch} mismatches, {n_svt_nonprog} non-programs")
@@ -1182,7 +1303,25 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 'campus':      '',
             })
             continue
-        subject, degree, campus_from_name = _parse_external_name(p['program_name'])
+        # Expand multi-campus entries (e.g. "X in Boston and Oakland") into one per campus.
+        # For simplicity, process each expansion independently using the same matching logic.
+        _ipd_expansions = _expand_multi_campus(p['program_name'], '')
+        # If multi-campus, process the first expansion now and queue the rest for re-entry
+        # by synthesizing pseudo-entries for later expansions.
+        _ipd_name_to_parse = _ipd_expansions[0][0]
+        _ipd_campus_hint   = _ipd_expansions[0][1]
+        for _extra_name, _extra_campus in _ipd_expansions[1:]:
+            _extra_subject, _extra_degree, _extra_campus_from = _parse_external_name(_extra_name)
+            if _extra_campus and not _extra_campus_from:
+                _extra_campus_from = _extra_campus
+            _extra_row, _ = _lookup_cim(_extra_subject, _extra_degree, _extra_campus_from)
+            if _extra_row and not _extra_row.get('ipd_status'):
+                _extra_row['ipd_status']             = p['ipd_status']
+                _extra_row['ipd_proposal_type']      = p.get('ipd_proposal_type', '')
+                _extra_row['ipd_additional_college'] = p.get('ipd_additional_college', '')
+        subject, degree, campus_from_name = _parse_external_name(_ipd_name_to_parse)
+        if _ipd_campus_hint and not campus_from_name:
+            campus_from_name = _ipd_campus_hint
         proposal_type = p.get('ipd_proposal_type', '')
         is_launch_deploy = bool(_LAUNCH_DEPLOY_RE.search(proposal_type))
 
