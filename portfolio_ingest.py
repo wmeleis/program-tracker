@@ -735,6 +735,32 @@ def _is_non_program(name):
     return False
 
 
+# Non-programs that are completely silent — don't report them in the non_programs list.
+# These are recurring process artifacts or multi-program bundles with no actionable tracking
+# implication. They already pass _is_non_program(); this second gate just drops them from
+# the console output so they stop cluttering the report.
+_SILENT_NON_PROGRAM_RE = re.compile(
+    r';'                                # multi-program semicolon bundles
+    r'|\binactivate\b'                  # "Inactivate EdD in ..."
+    r'|\bdeactivation\b'               # "Global Health and Nutrition Cert deactivation"
+    r'|\bsuspension\s+of\b'            # "Suspension of MPS Insurance Analytics"
+    r'|\bexit[\s-]?only\s+degree\b'    # "Exit-Only Degree Program"
+    r'|\blaunch\s+of\s+the\b'          # "Launch of the MFA in X"
+    r'|\band/or\b',                    # "Executive MBA and/or MS Management"
+    re.I
+)
+
+
+def _is_silent_non_program(name):
+    """Return True for non-programs that should be completely dropped (not listed at all)."""
+    if _SILENT_NON_PROGRAM_RE.search(name or ''):
+        return True
+    # Multi-degree bundles like "MS CEE and MS BIOE in TOR", "MSIS and MSIS Bridge In Miami"
+    if _MULTI_PROG_DEGREE_RE.search(name or ''):
+        return True
+    return False
+
+
 # Regex to find known campus names in a program name string
 _CAMPUS_FIND_RE = re.compile(
     r'\b(Boston|Oakland|Portland|Toronto|Seattle|Miami|Arlington|'
@@ -1244,11 +1270,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     for p in roster_rows_data:
         if _is_non_program(p['program_name']):
             n_svt_nonprog += 1
-            non_programs.append({
-                'source':      'SVT',
-                'source_name': p['program_name'],
-                'campus':      p['campus'],
-            })
+            if not _is_silent_non_program(p['program_name']):
+                non_programs.append({
+                    'source':      'SVT',
+                    'source_name': p['program_name'],
+                    'campus':      p['campus'],
+                })
             continue
 
         # Expand multi-campus entries (e.g. "X, Boston and Oakland, GC") into one per campus
@@ -1333,11 +1360,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     for p in ipd_rows_data:
         if _is_non_program(p['program_name']):
             n_ipd_nonprog += 1
-            non_programs.append({
-                'source':      'IPD',
-                'source_name': p['program_name'],
-                'campus':      '',
-            })
+            if not _is_silent_non_program(p['program_name']):
+                non_programs.append({
+                    'source':      'IPD',
+                    'source_name': p['program_name'],
+                    'campus':      '',
+                })
             continue
         # Expand multi-campus entries (e.g. "X in Boston and Oakland") into one per campus.
         # For simplicity, process each expansion independently using the same matching logic.
