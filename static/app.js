@@ -3111,6 +3111,238 @@ function abbreviateCampus(campus) {
     return CAMPUS_ABBREVS[campus] || campus;
 }
 
+// ── Console modal ──────────────────────────────────────────────────────────────
+
+function openConsoleModal() {
+    const modal = document.getElementById('console-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    loadConsoleData();
+}
+
+function closeConsoleModal() {
+    const modal = document.getElementById('console-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function closeConsoleModalIfBackdrop(event) {
+    if (event.target.id === 'console-modal') closeConsoleModal();
+}
+
+async function loadConsoleData() {
+    const body = document.getElementById('console-modal-body');
+    body.innerHTML = 'Loading…';
+    try {
+        const resp = await fetch('/api/console');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        body.innerHTML = renderConsoleContent(data);
+    } catch (e) {
+        body.innerHTML = `<p style="color:#b91c1c">Could not load console data: ${e.message}</p>`;
+    }
+}
+
+function renderConsoleContent(data) {
+    const scanLog    = (data.scan_log || []).slice().reverse();
+    const mm         = data.mismatches || {};
+    const updatedAt  = mm.updated_at;
+    const nonPrograms   = mm.non_programs   || [];
+    const ipdAdded      = mm.ipd_added      || [];
+    const svtMismatches = mm.svt_mismatches || [];
+    const ipdMismatches = mm.ipd_mismatches || [];
+    const otpMismatches = mm.otp_mismatches || [];
+    const glsMismatches = mm.gls_mismatches || [];
+
+    let html = '<h3 style="margin:0 0 10px">Scan History</h3>';
+    if (!scanLog.length) {
+        html += '<p class="empty-state">No scans recorded yet.</p>';
+    } else {
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+        html += '<thead><tr style="background:#f1f5f9;text-align:left">'
+             + '<th style="padding:5px 8px">Started</th>'
+             + '<th style="padding:5px 8px">Completed</th>'
+             + '<th style="padding:5px 8px">Duration</th>'
+             + '<th style="padding:5px 8px">Programs</th>'
+             + '<th style="padding:5px 8px">Changes</th>'
+             + '<th style="padding:5px 8px">Status</th>'
+             + '</tr></thead><tbody>';
+        for (const entry of scanLog) {
+            const started   = entry.started_at   ? new Date(entry.started_at)   : null;
+            const completed = entry.completed_at ? new Date(entry.completed_at) : null;
+            const dur = (started && completed)
+                ? Math.round((completed - started) / 60000) + ' min' : '—';
+            const fmtDate = d => d ? d.toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+            const rowColor = entry.error ? '#fff5f5' : '';
+            html += `<tr style="border-top:1px solid #e2e8f0;background:${rowColor}">
+                <td style="padding:5px 8px;white-space:nowrap">${fmtDate(started)}</td>
+                <td style="padding:5px 8px;white-space:nowrap">${fmtDate(completed)}</td>
+                <td style="padding:5px 8px">${dur}</td>
+                <td style="padding:5px 8px">${entry.programs_scanned ?? '—'}</td>
+                <td style="padding:5px 8px">${entry.changes ?? '—'}</td>
+                <td style="padding:5px 8px;color:${entry.error ? '#b91c1c' : '#15803d'}">${entry.error ? '✗ ' + escapeHtml(entry.error) : '✓ OK'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
+    html += '<h3 style="margin:20px 0 6px">Portfolio Ingest Report</h3>';
+    if (updatedAt) {
+        html += `<p style="color:#64748b;font-size:11px;margin:0 0 12px">Last ingest: ${new Date(updatedAt).toLocaleString()}</p>`;
+    }
+
+    function _mismatchTable(rows, bgColor) {
+        if (!rows.length) return '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+        let t = `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">`;
+        t += `<thead><tr style="background:${bgColor};text-align:left">`
+           + '<th style="padding:4px 8px">Name</th>'
+           + '<th style="padding:4px 8px">Campus</th>'
+           + '<th style="padding:4px 8px">Best Guess</th>'
+           + '</tr></thead><tbody>';
+        for (const m of rows) {
+            const name   = m.source_name || m.name || '';
+            const campus = m.source_campus || m.campus || '';
+            const guess  = m.best_guess ? escapeHtml(m.best_guess) : '<span style="color:#94a3b8">—</span>';
+            t += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(name)}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(campus)}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${guess}</td>
+            </tr>`;
+        }
+        t += '</tbody></table>';
+        return t;
+    }
+
+    const svtAdded = mm.svt_added || [];
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from SVT (${svtAdded.length})</h4>`;
+    if (!svtAdded.length) {
+        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+    } else {
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+        html += '<thead><tr style="background:#eff6ff;text-align:left">'
+             + '<th style="padding:4px 8px">SVT Name</th>'
+             + '<th style="padding:4px 8px">SVT Campus</th>'
+             + '<th style="padding:4px 8px">CIM Format</th>'
+             + '</tr></thead><tbody>';
+        for (const p of svtAdded) {
+            html += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(p.original_name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || '')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from IPD (${ipdAdded.length})</h4>`;
+    if (!ipdAdded.length) {
+        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+    } else {
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+        html += '<thead><tr style="background:#eff6ff;text-align:left">'
+             + '<th style="padding:4px 8px">IPD Name</th>'
+             + '<th style="padding:4px 8px">IPD Campus</th>'
+             + '<th style="padding:4px 8px">CIM Format</th>'
+             + '<th style="padding:4px 8px">Proposal Type</th>'
+             + '</tr></thead><tbody>';
+        for (const p of ipdAdded) {
+            html += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(p.original_name || p.name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || p.name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.proposal_type || '')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">SVT entries with no CIM match (${svtMismatches.length})</h4>`;
+    html += _mismatchTable(svtMismatches, '#fff1f2');
+
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">IPD entries with no CIM match (${ipdMismatches.length})</h4>`;
+    html += _mismatchTable(ipdMismatches, '#fff1f2');
+
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">OTP entries with no CIM match (${otpMismatches.length})</h4>`;
+    html += _mismatchTable(otpMismatches, '#fff1f2');
+
+    if (glsMismatches.length) {
+        html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">GLS entries with no match (${glsMismatches.length})</h4>`;
+        html += _mismatchTable(glsMismatches, '#fff1f2');
+    }
+
+    if (nonPrograms.length) {
+        const bySource = {};
+        for (const e of nonPrograms) {
+            (bySource[e.source] = bySource[e.source] || []).push(e);
+        }
+        html += `<details style="margin-top:16px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:#64748b">Non-program entries (${nonPrograms.length})</summary>`;
+        for (const [src, rows] of Object.entries(bySource)) {
+            html += `<h5 style="margin:10px 0 4px;font-size:12px;color:#64748b">${escapeHtml(src)} (${rows.length})</h5>`;
+            html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">';
+            html += '<thead><tr style="background:#f8fafc;text-align:left"><th style="padding:3px 8px">Name</th></tr></thead><tbody>';
+            for (const e of rows) {
+                html += `<tr style="border-top:1px solid #e2e8f0"><td style="padding:3px 8px;color:#64748b">${escapeHtml(e.source_name)}</td></tr>`;
+            }
+            html += '</tbody></table>';
+        }
+        html += '</details>';
+    }
+
+    return html;
+}
+
+// ── Info-tooltip overlay (drives <span class="info-tip"> elements) ──────────
+// Tooltips are CSS-styled but positioned via JS so they escape any
+// overflow:hidden ancestor. Hovering a .tip-icon shows #tip-overlay with the
+// .tip-bubble text content, anchored just below the icon.
+(function initTipOverlay() {
+    if (typeof document === 'undefined') return;
+    const start = () => {
+        let overlay = document.getElementById('tip-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'tip-overlay';
+            document.body.appendChild(overlay);
+        }
+        let hideTimer = null;
+        const show = (icon) => {
+            const wrap = icon.closest('.info-tip');
+            if (!wrap) return;
+            const bubble = wrap.querySelector('.tip-bubble');
+            if (!bubble) return;
+            overlay.textContent = bubble.textContent;
+            const r = icon.getBoundingClientRect();
+            overlay.style.display = 'block';
+            // After display we can measure; position after a microtask
+            requestAnimationFrame(() => {
+                const ow = overlay.offsetWidth;
+                let left = r.left + r.width / 2 - ow / 2;
+                left = Math.max(8, Math.min(left, window.innerWidth - ow - 8));
+                overlay.style.left = left + 'px';
+                overlay.style.top  = (r.bottom + 8) + 'px';
+            });
+        };
+        const hide = () => { overlay.style.display = 'none'; };
+        document.addEventListener('mouseover', (e) => {
+            const icon = e.target.closest && e.target.closest('.tip-icon');
+            if (icon) {
+                if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+                show(icon);
+            }
+        });
+        document.addEventListener('mouseout', (e) => {
+            const icon = e.target.closest && e.target.closest('.tip-icon');
+            if (icon) {
+                hideTimer = setTimeout(hide, 120);
+            }
+        });
+    };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
+})();
+
 // Strip trailing campus parenthetical from a portfolio program name for display.
 // e.g. "Analytics, MS (Oakland)" → "Analytics, MS"
 // Keeps non-campus parentheticals like "(non-degree)" intact.
