@@ -4016,8 +4016,11 @@ function renderPortfolioTable() {
         portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
     });
 
+    // Use the page's existing info-tip overlay system (JS-driven, no native
+    // title= delay). The IIFE near the top of the file watches for mouseover
+    // on .tip-icon elements and renders the .tip-bubble text in #tip-overlay.
     const _help = (text) => text
-        ? `<span class="col-help" title="${escapeHtml(text)}" onclick="event.stopPropagation()">&#9432;</span>`
+        ? `<span class="info-tip" onclick="event.stopPropagation()"><i class="tip-icon">i</i><span class="tip-bubble">${escapeHtml(text)}</span></span>`
         : '';
     const visibleHeaders = PORTFOLIO_COLUMNS
         .filter(c => portfolioVisibleCols.has(c.key))
