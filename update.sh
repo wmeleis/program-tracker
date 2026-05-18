@@ -54,7 +54,7 @@ if ! pgrep -q "$BROWSER_APP"; then
 fi
 
 SESSION_CHECK=$(osascript -e "
-tell application \"$BROWSER_APP\"
+tell application \"$BROWSER_APP\" without activating
     set tabList to every tab of window 1
     repeat with t in tabList
         if URL of t contains \"courseleaf/approve\" then
