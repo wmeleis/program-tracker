@@ -676,7 +676,6 @@ _NON_PROGRAM_RE = re.compile(
     r'|summer\s+institute'
     r'|ai\s+for\s+workforce'
     r'|3[\-\s]year\s+apprenticeship'
-    r'|concentration\s+in\s+the\s'           # "AI Concentration in the MS in X"
     r'|converted\s+to\s+fully\s+online'       # "CPS Degrees converted to fully online via EDGE"
     r'|\bminor\s+in\b'                        # "Minor in Creative Writing"
     r'|\bhalf[\s-]?major\b'                   # "Half Major, Applied Creative Writing"
@@ -1620,17 +1619,34 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     print(f"  Total non-CIM rows: {n_non_cim}")
 
     # ── Write mismatches JSON ─────────────────────────────────────────────────
+    def _dedup(lst, *key_fields):
+        """Deduplicate a list of dicts by the given key fields, preserving order."""
+        seen, out = set(), []
+        for item in lst:
+            k = tuple(item.get(f, '') for f in key_fields)
+            if k not in seen:
+                seen.add(k)
+                out.append(item)
+        return out
+
     _mismatch_file = os.path.join(os.path.dirname(_find_db_path()), 'portfolio_mismatches.json')
     try:
+        _np   = _dedup(sorted(non_programs,   key=lambda x: (x['source'], x['source_name'])), 'source', 'source_name')
+        _sa   = _dedup(sorted(svt_added_log,  key=lambda x: x['original_name']), 'original_name', 'campus')
+        _sm   = _dedup(sorted(svt_mismatches, key=lambda x: x['source_name']), 'source_name')
+        _im   = _dedup(sorted(ipd_mismatches, key=lambda x: x['source_name']), 'source_name')
+        _ia   = _dedup(sorted(ipd_added_log,  key=lambda x: x['name']), 'name', 'campus')
+        _om   = _dedup(sorted(otp_mismatches, key=lambda x: x['source_name']), 'source_name')
+        _gm   = _dedup(sorted(gls_mismatches, key=lambda x: x.get('source_name', '')), 'source_name')
         _mismatch_data = {
             'updated_at':     now,
-            'non_programs':   sorted(non_programs,   key=lambda x: (x['source'], x['source_name'])),
-            'svt_added':      sorted(svt_added_log,  key=lambda x: x['original_name']),
-            'svt_mismatches': sorted(svt_mismatches, key=lambda x: x['source_name']),
-            'ipd_mismatches': sorted(ipd_mismatches, key=lambda x: x['source_name']),
-            'ipd_added':      sorted(ipd_added_log,  key=lambda x: x['name']),
-            'otp_mismatches': sorted(otp_mismatches, key=lambda x: x['source_name']),
-            'gls_mismatches': sorted(gls_mismatches, key=lambda x: x.get('source_name', '')),
+            'non_programs':   _np,
+            'svt_added':      _sa,
+            'svt_mismatches': _sm,
+            'ipd_mismatches': _im,
+            'ipd_added':      _ia,
+            'otp_mismatches': _om,
+            'gls_mismatches': _gm,
         }
         with open(_mismatch_file, 'w') as _f:
             json.dump(_mismatch_data, _f, indent=2)
