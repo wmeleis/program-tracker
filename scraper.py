@@ -273,7 +273,7 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     # while, the first call wakes the tab up.
     applescript_fast = f'''
     set jsCode to (read POSIX file "{js_file}" as text)
-    tell application "{BROWSER_APP}" without activating
+    tell application "{BROWSER_APP}"
         set tabIdx to 0
         set n to count of tabs of window 1
         repeat with i from 1 to n
@@ -294,7 +294,7 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
     set jsCode to (read POSIX file "{js_file}" as text)
     -- Save frontmost app before touching Chrome
     set prevApp to name of (info for (path to frontmost application))
-    tell application "{BROWSER_APP}" without activating
+    tell application "{BROWSER_APP}"
         set tabIdx to 0
         set n to count of tabs of window 1
         repeat with i from 1 to n
