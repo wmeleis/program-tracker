@@ -1933,6 +1933,104 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     else:
         print(f"  2025 scoring: file not found, skipping ({SCORING_2025_PATH})")
 
+    # ── Step 6: Link concentration rows to their parent program ──────────────
+    # Concentrations are stored as their own portfolio_programs rows (the
+    # CIM-side records exist that way). Set concentration_of so the frontend
+    # nests them under their parent program instead of listing them as
+    # standalone top-level rows.
+    #
+    # Patterns handled:
+    #   - "X with Concentration in Y, DEGREE"      → parent = "X, DEGREE"
+    #   - "X Concentration in Y" (no degree code)  → parent has subject "X-Y"
+    #     (CIM names parents with an em-dash, e.g. "Nursing—X, MS").
+    #   - "Subject - Concentration Name, DEG"      → parent = "Subject, DEG"
+    _CONC_WITH = re.compile(
+        r'^(.+?)\s+with\s+Concentration\s+in\s+[^,]+,\s+([A-Z][A-Za-z0-9\-]*)\s*$',
+        re.I)
+    _CONC_DASH = re.compile(
+        r'^(.+?)\s*[-—]\s*[^-—,]+?\s+Concentration,?\s+([A-Z][A-Za-z0-9\-]*)\s*$',
+        re.I)
+    _CONC_SUBJ_IN = re.compile(
+        r'^([^,]+?)\s+Concentration\s+in\s+(.+)$',
+        re.I)
+    # Indexes for parent lookup
+    name_idx = {}         # normalized full name → pid
+    subject_idx = {}      # normalized subject (no degree/campus) → list of pids
+    for pid, row in tracker.items():
+        full = row.get('program_name') or ''
+        nf = _norm(full)
+        if nf and nf not in name_idx:
+            name_idx[nf] = pid
+        subj, _deg, _cmp = _parse_cim_name(full)
+        ns = _norm_subject(subj)
+        if ns:
+            subject_idx.setdefault(ns, []).append(pid)
+    n_linked = 0
+    for pid, row in tracker.items():
+        name = row.get('program_name') or ''
+        if 'concentration' not in name.lower():
+            continue
+        if row.get('concentration_of'):
+            continue
+        # Pattern A: "X with Concentration in Y, DEGREE"
+        m = _CONC_WITH.match(name)
+        if m:
+            parent = f"{m.group(1).strip()}, {m.group(2).strip()}"
+            key = _norm(parent)
+            if key in name_idx and name_idx[key] != pid:
+                row['concentration_of'] = name_idx[key]
+                n_linked += 1
+                continue
+        # Pattern B: "X - Y Concentration, DEGREE"
+        m = _CONC_DASH.match(name)
+        if m:
+            parent = f"{m.group(1).strip()}, {m.group(2).strip()}"
+            key = _norm(parent)
+            if key in name_idx and name_idx[key] != pid:
+                row['concentration_of'] = name_idx[key]
+                n_linked += 1
+                continue
+        # Pattern C: "Subject Concentration in Rest" — parent subject is
+        # "Subject-Rest" (em-dash; the CIM convention for nurse-practitioner
+        # tracks under Nursing). Only the dash-joined parent is safe — the
+        # plain "Rest" subject would wrongly link "Political Science
+        # Concentration in Public Policy" to a stand-alone "Public Policy"
+        # program. Concentrations whose parent isn't dash-named (Business
+        # Concentration, Political Science Concentration, etc.) fall through
+        # to the explicit map below.
+        m = _CONC_SUBJ_IN.match(name)
+        if m:
+            base = m.group(1).strip()
+            rest = m.group(2).strip()
+            linked = False
+            for cand_subj in (f"{base}-{rest}", f"{base}—{rest}"):
+                cands = subject_idx.get(_norm_subject(cand_subj), [])
+                hit = next((c for c in cands if c != pid), None)
+                if hit:
+                    row['concentration_of'] = hit
+                    n_linked += 1
+                    linked = True
+                    break
+            if linked:
+                continue
+        # Pattern D: explicit prefix → parent name mapping for CIM
+        # concentration records whose parent isn't discoverable by pattern
+        # (Business / Political Science concentration sub-records).
+        _EXPLICIT_PARENT = [
+            ('business concentration in ',         'business administration, bsba (boston)'),
+            ('political science concentration in ','political science, ba (boston)'),
+        ]
+        lname = name.lower()
+        for prefix, parent_name in _EXPLICIT_PARENT:
+            if lname.startswith(prefix):
+                key = _norm(parent_name)
+                if key in name_idx and name_idx[key] != pid:
+                    row['concentration_of'] = name_idx[key]
+                    n_linked += 1
+                break
+    if n_linked:
+        print(f"  Linked {n_linked} concentration rows to parents")
+
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())
     replace_all_portfolio_programs(rows)
