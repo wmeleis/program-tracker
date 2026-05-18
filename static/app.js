@@ -3377,6 +3377,15 @@ function extractCampus(name) {
     const val = match[1];
     // Filter out non-campus parentheticals
     if (val.length > 20 || val.indexOf('template') !== -1 || val.indexOf('Copy') !== -1) return '';
+    // Collapse all online variants into a single "Online" campus, matching
+    // the portfolio's _normalize_campus() policy. "Primarily Online",
+    // "Online - Vancouver Requirements", etc. all roll up to "Online" so
+    // the Programs / Courses campus filter shows one Online option, not
+    // separate ones for each suffix.
+    const low = val.toLowerCase();
+    if (low === 'online' || low.startsWith('primarily online') || low.startsWith('online -')) {
+        return 'Online';
+    }
     return val;
 }
 
