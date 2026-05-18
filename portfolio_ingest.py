@@ -578,10 +578,10 @@ _DEGREE_IMPLICIT_SUBJECT = {
     'DNP': 'Nursing Practice',
 }
 
-# Deployment suffix on subject after short-prefix parse: "MS Data Science - Align" →
-# subject="Data Science", degree="MS-Align" (matches CIM's "Data Science, MS—Align")
+# Deployment suffix on subject after short-prefix parse: "MS Data Science - Align" or
+# "MS Cybersecurity, Align" → subject="...", degree="MS-Align" (matches CIM's "MS—Align")
 _DEPLOYMENT_SUFFIX_RE = re.compile(
-    r'\s*[-–—]\s*(align|connect|bridge|accelerated|part[\s\-]?time|online|full[\s\-]?time)\s*$',
+    r'\s*(?:[-–—]|,)\s*(align|connect|bridge|accelerated|part[\s\-]?time|online|full[\s\-]?time)\s*$',
     re.I
 )
 
@@ -818,6 +818,8 @@ def _norm_degree(degree_str):
     s = (degree_str or '').strip()
     # Remove internal dots: "M.S." → "MS", "Ph.D." → "PhD"
     s_nodots = re.sub(r'\.', '', s)
+    # Normalize em-dash/en-dash to hyphen so "MS—Align" and "MS-Align" produce the same key
+    s_nodots = re.sub(r'[—–]', '-', s_nodots)
     # Try long-form first
     for pat, short in _LONG_DEGREE_MAP:
         if pat.match(s):
@@ -854,7 +856,8 @@ def _is_valid_degree(degree_str):
     # Reject campus/location/descriptor names that happen to be all-caps letters
     if normed.lower() in _DEGREE_BLOCKLIST:
         return False
-    return bool(re.match(r'^[A-Z][A-Z0-9]{1,9}$', normed))
+    # Allow hyphenated deployment suffixes like "MS-ALIGN", "MPS-CONNECT", "MSIS-BRIDGE"
+    return bool(re.match(r'^[A-Z][A-Z0-9]{1,9}(-[A-Za-z][A-Za-z0-9-]*)?$', normed))
 
 
 def _norm_subject(subject_str):
@@ -1185,25 +1188,43 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         Returns (row, match_type) where match_type is 'exact', 'name_deg', or None.
         """
         campus_resolved = _normalize_campus(campus) if campus else 'Boston'
-        key3 = _cim_index_keys(subject, degree, campus_resolved)
-        if key3 in cim_exact_index:
-            return cim_exact_index[key3], 'exact'
-        key2 = _subject_degree_keys(subject, degree)
-        candidates = cim_nameDeg_index.get(key2, [])
-        if len(candidates) == 1:
-            return candidates[0], 'name_deg'
-        if len(candidates) > 1:
-            # Multiple campus variants — return None (ambiguous) unless campus matches
-            # exactly after normalization
-            for c in candidates:
-                if _norm_campus(c['campus']) == _norm_campus(campus_resolved):
-                    return c, 'exact'
-            # If caller had no campus, return first Boston candidate
-            if not campus or campus_resolved == 'Boston':
-                for c in candidates:
-                    if _norm_campus(c.get('campus', '')) == 'boston':
-                        return c, 'name_deg'
+
+        def _try(norm_subj, norm_deg_lower, norm_campus_str):
+            k3 = (norm_subj, norm_deg_lower, norm_campus_str)
+            if k3 in cim_exact_index:
+                return cim_exact_index[k3], 'exact'
+            k2 = (norm_subj, norm_deg_lower)
+            cands = cim_nameDeg_index.get(k2, [])
+            if len(cands) == 1:
+                return cands[0], 'name_deg'
+            if len(cands) > 1:
+                for c in cands:
+                    if _norm_campus(c['campus']) == norm_campus_str:
+                        return c, 'exact'
+                if norm_campus_str == 'boston':
+                    for c in cands:
+                        if _norm_campus(c.get('campus', '')) == 'boston':
+                            return c, 'name_deg'
             return None, None
+
+        norm_campus_str = _norm_campus(campus_resolved)
+        norm_subj = _norm_subject(subject)
+        norm_deg = _norm_degree(degree).lower()
+
+        row, mt = _try(norm_subj, norm_deg, norm_campus_str)
+        if row:
+            return row, mt
+
+        # Deployment-suffix fallback: if degree has a hyphen (e.g. 'MS-Align' from
+        # "MS Data Science - Align"), try the base degree. Handles CIM programs that
+        # store the deployment in the degree field differently or not at all.
+        if '-' in norm_deg:
+            base_deg = norm_deg.split('-')[0]
+            if base_deg:
+                row, mt = _try(norm_subj, base_deg, norm_campus_str)
+                if row:
+                    return row, mt
+
         return None, None
 
     # Mismatch accumulators
