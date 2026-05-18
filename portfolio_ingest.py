@@ -986,6 +986,60 @@ def _best_eff_cat(eff_cat, completion_date, cim_step=''):
     return ''
 
 
+# Concentration headings to skip — purely structural / generic.
+_CONC_SKIP = re.compile(
+    r'^concentrations?$'
+    r'|^concentrations?\s+(or|and|for\s+all|options?|courses?|list)\b'
+    r'|\bconcentration\s+(courses?|list|options?|requirements?)\b'
+    r'|\bconcentration\s+or\s+'
+    r'|\b(without|no)\s+concentration\b'
+    r'|\(without\s+concentration\)'
+    r'|^excluded\s+courses'
+    r'|^coursework\s+option\b',
+    re.I
+)
+
+
+def _extract_concentrations_from_html(html):
+    """Return sorted list of named concentration names from CIM curriculum HTML.
+
+    Walks the program's curriculum h2/h3/h4 headings, keeps the ones with the
+    word "concentration", and normalizes them into the concentration name
+    itself (stripping prefixes like "Optional Concentration in", suffixes
+    like "Concentration(s)" / "(Optional)" / college attributions).
+    """
+    if not html:
+        return []
+    headings = re.findall(r'<h[234][^>]*>(.*?)</h[234]>', html, re.I | re.S)
+    results = []
+    seen = set()
+    for raw in headings:
+        h = re.sub(r'<[^>]+>', '', raw).replace('\xa0', ' ').strip()
+        h = re.sub(r'\s+', ' ', h).strip()
+        if 'concentration' not in h.lower():
+            continue
+        if _CONC_SKIP.search(h):
+            continue
+        h = re.sub(r'\s*[—]\s*\S.*College.*$', '', h).strip()
+        h = re.sub(r'\s*\([Oo]ptional\)$', '', h).strip()
+        h = re.sub(r'\s*\([Rr]equired\)$', '', h).strip()
+        h = h.rstrip('*† ').strip()
+        m = re.match(r'^(?:optional\s+)?concentration\s+in\s+(.+)$', h, re.I)
+        if m:
+            h = m.group(1).strip()
+        elif re.search(r'\bwith\s+a?\s*concentration\s+in\s+', h, re.I):
+            h = re.sub(r'^.*\bwith\s+a?\s*concentration\s+in\s+', '', h, flags=re.I).strip()
+        elif re.search(r'\bconcentrations?$', h, re.I):
+            h = re.sub(r'\s*\bconcentrations?\s*$', '', h, flags=re.I).strip()
+        else:
+            if re.match(r'^concentration\s', h, re.I):
+                continue
+        if h and h.lower() not in seen:
+            seen.add(h.lower())
+            results.append(h)
+    return results
+
+
 def _normalize_college(college):
     """Canonicalize a college name.
 
@@ -1932,6 +1986,36 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         print(f"  2025 scoring: {len(scoring_entries)} entries, {n_scoring_matched} matched")
     else:
         print(f"  2025 scoring: file not found, skipping ({SCORING_2025_PATH})")
+
+    # ── Step 5.9: Extract concentration names from each program's CIM
+    # curriculum HTML and store them as a JSON-encoded list. The frontend
+    # reads this and renders one expandable sub-row per named concentration
+    # under the parent program (so a single MS in X with 6 tracks shows as
+    # one Portfolio row that you can expand to see all 6).
+    cim_ids_needed = [r['cim_program_id'] for r in tracker.values()
+                      if r.get('cim_program_id')]
+    if cim_ids_needed:
+        with get_db() as conn:
+            curriculum_map = {}
+            for i in range(0, len(cim_ids_needed), 500):
+                chunk = cim_ids_needed[i:i + 500]
+                placeholders = ','.join('?' * len(chunk))
+                db_rows = conn.execute(
+                    f'SELECT id, curriculum_html FROM programs WHERE id IN ({placeholders})',
+                    chunk
+                ).fetchall()
+                for r in db_rows:
+                    if r['curriculum_html']:
+                        curriculum_map[r['id']] = r['curriculum_html']
+        n_with_concs = 0
+        for row in tracker.values():
+            cim_id = row.get('cim_program_id')
+            if cim_id and cim_id in curriculum_map:
+                concs = _extract_concentrations_from_html(curriculum_map[cim_id])
+                if concs:
+                    row['concentrations_json'] = json.dumps(concs)
+                    n_with_concs += 1
+        print(f"  Curriculum concentrations: {n_with_concs} programs have named concentrations")
 
     # ── Step 6: Link concentration rows to their parent program ──────────────
     # Concentrations are stored as their own portfolio_programs rows (the
