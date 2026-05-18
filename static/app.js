@@ -290,8 +290,8 @@ function populateCatalogCollegeFilter() {
     }
     const prev = sel.value;
     const opts = Array.from(counts.entries())
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([name, count]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)} (${count})</option>`)
+        .sort((a, b) => abbreviateCollege(a[0]).localeCompare(abbreviateCollege(b[0])))
+        .map(([name, count]) => `<option value="${escapeHtml(name)}">${escapeHtml(abbreviateCollege(name))} (${count})</option>`)
         .join('');
     sel.innerHTML = '<option value="">All Colleges</option>' + opts;
     if (prev && Array.from(sel.options).some(o => o.value === prev)) {
@@ -751,7 +751,9 @@ async function loadCourseColleges() {
         const res = await fetch('/api/course_colleges');
         const data = await res.json();
         const select = document.getElementById('filter-college');
-        const options = (data.colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        const colleges = (data.colleges || []).slice()
+            .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
+        const options = colleges.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))}</option>`).join('');
         select.innerHTML = '<option value="">All Colleges</option>' + options;
     } catch (e) {
         console.error('Failed to load course colleges:', e);
@@ -953,7 +955,9 @@ async function loadColleges() {
         const res = await fetch('/api/colleges');
         const data = await res.json();
         const select = document.getElementById('filter-college');
-        const options = (data.colleges || []).map(c => `<option value="${c}">${c}</option>`).join('');
+        const colleges = (data.colleges || []).slice()
+            .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
+        const options = colleges.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))}</option>`).join('');
         select.innerHTML = '<option value="">All Colleges</option>' + options;
     } catch (e) {
         console.error('Failed to load colleges:', e);
@@ -1076,9 +1080,9 @@ function updateCollegeOptions(baseFiltered) {
     baseFiltered.forEach(item => {
         if (item.college) counts[item.college] = (counts[item.college] || 0) + 1;
     });
-    const sorted = Object.keys(counts).sort();
+    const sorted = Object.keys(counts).sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
     select.innerHTML = '<option value="">All Colleges</option>' +
-        sorted.map(c => `<option value="${c}">${c} (${counts[c]})</option>`).join('');
+        sorted.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))} (${counts[c]})</option>`).join('');
     // Preserve selection if still valid
     if (counts[current]) select.value = current;
 }
@@ -3434,11 +3438,14 @@ function _updateMultiFilterBtn(id, filterSet) {
     const btn = document.getElementById(id);
     if (!btn) return;
     const wrap = document.getElementById('fmw-' + id);
+    const labelFor = (id === 'portfolio-filter-college')
+        ? (v => abbreviateCollege(v))
+        : (v => v);
     if (filterSet.size === 0) {
         btn.textContent = '— select — ▾';
         if (wrap) wrap.classList.remove('has-value');
     } else if (filterSet.size === 1) {
-        btn.textContent = [...filterSet][0] + ' ▾';
+        btn.textContent = labelFor([...filterSet][0]) + ' ▾';
         if (wrap) wrap.classList.add('has-value');
     } else {
         btn.textContent = filterSet.size + ' selected ▾';
@@ -3526,11 +3533,18 @@ function togglePortfolioMultiFilter(id, e) {
     const filterSet = filterSetMap[id];
     const valuesMap = _getPortfolioFilterValues();
     const vals = valuesMap[id] || [];
-    dd.innerHTML = vals.map(v => `
+    const labelFor = (id === 'portfolio-filter-college')
+        ? (v => abbreviateCollege(v))
+        : (v => v);
+    // Re-sort by label for college so acronyms sort alphabetically
+    const display = (id === 'portfolio-filter-college')
+        ? vals.slice().sort((a, b) => labelFor(a).localeCompare(labelFor(b)))
+        : vals;
+    dd.innerHTML = display.map(v => `
         <label class="portfolio-col-check">
             <input type="checkbox" ${filterSet && filterSet.has(v) ? 'checked' : ''}
                    onchange="togglePortfolioMultiValue(${JSON.stringify(id)}, ${JSON.stringify(v)}, this.checked)">
-            ${escapeHtml(v)}
+            ${escapeHtml(labelFor(v))}
         </label>`).join('');
     dd.classList.add('open');
 }
