@@ -4079,11 +4079,30 @@ function renderPortfolioTable() {
         }
     });
 
-    // Force-include parents of matching portfolio concentration rows
+    // Parents of matching concentration sub-rows: only force-include the
+    // parent when the parent itself ALSO passes the filter (i.e. it's in
+    // `filtered`). Otherwise promote the matching children to top-level
+    // standalone rows — don't surface a parent that fails the filter just
+    // because one of its sub-rows passes. Without this, filtering
+    // 'In CIM = Yes' surfaced amber not-in-CIM synthetic parents simply
+    // because one of their real-CIM children matched.
+    const filteredIds = new Set(filtered.map(r => r.id));
     Object.keys(matchingConcsByParent).forEach(parentId => {
-        if (!topLevelIds.has(parentId) && allById[parentId]) {
+        if (topLevelIds.has(parentId)) return;
+        if (filteredIds.has(parentId) && allById[parentId]) {
+            // Parent ALSO passes the filter — include it as a nesting host.
             topLevel.push(allById[parentId]);
             topLevelIds.add(parentId);
+        } else {
+            // Parent fails the filter — promote children to top-level rows
+            // and drop the nesting (they appear standalone in the table).
+            (matchingConcsByParent[parentId] || []).forEach(child => {
+                if (!topLevelIds.has(child.id)) {
+                    topLevel.push(child);
+                    topLevelIds.add(child.id);
+                }
+            });
+            delete matchingConcsByParent[parentId];
         }
     });
 
