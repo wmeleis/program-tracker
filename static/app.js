@@ -4185,9 +4185,22 @@ function renderPortfolioRow(p, opts = {}) {
     const isSynthetic = (p.id || '').startsWith('synth_');
     const concBadge = isPortfolioConc
         ? `<span class="portfolio-conc-badge">Conc.</span> ` : '';
-    const rowClass = isPortfolioConc
+    // CIM-change-type left-border color (matches the Programs tab):
+    //   New          → green   (row-added)
+    //   Change       → blue    (row-edited)
+    //   Inactivation → red     (row-deactivated)
+    // Not-in-CIM rows (no cim_program_id) get a light-amber row tint to
+    // visually flag that the entry comes from an external feed and has
+    // no canonical CIM record yet.
+    const changeClass =
+        p.cim_change_type === 'New'          ? ' row-added' :
+        p.cim_change_type === 'Change'       ? ' row-edited' :
+        p.cim_change_type === 'Inactivation' ? ' row-deactivated' : '';
+    const notInCim = !p.cim_program_id ? ' portfolio-not-in-cim' : '';
+    const rowClass = (isPortfolioConc
         ? 'portfolio-row portfolio-concentration-row'
-        : isSynthetic ? 'portfolio-row portfolio-synthetic-row' : 'portfolio-row';
+        : isSynthetic ? 'portfolio-row portfolio-synthetic-row' : 'portfolio-row')
+        + changeClass + notInCim;
 
     const toggleBtn = hasConcentrations
         ? `<button class="portfolio-conc-toggle${isExpanded ? ' expanded' : ''}"
