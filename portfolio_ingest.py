@@ -1253,6 +1253,28 @@ def _extract_concentrations_from_html(html):
         else:
             if re.match(r'^concentration\s', h, re.I):
                 continue
+        # Reject structural markers that survived normalization. These
+        # CIM headings end up reducing to a single generic word like
+        # 'Optional' or 'Required' once the trailing 'Concentration' is
+        # stripped — they are NOT real concentration names.
+        _STRUCTURAL_BLOCKLIST = {
+            'optional', 'required', 'elective', 'electives',
+            'core', 'core requirements', 'requirements',
+            'general electives', 'restricted electives',
+            'professional electives', 'free electives',
+        }
+        h_clean = re.sub(r'\s*[/]\s*', '/', h).strip()
+        if h_clean.lower() in _STRUCTURAL_BLOCKLIST:
+            continue
+        # Also reject if the result starts with a structural prefix
+        # ("Elective Courses / Optional", "Professional Electives/Optional",
+        # "Optional Political Science", etc.) — these are pure curriculum
+        # plumbing language, not real concentrations.
+        _STRUCTURAL_PREFIX_RE = re.compile(
+            r'^(elective\s+courses?|professional\s+electives?|optional|required|core)\b',
+            re.I)
+        if _STRUCTURAL_PREFIX_RE.match(h):
+            continue
         if h and h.lower() not in seen:
             seen.add(h.lower())
             results.append(h)
