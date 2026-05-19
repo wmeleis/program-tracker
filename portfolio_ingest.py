@@ -2496,6 +2496,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # the base degree, and do NOT synthesize a base-degree placeholder when
     # only a deployment variant exists at a campus.
 
+    # Do NOT inherit concentrations across campus deployments. IPD does not
+    # supply a concentration column — whatever IPD knows is embedded in the
+    # program name. If a deployment row has no concentrations_json of its
+    # own (because there's no CIM curriculum yet), leave it blank rather
+    # than borrowing from another campus's deployment.
+
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())
     replace_all_portfolio_programs(rows)
