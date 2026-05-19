@@ -369,6 +369,15 @@ def build_static_site():
         r'<div id="refs-modal"[^>]*>.*?</div>\s*</div>\s*</div>',
         '', html, count=1, flags=re.DOTALL
     )
+    # Remove the Console button and modal — local-only, no backend on static site.
+    html = re.sub(
+        r'<button id="console-btn"[^>]*>.*?</button>',
+        '', html, count=1, flags=re.DOTALL
+    )
+    html = re.sub(
+        r'<!-- Console modal.*?</div>\s*</div>\s*</div>',
+        '', html, count=1, flags=re.DOTALL
+    )
 
     # Wrap the dashboard body content in a hidden container and prepend gate
     gate_html = _gate_html(cache_bust)
@@ -736,6 +745,15 @@ function __staticInit() {
         const D = await _getData();
         _setLastUpdated(D);
         allPortfolioPrograms = D.portfolio_programs || [];
+        // Match the Flask loadPortfolioDashboard: parse concentrations_json
+        // so renderPortfolioRow's hasConcentrations check can fire and the
+        // expand-arrow appears next to programs with concentrations.
+        allPortfolioPrograms.forEach(p => {
+            try {
+                p.concentrations = p.concentrations_json
+                    ? JSON.parse(p.concentrations_json) : [];
+            } catch (e) { p.concentrations = []; }
+        });
         if (typeof populatePortfolioFilters === 'function') populatePortfolioFilters();
         renderPortfolioTable();
     };
