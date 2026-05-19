@@ -3663,6 +3663,7 @@ const _CRED_SETS = {
     "Prof Doctorate":new Set(['DNP','DPT','DPS','DLP','EDD','DMSC','PHARMD','JD','JSSD','LLM']),
     "CAGS":          new Set(['CAGS']),
     "Certificate":   new Set(['CERTG','CERTU','CERTP','CERT']),
+    "Minor":         new Set(['MINOR']),
 };
 
 function _credentialFromCode(rawIn) {
@@ -3670,10 +3671,14 @@ function _credentialFromCode(rawIn) {
     if (_CRED_SETS["CAGS"].has(raw))           return 'CAGS';
     if (_CRED_SETS["PhD"].has(raw))            return 'PhD';
     if (_CRED_SETS["Prof Doctorate"].has(raw)) return 'Prof Doctorate';
+    if (_CRED_SETS["Minor"].has(raw))          return 'Minor';
     if (_CRED_SETS["Master's"].has(raw))       return "Master's";
     if (_CRED_SETS["Bachelor's"].has(raw))     return "Bachelor's";
     if (_CRED_SETS["Certificate"].has(raw) || raw.startsWith('CERT')) return 'Certificate';
-    // Heuristic fallbacks for unknown but pattern-consistent codes
+    // Heuristic fallbacks for unknown but pattern-consistent codes.
+    // Reject English words that happen to start with M/B (Minor, Major,
+    // Bachelor when bare, etc.) — they're not degree codes.
+    if (raw === 'MINOR' || raw === 'MAJOR' || raw === 'BACHELOR' || raw === 'MASTER' || raw === 'MASTERS') return '';
     if (raw.startsWith('M') && raw.length >= 2 && raw.length <= 10) return "Master's";
     if (raw.startsWith('B') && raw.length >= 2 && raw.length <= 10) return "Bachelor's";
     return '';
