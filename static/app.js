@@ -3374,6 +3374,18 @@ function normalizePortfolioName(name) {
     for (const [re, fn] of _DEGREE_EXPAND) {
         if (re.test(name)) return name.replace(re, fn);
     }
+    // Canonicalize "Master of Architecture—N-Year Program" → "Architecture, MArch—N-Year"
+    let m = name.match(/^Master\s+of\s+Architecture\s*(?:[—\-]\s*([^,]+?))?\s*$/i);
+    if (m) {
+        const suf = m[1] ? '—' + m[1].replace(/\s*Program\s*$/i, '').trim() : '';
+        return 'Architecture, MArch' + suf;
+    }
+    // Strip a trailing standalone " Program" word — it's redundant
+    // in names like "Pharmaceutical Engineering Bridge Program, MS" or
+    // "Master of Architecture—Two-Year Program".  Don't touch "Nursing—…
+    // Accelerated Program for …" (still readable), etc.  Just remove the
+    // bare " Program" before a comma or end-of-string.
+    name = name.replace(/\s+Program(\s*,|\s*$)/i, '$1');
     return name;
 }
 
