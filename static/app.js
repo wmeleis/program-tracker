@@ -4102,24 +4102,8 @@ function renderPortfolioTable() {
             });
         }
 
-        // Portfolio concentration rows (always shown under parent). Each
-        // sub-row that has its own curriculum concentrations also gets the
-        // expand-arrow so the user can drill in (e.g. MS—Align under MS,
-        // where MS—Align has its own concentrations list).
-        portfolioConcs.forEach(c => {
-            const cConcs = c.concentrations || [];
-            const cExpanded = portfolioExpandedIds.has(c.id);
-            rowHtml.push(renderPortfolioRow(c, {
-                isPortfolioConc: true,
-                hasConcentrations: cConcs.length > 0,
-                isExpanded: cExpanded,
-            }));
-            if (cConcs.length > 0 && cExpanded) {
-                cConcs.forEach(name => {
-                    rowHtml.push(renderPortfolioConcRow(name, portfolioSearch));
-                });
-            }
-        });
+        // Portfolio concentration rows (always shown under parent)
+        portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
     });
 
     // Use the page's existing info-tip overlay system (JS-driven, no native

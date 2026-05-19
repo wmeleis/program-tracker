@@ -2489,106 +2489,11 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     if n_linked:
         print(f"  Linked {n_linked} concentration rows to parents")
 
-    # ── Step 7: Deployment-variant linking (Align / Connect / Bridge etc.) ──
-    # Treat every row with a hyphenated/em-dashed degree as a sub-entry under
-    # its base-degree parent. Example: 'Artificial Intelligence, MS—Align
-    # (Miami)' becomes a child of 'Artificial Intelligence, MS (Miami)'.
-    # If the parent row doesn't exist, synthesize one so even a single
-    # deployment shows as a header + sub-entry (user request: 'if there is
-    # just one concentration, still make a header entry and a sub entry').
-    n_deploy_linked = 0
-    n_deploy_synth = 0
-    # Rebuild the name index with any newly-synthesized concentration parents.
-    name_to_pid = {}
-    for _pid, _row in tracker.items():
-        for _k in (_norm(_row.get('program_name') or ''),
-                   _degree_core(_row.get('program_name') or '')):
-            if _k and _k not in name_to_pid:
-                name_to_pid[_k] = _pid
-    for _pid in list(tracker):
-        _row = tracker.get(_pid)
-        if not _row:
-            continue
-        if _row.get('concentration_of'):
-            continue  # already nested
-        _name = _row.get('program_name') or ''
-        _subj, _deg, _cmp = _parse_cim_name(_name)
-        # Need a degree with a hyphen/em-dash deployment suffix to qualify.
-        # _norm_degree normalizes em-dash → hyphen, so check for '-'.
-        _deg_norm = _norm_degree(_deg)
-        if '-' not in _deg_norm:
-            continue
-        _base_deg, _, _suffix = _deg_norm.partition('-')
-        if not _base_deg or not _suffix:
-            continue
-        # Reapply canonical case to the base degree.
-        _BASE_CASE = {'PHD':'PhD','EDD':'EdD','MED':'MEd','MARCH':'MArch',
-                      'MDES':'MDes','MENG':'MEng','BARCH':'BArch',
-                      'PHARMD':'PharmD','DMSC':'DMSc'}
-        _base_disp = _BASE_CASE.get(_base_deg.upper(), _base_deg.upper())
-        _cmp_resolved = _normalize_campus(_cmp) if _cmp else 'Boston'
-        _parent_name = (f"{_subj}, {_base_disp} ({_cmp_resolved})"
-                        if _cmp_resolved else f"{_subj}, {_base_disp}")
-        # Look up an existing parent
-        _hit = None
-        for _k in (_norm(_parent_name), _degree_core(_parent_name)):
-            if _k and _k in name_to_pid and name_to_pid[_k] != _pid:
-                _hit = name_to_pid[_k]
-                break
-        if not _hit:
-            # Synthesize a parent so every deployment is nested
-            _synth_pid = 'synth_' + re.sub(
-                r'[^a-z0-9]+', '_', _norm(_parent_name))[:60]
-            if _synth_pid not in tracker:
-                tracker[_synth_pid] = dict(_EMPTY_TRACKING, **{
-                    'id': _synth_pid,
-                    'program_name': _parent_name,
-                    'college': _row.get('college', ''),
-                    'campus': _cmp_resolved,
-                    'cim_program_id': None,
-                    'cim_step': '', 'cim_completion_date': '',
-                })
-                n_deploy_synth += 1
-            for _k in (_norm(_parent_name), _degree_core(_parent_name)):
-                if _k and _k not in name_to_pid:
-                    name_to_pid[_k] = _synth_pid
-            _hit = _synth_pid
-        _row['concentration_of'] = _hit
-        n_deploy_linked += 1
-    if n_deploy_linked or n_deploy_synth:
-        print(f"  Deployment-variant linking: {n_deploy_linked} linked, "
-              f"{n_deploy_synth} synthetic base parents created")
-
-    # ── Step 7.5: Bubble deployment-variant concentrations up to the parent
-    # When a deployment row (MS—Align) nests under a base row (MS), the UI
-    # only shows the parent's concentrations on expand. So the parent's
-    # concentrations_json now merges in its children's concentrations
-    # (deduplicated, case-insensitive). The child rows keep their own
-    # concentrations_json too, in case the user expands the child directly.
-    for _pid, _row in tracker.items():
-        if _row.get('concentration_of'):
-            continue
-        children = [c for c in tracker.values() if c.get('concentration_of') == _pid]
-        if not children:
-            continue
-        try:
-            existing = json.loads(_row.get('concentrations_json') or '[]')
-        except Exception:
-            existing = []
-        seen = {x.strip().lower() for x in existing}
-        added = []
-        for c in children:
-            try:
-                child_concs = json.loads(c.get('concentrations_json') or '[]')
-            except Exception:
-                child_concs = []
-            for nm in child_concs:
-                key = nm.strip().lower()
-                if key and key not in seen:
-                    seen.add(key)
-                    added.append(nm)
-        if added:
-            _row['concentrations_json'] = json.dumps(existing + added)
+    # NOTE: deployment variants (MS—Align, MS—Connect, MS—Bridge, MS—Online,
+    # etc.) are SEPARATE PROGRAMS in CIM, not concentrations or sub-entries
+    # of their base degree. They get their own top-level Portfolio row and
+    # their own concentrations expand independently. Do NOT nest them under
+    # the base degree.
 
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())
