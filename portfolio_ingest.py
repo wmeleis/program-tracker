@@ -2514,12 +2514,25 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             if not pattern.search(name):
                 continue
             lookup_campus = campus_override if campus_override else row.get('campus', '')
+            row_has_campus = bool(row.get('campus', ''))
             found_pid = None
             if lookup_campus:
                 key = _norm(f'{parent_name} ({lookup_campus})')
                 if key in name_to_pid and name_to_pid[key] != pid:
                     found_pid = name_to_pid[key]
-            if not found_pid and not campus_override:
+                # Also try _degree_core which strips campus — but ONLY if
+                # the candidate parent's actual campus matches. Prevents a
+                # Charlotte concentration row from matching a Portland parent
+                # just because their degree_core strings happen to match.
+                if not found_pid:
+                    for key in (_norm(parent_name), _degree_core(parent_name)):
+                        if key and key in name_to_pid and name_to_pid[key] != pid:
+                            cand = tracker.get(name_to_pid[key], {})
+                            if (cand.get('campus','') or '').lower() == lookup_campus.lower():
+                                found_pid = name_to_pid[key]
+                                break
+            elif not row_has_campus and not campus_override:
+                # Row has no campus AND no override — fall through to any match.
                 for key in (_norm(parent_name), _degree_core(parent_name)):
                     if key and key in name_to_pid and name_to_pid[key] != pid:
                         found_pid = name_to_pid[key]

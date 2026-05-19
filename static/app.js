@@ -4195,7 +4195,30 @@ function renderPortfolioRow(p, opts = {}) {
                title="${isExpanded ? 'Collapse' : 'Show'} concentrations">${isExpanded ? '▼' : '▶'}</button>`
         : '';
 
-    const displayName = normalizePortfolioName(stripCampusFromName(p.program_name));
+    // For nested concentration sub-rows, prefer a short display name that
+    // shows just the concentration topic (not the parent program's name).
+    // Falls back to the full program name when no pattern matches.
+    function _shortConcName(full) {
+        const n = (full || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+        let m;
+        // "X, concentration in Y, DEG"  →  "Y"
+        m = n.match(/^.+?,\s*concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
+        if (m) return m[1].trim();
+        // "X CONCENTRATION_NAME Concentration ..., DEG"  →  "CONCENTRATION_NAME"
+        // e.g. "Bioengineering Biomedical Devices and Bioimaging Concentration Bridge Program, MS"
+        m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i);
+        if (m) return m[1].trim();
+        // "X with Concentration in Y, DEG"  →  "Y"
+        m = n.match(/^.+?\s+with\s+Concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
+        if (m) return m[1].trim();
+        // "X - Y Concentration, DEG"  →  "Y"
+        m = n.match(/^.+?\s*[-—]\s*(.+?)\s+Concentration,?\s+[A-Z]{1,7}\s*$/i);
+        if (m) return m[1].trim();
+        return n;
+    }
+    const displayName = isPortfolioConc
+        ? _shortConcName(p.program_name)
+        : normalizePortfolioName(stripCampusFromName(p.program_name));
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
         <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}</td>
         ${_pc('degree',     extractPortfolioDegree(p.program_name))}
