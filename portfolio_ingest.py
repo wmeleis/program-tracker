@@ -1187,6 +1187,10 @@ _EXPLICIT_CONC_PARENTS = [
      'Artificial Intelligence, MS', 'Boston'),
     (re.compile(r'^Bouve Health AI$', re.I),
      'Artificial Intelligence, MS', 'Boston'),
+    # "AI - X Concentration, MS" → AI MS (the canonical Boston program;
+    # synonym 'AI' for 'Artificial Intelligence').
+    (re.compile(r'^AI\s*[-—,]\s*.+?\s+Concentration\b', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
 ]
 
 
@@ -2231,11 +2235,37 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                         if _r.get('program_name') in _PORTFOLIO_REMOVE
                         or _strip_paren(_r.get('program_name','')) in _PORTFOLIO_REMOVE]:
         del tracker[_pid_remove]
+    # Build an index of existing rows by (norm_name_without_campus, campus)
+    # so renames can merge into an existing CIM row instead of creating a
+    # duplicate. The "Artificial Intelligence, MS" rename target without a
+    # campus parenthetical must still match "Artificial Intelligence, MS
+    # (Boston)" stored under campus=Boston.
+    def _name_no_paren(s):
+        return _norm(re.sub(r'\s*\([^)]*\)\s*$', '', s or '').strip())
+    _existing_by_key = {}
+    for _pid, _row in tracker.items():
+        _key = (_name_no_paren(_row.get('program_name','')),
+                _norm_campus(_row.get('campus','')))
+        _existing_by_key.setdefault(_key, _pid)
+
+    def _merge_into(target_pid, source_row):
+        """Overlay non-empty SVT/IPD/OTP/GLS fields from source into target."""
+        t = tracker[target_pid]
+        for fld in ('svt_status','roster_sub_status','roster_proposal_type',
+                    'roster_launch_date','ipd_status','ipd_proposal_type',
+                    'ipd_additional_college','otp_status','otp_sub_status',
+                    'otp_market_potential','otp_market_signal',
+                    'otp_internal_performance','otp_q3_status','otp_effective_term',
+                    'gls_status'):
+            if not t.get(fld) and source_row.get(fld):
+                t[fld] = source_row[fld]
+
     for _pid in list(tracker):
         if _pid not in tracker:
             continue
         _row = tracker[_pid]
         _name = _row.get('program_name') or ''
+        _changed = False
         if _name in _PORTFOLIO_RENAME:
             _new_name, _new_college, _new_campus = _PORTFOLIO_RENAME[_name]
             _row['program_name'] = _new_name
@@ -2243,10 +2273,25 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 _row['college'] = _normalize_college(_new_college)
             if _new_campus:
                 _row['campus'] = _new_campus
+            _changed = True
         elif _ROUX_RE.search(_name):
             _row['program_name'] = _ROUX_RE.sub('', _name).strip().rstrip(',').strip()
             if not _row.get('campus') or _row['campus'] in ('', 'Boston'):
                 _row['campus'] = 'Portland'
+            _changed = True
+        # After rename, if the new (name, campus) collides with another row,
+        # merge into that row and delete this one. Avoids creating duplicate
+        # 'Artificial Intelligence, MS (Boston)'-style synth rows that
+        # shadow the real CIM record.
+        if _changed:
+            new_key = (_name_no_paren(_row.get('program_name','')),
+                       _norm_campus(_row.get('campus','')))
+            target = _existing_by_key.get(new_key)
+            if target and target != _pid:
+                _merge_into(target, _row)
+                del tracker[_pid]
+            else:
+                _existing_by_key[new_key] = _pid
 
     # ── Step 6: Link concentration rows to their parent program ──────────────
     # Concentrations must NEVER appear as standalone top-level rows. Algorithm:
