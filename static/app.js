@@ -1252,6 +1252,20 @@ async function applyFilters() {
         renderCatalogTable();
         return;
     }
+    // Portfolio view also has its own filter pipeline. The header
+    // #filter-search input is shared across all views, so route its value
+    // into portfolioSearch and re-render the portfolio table. Without this,
+    // typing in the header search on Portfolio caused the Programs filter
+    // pipeline to run against Portfolio data (it doesn't know about
+    // portfolio_programs) and emit the Programs "No programs match" empty
+    // state into the table container.
+    if (currentView === 'portfolio') {
+        const hdr = document.getElementById('filter-search');
+        if (typeof setPortfolioSearch === 'function') {
+            setPortfolioSearch(hdr ? hdr.value : '');
+        }
+        return;
+    }
     const collegeFilter = document.getElementById('filter-college').value;
     const approverFilter = document.getElementById('filter-approver').value;
 
@@ -3615,8 +3629,12 @@ let portfolioSearch        = '';
 // that getPortfolioFiltered() reads.
 function setPortfolioSearch(v) {
     portfolioSearch = v || '';
+    // Mirror to BOTH search inputs so the portfolio-row chip stays in sync
+    // with the always-visible header search.
     const el = document.getElementById('portfolio-search');
     if (el && el.value !== portfolioSearch) el.value = portfolioSearch;
+    const hdr = document.getElementById('filter-search');
+    if (hdr && hdr.value !== portfolioSearch) hdr.value = portfolioSearch;
     if (typeof updateClearButtons === 'function') updateClearButtons();
     if (typeof renderPortfolioTable === 'function') renderPortfolioTable();
 }
