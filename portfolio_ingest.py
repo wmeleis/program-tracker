@@ -1135,30 +1135,29 @@ _PORTFOLIO_REMOVE = frozenset({
 _PORTFOLIO_RENAME = {
     'Data Science, MS - new CAMD concentration':
         ('Data Science, MS', 'Office of the Provost', ''),
-    # IPD concentration proposals — rename to the concentration name itself
-    # so they become sub-rows under their parent program (linked via
-    # _EXPLICIT_CONC_PARENTS below). Preserves the IPD status and the fact
-    # that someone is proposing this specific concentration.
-    'AI (New COE Concentration in Human-AI Collaboration), MS':
-        ('Human-AI Collaboration', 'College of Engineering', 'Boston'),
-    'AI (New COE Concentration in High Performance and Edge AI), MS':
-        ('High Performance and Edge AI', 'College of Engineering', 'Boston'),
-    'Computational Creativity Concentration for UIP Masters in AI':
-        ('Computational Creativity', 'Office of the Provost', 'Boston'),
+    # NOTE: the IPD entries below used to be hardcoded here:
+    #   'AI (New COE Concentration in Human-AI Collaboration), MS'
+    #   'AI (New COE Concentration in High Performance and Edge AI), MS'
+    #   'Computational Creativity Concentration for UIP Masters in AI'
+    #   'AI (new concentration) Bouve, MS'
+    #   'Artificial Intelligence - Omics Concentration (COS), MS'
+    # They are now handled GENERICALLY by the IPD preprocessor's three
+    # concentration patterns (_CONC_NEW_RE, _CONC_NEW_NAMED_RE, _CONC_FOR_RE)
+    # which extract the concentration name (either explicit in the entry or
+    # looked up by college in the parent's CIM curriculum HTML).
     'Doctor of Professional Studies at Roux':
         ('Professional Studies, DPS', 'Coll of Professional Studies', 'Portland'),
     'at Roux, EDD':
         ('Education, EdD', '', 'Portland'),
     'and MSIS Bridge In Miami, MSIS':
         ('Information Systems, MSIS (Bridge)', '', 'Miami'),
-    'Artificial Intelligence - Omics Concentration (COS), MS':
-        ('Omics', 'College of Science', 'Boston'),
-    # IPD says 'MS in AI (new concentration) Bouve' — looking at AI MS
-    # (Boston)'s curriculum HTML, the actual concentration name is
-    # 'Health Data Concentration—Bouvé College of Health Sciences'.
-    # Rename to 'Health Data' (the curriculum extractor's normalized form).
-    'AI (new concentration) Bouve, MS':
-        ('Health Data', 'Bouve College of Hlth Sciences', 'Boston'),
+    # NOTE: 'Artificial Intelligence - Omics Concentration (COS), MS' and
+    # 'AI (new concentration) Bouve, MS' used to be hardcoded here. They're
+    # now handled GENERICALLY by the IPD preprocessor patterns:
+    #   _CONC_DASH_PAREN_RE    catches 'PARENT - X Concentration (CC), DEG'
+    #   _CONC_NEW_RE           catches 'DEG in PARENT (new concentration) COLLEGE'
+    #                          and looks up the canonical name in the parent's
+    #                          CIM curriculum HTML by college name.
     'Data Science - CAMD Concentration, MS':
         ('Data Science, MS', 'Coll of Arts, Media & Design', 'Boston'),
     'Data Science - Health Data concentration, MS':
@@ -1193,22 +1192,16 @@ _EXPLICIT_CONC_PARENTS = [
      'Civil Engineering, MSCivE', None),
     (re.compile(r'^UG Concentration in ', re.I),
      'Regulatory Affairs, BS', 'Boston'),
-    (re.compile(r'^Omics$', re.I),
-     'Artificial Intelligence, MS', 'Boston'),
-    (re.compile(r'^Health Data$', re.I),
-     'Artificial Intelligence, MS', 'Boston'),
     # "AI - X Concentration, MS" → AI MS (the canonical Boston program;
     # synonym 'AI' for 'Artificial Intelligence').
     (re.compile(r'^AI\s*[-—,]\s*.+?\s+Concentration\b', re.I),
      'Artificial Intelligence, MS', 'Boston'),
-    # IPD concentration proposals renamed to the concentration name itself
-    # — link them as sub-rows under AI MS Boston.
-    (re.compile(r'^Human-AI Collaboration$', re.I),
-     'Artificial Intelligence, MS', 'Boston'),
-    (re.compile(r'^High Performance and Edge AI$', re.I),
-     'Artificial Intelligence, MS', 'Boston'),
-    (re.compile(r'^Computational Creativity$', re.I),
-     'Artificial Intelligence, MS', 'Boston'),
+    # NOTE: '^Omics$', '^Health Data$', '^Human-AI Collaboration$',
+    # '^High Performance and Edge AI$', '^Computational Creativity$' used to
+    # live here as explicit ^pattern$ → 'Artificial Intelligence, MS'
+    # mappings. They are no longer needed — the IPD preprocessor's
+    # _CONC_NEW_RE / _CONC_NEW_NAMED_RE / _CONC_FOR_RE create the sub-rows
+    # already linked to the right parent at ingest time.
 ]
 
 
@@ -1930,6 +1923,78 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         r'^(.+?)\s+Concentration\s+for\s+.+?\s+Masters?\s+in\s+(.+)$',
         re.I
     )
+    # "DEG in PARENT (new concentration) COLLEGE" — e.g.
+    # "MS in AI (new concentration) Bouve". No explicit concentration name;
+    # we look up the parent's CIM curriculum HTML for a concentration heading
+    # whose text contains the COLLEGE name, then use that canonical name.
+    _CONC_NEW_RE = re.compile(
+        r'^(.+?)\s*\(\s*new\s+concentration\s*\)\s+(\S[\w\s\-\']*?)\s*$',
+        re.I
+    )
+    # "DEG in PARENT (New CC Concentration in CONC_NAME)" — e.g.
+    # "MS in AI (New COE Concentration in High Performance and Edge AI)".
+    # CC is a college code (1-5 uppercase letters). The CONC_NAME is the
+    # canonical concentration name as proposed; no curriculum lookup needed.
+    _CONC_NEW_NAMED_RE = re.compile(
+        r'^(.+?)\s*\(\s*New\s+([A-Z]{2,5})\s+Concentration\s+in\s+(.+?)\s*\)\s*(?:,\s*MS)?\s*$',
+        re.I
+    )
+    # "[DEG in ]PARENT - CONC_NAME Concentration (CC)[, DEG]" — e.g.
+    # "MS in Artificial Intelligence - Omics Concentration (COS)" or
+    # "Artificial Intelligence - Omics Concentration (COS), MS".
+    # Captures: leading-degree (optional), parent, concentration name,
+    # college code, trailing-degree (optional). Either leading- or
+    # trailing-degree must be present.
+    _CONC_DASH_PAREN_RE = re.compile(
+        r'^(?:([A-Z]{2,7})\s+in\s+)?(.+?)\s*[-—]\s*(.+?)\s+Concentration\s*\(\s*([A-Z]{2,5})\s*\)\s*(?:,\s*([A-Z]{1,7}))?\s*$',
+        re.I
+    )
+
+    def _strip_diacritics(s):
+        import unicodedata
+        return ''.join(c for c in unicodedata.normalize('NFD', s or '')
+                       if unicodedata.category(c) != 'Mn')
+
+    def _find_concentration_by_college(parent_row, college_hint):
+        """Search the parent CIM program's curriculum_html for a concentration
+        heading containing the given college hint (case-insensitive, diacritic-
+        insensitive). Returns the normalized concentration name, or None."""
+        if not parent_row or not college_hint:
+            return None
+        cim_id = parent_row.get('cim_program_id')
+        if not cim_id:
+            return None
+        with get_db() as conn:
+            row = conn.execute(
+                'SELECT curriculum_html FROM programs WHERE id = ?',
+                (cim_id,)).fetchone()
+        if not row or not row['curriculum_html']:
+            return None
+        # Walk concentration headings (same logic as _extract_concentrations_from_html)
+        target = _strip_diacritics(college_hint).lower()
+        for raw in re.findall(r'<h[234][^>]*>(.*?)</h[234]>',
+                              row['curriculum_html'], re.I | re.S):
+            h = re.sub(r'<[^>]+>', '', raw).replace('\xa0', ' ').strip()
+            if 'concentration' not in h.lower():
+                continue
+            if _strip_diacritics(h).lower().find(target) < 0:
+                continue
+            # Found a match — normalize via the existing extractor's rules
+            extracted = _extract_concentrations_from_html(f'<h2>{h}</h2>')
+            if extracted:
+                return extracted[0]
+        return None
+
+    def _parse_deg_in_subj(s):
+        """Parse 'DEG in SUBJECT' / 'Master of X in SUBJECT' → (subject, degree).
+        Returns (None, None) if can't parse. Expands AI/CS/DS acronyms."""
+        subj, deg, _ = _parse_external_name(s.strip())
+        _SUBJ_ALIAS = {'ai': 'Artificial Intelligence',
+                       'cs': 'Computer Science',
+                       'ds': 'Data Science'}
+        if subj.lower() in _SUBJ_ALIAS:
+            subj = _SUBJ_ALIAS[subj.lower()]
+        return subj, deg
 
     def _create_conc_subrow(conc_name, parent_subj, parent_deg, parent_camp, ipd_row):
         """Create a tracker sub-row for an IPD-proposed concentration,
@@ -2002,6 +2067,49 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 parent_rest = _SUBJ_ALIAS[parent_rest.lower()]
             # Default to MS for "Masters in X" pattern
             if _create_conc_subrow(conc_name, parent_rest, 'MS', '', p):
+                n_ipd_matched += 1
+                continue
+
+        # "DEG in PARENT (new concentration) COLLEGE" — lookup canonical
+        # concentration name in parent's curriculum HTML by college.
+        conc_m3 = _CONC_NEW_RE.match(p['program_name'])
+        if conc_m3:
+            parent_str = conc_m3.group(1).strip()
+            college    = conc_m3.group(2).strip()
+            parent_subj, parent_deg = _parse_deg_in_subj(parent_str)
+            if parent_subj and parent_deg:
+                parent_row, _ = _lookup_cim(parent_subj, parent_deg, '')
+                conc_name = _find_concentration_by_college(parent_row, college)
+                if conc_name and _create_conc_subrow(
+                        conc_name, parent_subj, parent_deg, '', p):
+                    n_ipd_matched += 1
+                    continue
+
+        # "DEG in PARENT (New CC Concentration in CONC_NAME)" — explicit name.
+        conc_m4 = _CONC_NEW_NAMED_RE.match(p['program_name'])
+        if conc_m4:
+            parent_str = conc_m4.group(1).strip()
+            conc_name  = conc_m4.group(3).strip()
+            parent_subj, parent_deg = _parse_deg_in_subj(parent_str)
+            if parent_subj and parent_deg:
+                if _create_conc_subrow(conc_name, parent_subj, parent_deg, '', p):
+                    n_ipd_matched += 1
+                    continue
+
+        # "[DEG in ]PARENT - CONC_NAME Concentration (CC)[, DEG]" — e.g.
+        # "MS in Artificial Intelligence - Omics Concentration (COS)"
+        conc_m5 = _CONC_DASH_PAREN_RE.match(p['program_name'])
+        if conc_m5:
+            lead_deg    = conc_m5.group(1)
+            parent_subj = conc_m5.group(2).strip()
+            conc_name   = conc_m5.group(3).strip()
+            trail_deg   = conc_m5.group(5)
+            parent_deg  = _norm_degree(lead_deg or trail_deg or 'MS')
+            # Expand AI/CS/DS acronyms
+            _SUBJ_ALIAS2 = {'ai':'Artificial Intelligence','cs':'Computer Science','ds':'Data Science'}
+            if parent_subj.lower() in _SUBJ_ALIAS2:
+                parent_subj = _SUBJ_ALIAS2[parent_subj.lower()]
+            if _create_conc_subrow(conc_name, parent_subj, parent_deg, '', p):
                 n_ipd_matched += 1
                 continue
         # Expand multi-campus entries (e.g. "X in Boston and Oakland") into one per campus.
