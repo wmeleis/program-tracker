@@ -639,12 +639,12 @@ header h1 {
 }
 
 /* Portfolio rows for programs that don't exist in CIM (external-feed-only).
-   Light amber tint across all cells flags 'no CIM record yet'. */
+   Very light amber tint across all cells flags 'no CIM record yet'. */
 .portfolio-row.portfolio-not-in-cim td {
-    background: #fef3c7;
+    background: #fffbeb;
 }
 .portfolio-row.portfolio-not-in-cim:hover td {
-    background: #fde68a;
+    background: #fef3c7;
 }
 
 /* Proposal type filter buttons */
@@ -725,7 +725,7 @@ header h1 {
 .legend-swatch.new { background: #22c55e; }
 .legend-swatch.change { background: #3b82f6; }
 .legend-swatch.inactivation { background: #ef4444; }
-.legend-swatch.not-in-cim { background: #fef3c7; border: 1px solid #fcd34d; }
+.legend-swatch.not-in-cim { background: #fffbeb; border: 1px solid #fcd34d; }
 
 /* Workflow detail (expanded row) */
 .workflow-detail {
