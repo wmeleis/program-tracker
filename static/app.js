@@ -3591,6 +3591,39 @@ let portfolioGlsFilter       = new Set();
 let portfolioCimFilter       = new Set();
 let portfolioCimChangeFilter  = new Set();
 let portfolioInWorkflowFilter = new Set();
+
+// Toggle-button bridges to the existing multi-select filter Sets. The
+// dropdowns and the buttons share the same Set, so changing one updates
+// the other on the next render. Button visual state synced via
+// _syncPortfolioButtonRows().
+function setPortfolioInCim(btn, val) {
+    const s = portfolioInWorkflowFilter;
+    if (s.has(val)) s.delete(val); else s.add(val);
+    _updateMultiFilterBtn('portfolio-filter-inworkflow', s);
+    _syncPortfolioButtonRows();
+    updateClearButtons();
+    renderPortfolioTable();
+}
+function setPortfolioCimChange(btn, val) {
+    const s = portfolioCimChangeFilter;
+    if (s.has(val)) s.delete(val); else s.add(val);
+    _updateMultiFilterBtn('portfolio-filter-cimchange', s);
+    _syncPortfolioButtonRows();
+    updateClearButtons();
+    renderPortfolioTable();
+}
+function _syncPortfolioButtonRows() {
+    document.querySelectorAll('.portfolio-incim-btn').forEach(b => {
+        b.classList.toggle('active', portfolioInWorkflowFilter.has(b.dataset.incim));
+    });
+    document.querySelectorAll('.portfolio-cimchg-btn').forEach(b => {
+        b.classList.toggle('active', portfolioCimChangeFilter.has(b.dataset.cimchg));
+    });
+}
+if (typeof window !== 'undefined') {
+    window.setPortfolioInCim       = setPortfolioInCim;
+    window.setPortfolioCimChange   = setPortfolioCimChange;
+}
 let portfolioInactAdmitFilter = new Set();
 let portfolioInactTodayFilter = '';
 
@@ -3859,6 +3892,8 @@ function populatePortfolioFilters() {
         'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
     };
     multiIds.forEach(id => _updateMultiFilterBtn(id, filterSetMap[id] || new Set()));
+    // Keep the button rows in sync with the underlying filter Sets.
+    if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
 
     // Admitting Today stays as single-select
     const inactTodayVals = [...new Set(allPortfolioPrograms.map(p => _inactAdmittingToday(p)).filter(Boolean))].sort();
@@ -3958,6 +3993,7 @@ function togglePortfolioMultiValue(id, value, checked) {
     if (checked) filterSet.add(value);
     else filterSet.delete(value);
     _updateMultiFilterBtn(id, filterSet);
+    if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
     updateClearButtons();
     renderPortfolioTable();
 }

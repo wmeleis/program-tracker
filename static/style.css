@@ -1709,7 +1709,8 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 
 /* ==================== Portfolio view ==================== */
 
-.portfolio-lvl-btn, .portfolio-deg-btn, .portfolio-status-btn {
+.portfolio-lvl-btn, .portfolio-deg-btn, .portfolio-status-btn,
+.portfolio-incim-btn, .portfolio-cimchg-btn {
     padding: 5px 13px;
     border: 2px solid var(--border);
     border-radius: 6px;
@@ -1720,14 +1721,32 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     font-weight: 600;
     transition: all 0.2s;
 }
-.portfolio-lvl-btn:hover, .portfolio-deg-btn:hover, .portfolio-status-btn:hover {
+.portfolio-lvl-btn:hover, .portfolio-deg-btn:hover, .portfolio-status-btn:hover,
+.portfolio-incim-btn:hover, .portfolio-cimchg-btn:hover {
     border-color: var(--accent);
     color: var(--accent);
 }
-.portfolio-lvl-btn.active, .portfolio-deg-btn.active, .portfolio-status-btn.active {
+.portfolio-lvl-btn.active, .portfolio-deg-btn.active, .portfolio-status-btn.active,
+.portfolio-incim-btn.active {
     background: #eff6ff;
     color: var(--accent);
     border-color: var(--accent);
+}
+/* CIM Change buttons echo the row-border colors: green/blue/red on active */
+.portfolio-cimchg-btn.cimchg-new.active {
+    background: #dcfce7; color: #166534; border-color: #22c55e;
+}
+.portfolio-cimchg-btn.cimchg-edit.active {
+    background: #dbeafe; color: #1e40af; border-color: #3b82f6;
+}
+.portfolio-cimchg-btn.cimchg-inact.active {
+    background: #fee2e2; color: #991b1b; border-color: #ef4444;
+}
+.portfolio-btn-row-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    margin-right: 2px;
 }
 
 .portfolio-filters-section {

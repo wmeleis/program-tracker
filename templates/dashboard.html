@@ -106,6 +106,15 @@
             <button class="portfolio-status-btn" data-status="inworkflow" onclick="setPortfolioStatus('inworkflow')"><span class="info-tip-wrap">In Workflow<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with an active proposal currently moving through CIM approval steps.</span></span></span></button>
             <button class="portfolio-status-btn" data-status="catalog"    onclick="setPortfolioStatus('catalog')"><span class="info-tip-wrap">Fully Approved<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have completed the full CIM approval process. May still be pending catalog publication.</span></span></span></button>
         </div>
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span class="portfolio-btn-row-label">In CIM:</span>
+            <button class="portfolio-incim-btn" data-incim="Yes" onclick="setPortfolioInCim(this,'Yes')">Yes</button>
+            <button class="portfolio-incim-btn" data-incim="No" onclick="setPortfolioInCim(this,'No')">No</button>
+            <span class="portfolio-btn-row-label" style="margin-left:14px">CIM Change:</span>
+            <button class="portfolio-cimchg-btn cimchg-new"    data-cimchg="New"          onclick="setPortfolioCimChange(this,'New')">New</button>
+            <button class="portfolio-cimchg-btn cimchg-edit"   data-cimchg="Change"       onclick="setPortfolioCimChange(this,'Change')">Change</button>
+            <button class="portfolio-cimchg-btn cimchg-inact"  data-cimchg="Inactivation" onclick="setPortfolioCimChange(this,'Inactivation')">Inactivation</button>
+        </div>
         <div class="filter-group" style="flex-basis:100%; margin:0; padding:4px 0 0"></div>
         <div class="filter-group">
             <label>College:</label>
