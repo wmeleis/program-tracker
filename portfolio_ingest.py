@@ -1153,8 +1153,12 @@ _PORTFOLIO_RENAME = {
         ('Information Systems, MSIS (Bridge)', '', 'Miami'),
     'Artificial Intelligence - Omics Concentration (COS), MS':
         ('Omics', 'College of Science', 'Boston'),
+    # IPD says 'MS in AI (new concentration) Bouve' — looking at AI MS
+    # (Boston)'s curriculum HTML, the actual concentration name is
+    # 'Health Data Concentration—Bouvé College of Health Sciences'.
+    # Rename to 'Health Data' (the curriculum extractor's normalized form).
     'AI (new concentration) Bouve, MS':
-        ('Bouve Health AI', 'Bouve College of Hlth Sciences', 'Boston'),
+        ('Health Data', 'Bouve College of Hlth Sciences', 'Boston'),
     'Data Science - CAMD Concentration, MS':
         ('Data Science, MS', 'Coll of Arts, Media & Design', 'Boston'),
     'Data Science - Health Data concentration, MS':
@@ -1191,7 +1195,7 @@ _EXPLICIT_CONC_PARENTS = [
      'Regulatory Affairs, BS', 'Boston'),
     (re.compile(r'^Omics$', re.I),
      'Artificial Intelligence, MS', 'Boston'),
-    (re.compile(r'^Bouve Health AI$', re.I),
+    (re.compile(r'^Health Data$', re.I),
      'Artificial Intelligence, MS', 'Boston'),
     # "AI - X Concentration, MS" → AI MS (the canonical Boston program;
     # synonym 'AI' for 'Artificial Intelligence').
