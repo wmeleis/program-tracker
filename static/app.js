@@ -3650,6 +3650,16 @@ function _inactAdmittingToday(p) {
 // While an inactivation proposal is still moving through CIM (cim_step is set),
 // the program is still running (teach-out phase) and should show as "Active".
 let portfolioLevelFilter   = '';
+let portfolioStatusFilter  = '';  // '', 'underdev', 'inworkflow', 'catalog'
+
+function setPortfolioStatus(val) {
+    portfolioStatusFilter = (portfolioStatusFilter === val) ? '' : val;
+    document.querySelectorAll('.portfolio-status-btn').forEach(b =>
+        b.classList.toggle('active',
+            b.dataset.status === portfolioStatusFilter && portfolioStatusFilter !== ''));
+    renderPortfolioTable();
+}
+if (typeof window !== 'undefined') window.setPortfolioStatus = setPortfolioStatus;
 let portfolioDegreeFilter  = '';
 let portfolioSortKey = '';   // '' = default (college/name), or a PORTFOLIO_COLUMNS key or 'name'
 let portfolioSortDir = 1;    // 1 = asc, -1 = desc
@@ -4002,6 +4012,17 @@ function getPortfolioFiltered() {
     let rows = allPortfolioPrograms.slice();
     if (portfolioLevelFilter)   rows = rows.filter(p => classifyPortfolioLevel(p.program_name)  === portfolioLevelFilter);
     if (portfolioDegreeFilter)  rows = rows.filter(p => classifyPortfolioDegree(p.program_name) === portfolioDegreeFilter);
+    // Lifecycle status button row:
+    //   underdev   = tracked in IPD/SVT but no CIM record yet
+    //   inworkflow = active CIM workflow step set
+    //   catalog    = CIM workflow complete (completion_date) and no active step
+    if (portfolioStatusFilter === 'underdev') {
+        rows = rows.filter(p => !p.cim_program_id && (p.ipd_status || p.svt_status));
+    } else if (portfolioStatusFilter === 'inworkflow') {
+        rows = rows.filter(p => p.cim_step);
+    } else if (portfolioStatusFilter === 'catalog') {
+        rows = rows.filter(p => p.cim_completion_date && !p.cim_step);
+    }
     if (portfolioCollegeFilter.size)    rows = rows.filter(p => portfolioCollegeFilter.has(p.college || ''));
     if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
     if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
@@ -4097,7 +4118,7 @@ function renderPortfolioTable() {
         return av.localeCompare(bv) * portfolioSortDir;
     });
 
-    const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter ||
+    const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter || portfolioStatusFilter ||
         portfolioCollegeFilter.size || portfolioCampusFilter.size ||
         portfolioOtpFilter.size || portfolioIpdFilter.size ||
         portfolioRosterFilter.size || portfolioGlsFilter.size || portfolioCimFilter.size ||

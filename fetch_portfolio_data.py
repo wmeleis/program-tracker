@@ -9,11 +9,11 @@ Prerequisites:
     - Google Chrome open and logged into your Northeastern SSO
     - Run once with the pages open; they will be opened automatically if missing
 
-Outputs:
-    ~/Downloads/portfolio_sharepoint.xlsx   — OTP Program Tracking workbook
-    ~/Downloads/portfolio_smartsheet.tsv    — IPD Dashboard (tab-separated)
-    ~/Downloads/portfolio_roster.tsv        — SVT Roster of Record (all campuses/colleges)
-    ~/Downloads/portfolio_gls.csv           — GLS Program Detail (Tableau)
+Outputs (saved to data/portfolio_feeds/ inside the project directory):
+    portfolio_sharepoint.xlsx   — OTP Program Tracking workbook
+    portfolio_smartsheet.tsv    — IPD Dashboard (tab-separated)
+    portfolio_roster.tsv        — SVT Roster of Record (all campuses/colleges)
+    portfolio_gls.csv           — GLS Program Detail (Tableau)
 """
 
 import subprocess
@@ -57,7 +57,26 @@ _COLLEGE_DASHBOARDS = {
     'Mills':  'a0a8b191371640a98eb82ad30c147a0c',
 }
 
-OUTPUT_DIR = os.path.expanduser("~/Downloads")
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'portfolio_feeds')
+
+_frontmost_app = None  # cached before any Chrome interaction
+
+
+def _save_focus():
+    """Remember which app is currently frontmost so we can restore it later."""
+    global _frontmost_app
+    r = subprocess.run(
+        ['osascript', '-e', 'name of (info for (path to frontmost application))'],
+        capture_output=True, text=True, timeout=5)
+    _frontmost_app = r.stdout.strip() if r.returncode == 0 else None
+
+
+def _restore_focus():
+    """Give focus back to the app that was frontmost before Chrome stole it."""
+    if _frontmost_app and _frontmost_app != BROWSER_APP:
+        subprocess.run(
+            ['osascript', '-e', f'tell application "{_frontmost_app}" to activate'],
+            capture_output=True, timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +140,13 @@ def run_js_by_idx(tab_idx, js, timeout=60):
 
 
 def open_tab_if_missing(url, url_fragment):
-    script = f'''tell application "{BROWSER_APP}"
+    """Check for a Chrome tab whose URL contains url_fragment; create it if
+    missing. Save+restore frontmost app ATOMICALLY in the same AppleScript so
+    Chrome never gets to be visibly frontmost between the tab-create and the
+    focus restore."""
+    script = f'''
+    set prevApp to name of (info for (path to frontmost application))
+    tell application "{BROWSER_APP}"
         set found to false
         repeat with i from 1 to count of tabs of window 1
             if (URL of tab i of window 1) contains "{url_fragment}" then
@@ -130,17 +155,59 @@ def open_tab_if_missing(url, url_fragment):
             end if
         end repeat
         if not found then tell window 1 to make new tab with properties {{URL:"{url}"}}
-    end tell'''
+    end tell
+    if found is false and prevApp is not "{BROWSER_APP}" and prevApp is not "{BROWSER_APP}.app" then
+        -- Strip optional ".app" suffix and reactivate the previous app
+        set appName to prevApp
+        if appName ends with ".app" then
+            set appName to text 1 thru -5 of appName
+        end if
+        try
+            tell application appName to activate
+        end try
+    end if
+    '''
     subprocess.run(['osascript', '-e', script], capture_output=True)
 
 
-def open_new_tab(url):
-    """Open a new tab and return its 1-based index."""
+def find_existing_tab(url_fragment):
+    """Return the 1-based index of the first tab whose URL contains url_fragment, or None."""
     script = f'''tell application "{BROWSER_APP}"
+        repeat with i from 1 to count of tabs of window 1
+            if (URL of tab i of window 1) contains "{url_fragment}" then
+                return i as text
+            end if
+        end repeat
+        return "0"
+    end tell'''
+    r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=10)
+    try:
+        idx = int(r.stdout.strip())
+        return idx if idx > 0 else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def open_new_tab(url):
+    """Open a new tab and return its 1-based index. Atomically restores
+    focus to the previous frontmost app so Chrome never visibly pops."""
+    script = f'''
+    set prevApp to name of (info for (path to frontmost application))
+    tell application "{BROWSER_APP}"
         set n to count of tabs of window 1
         tell window 1 to make new tab with properties {{URL:"{url}"}}
-        return (n + 1) as text
-    end tell'''
+    end tell
+    if prevApp is not "{BROWSER_APP}" and prevApp is not "{BROWSER_APP}.app" then
+        set appName to prevApp
+        if appName ends with ".app" then
+            set appName to text 1 thru -5 of appName
+        end if
+        try
+            tell application appName to activate
+        end try
+    end if
+    return (n + 1) as text
+    '''
     r = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=15)
     try:
         return int(r.stdout.strip())
@@ -197,15 +264,82 @@ def wait_for_grid(tab_idx, min_rows=5, timeout=30):
 
 
 # ---------------------------------------------------------------------------
+# Session health checks
+# ---------------------------------------------------------------------------
+
+_SP_OTP_FRAGMENT      = "g_wahhab_northeastern_edu"
+_SP_REGULATORY_FRAGMENT = "GlobalRegulatoryAffairs"
+
+_SP_REGULATORY_URL = "https://northeastern.sharepoint.com/sites/GlobalRegulatoryAffairs"
+
+def _check_sharepoint_tab(source, url, fragment):
+    """Open the tab if missing, then verify the session isn't a login redirect."""
+    open_tab_if_missing(url, fragment)
+    time.sleep(2)  # brief wait for tab to start loading
+    current_url = run_js(fragment, "location.href", timeout=15)
+    if current_url is None:
+        return {
+            'source': source,
+            'ok': False,
+            'detail': f'{source} tab could not be opened — is Chrome running?',
+        }
+    login_domains = ('login.microsoftonline.com', 'login.microsoft.com', 'login.live.com')
+    if any(d in current_url for d in login_domains):
+        return {
+            'source': source,
+            'ok': False,
+            'detail': f'{source} session expired — please log back into SharePoint.',
+        }
+    return {'source': source, 'ok': True, 'detail': ''}
+
+
+def _check_smartsheet_tab(source, url):
+    """Open Smartsheet tab if missing, then verify it's not a login redirect."""
+    fragment = "b/publish?EQBCT=" + url.split("EQBCT=")[-1]
+    open_tab_if_missing(url, fragment)
+    time.sleep(2)
+    current_url = run_js(fragment, "location.href", timeout=15)
+    if current_url is None:
+        return {
+            'source': source,
+            'ok': False,
+            'detail': f'{source} tab could not be opened — is Chrome running?',
+        }
+    if 'app.smartsheet.com/b/publish' not in current_url and 'smartsheet.com' in current_url:
+        return {
+            'source': source,
+            'ok': False,
+            'detail': f'{source} session expired — please log back into Smartsheet.',
+        }
+    return {'source': source, 'ok': True, 'detail': ''}
+
+
+def check_portfolio_sessions():
+    """Verify that all required portfolio data sources are accessible in Chrome.
+    Opens tabs automatically if not already open.
+
+    Returns a list of dicts: [{'source': str, 'ok': bool, 'detail': str}]
+    """
+    results = []
+    results.append(_check_sharepoint_tab('SharePoint (OTP)', SHAREPOINT_URL, _SP_OTP_FRAGMENT))
+    results.append(_check_sharepoint_tab('SharePoint (Regulatory)', _SP_REGULATORY_URL, _SP_REGULATORY_FRAGMENT))
+    results.append(_check_smartsheet_tab('Smartsheet (IPD)', SMARTSHEET_URL))
+    results.append(_check_smartsheet_tab('Smartsheet (GLS Roster)', GLS_ROSTER_HUB))
+    return results
+
+
+# ---------------------------------------------------------------------------
 # SharePoint: download the .xlsx via the FileGetUrl in the page's JS
 # ---------------------------------------------------------------------------
 
 def fetch_sharepoint():
     print("\n--- SharePoint Excel ---")
+    _save_focus()
     # Use the owner's personal URL path as fragment — more specific than the
     # sharepoint.com domain alone, which can match the OneDrive home tab.
     _sp_fragment = "g_wahhab_northeastern_edu"
     open_tab_if_missing(SHAREPOINT_URL, _sp_fragment)
+    _restore_focus()  # Chrome may pop forward on tab create; restore immediately
     print("  Waiting for page to load...")
     wait_for_load(_sp_fragment, timeout=30)
     time.sleep(2)
@@ -289,6 +423,7 @@ def fetch_sharepoint():
     # Clean up holder divs
     run_js(_sp_fragment,
            "document.querySelectorAll('[id^=__xl]').forEach(d => d.remove())", timeout=5)
+    _restore_focus()
 
 
 # ---------------------------------------------------------------------------
@@ -297,10 +432,12 @@ def fetch_sharepoint():
 
 def fetch_smartsheet():
     print("\n--- Smartsheet IPD Dashboard ---")
+    _save_focus()
     # Match by the specific EQBCT token so we don't accidentally reuse a
     # roster tab that fetch_roster_dashboards() left on a different dashboard.
-    _ipd_token = SMARTSHEET_URL.split("EQBCT=")[-1]
+    _ipd_token = "b/publish?EQBCT=" + SMARTSHEET_URL.split("EQBCT=")[-1]
     open_tab_if_missing(SMARTSHEET_URL, _ipd_token)
+    _restore_focus()  # Chrome may pop forward on tab create; restore immediately
     print("  Waiting for page to load...")
     wait_for_load(_ipd_token, timeout=30)
     time.sleep(4)  # extra time for JS grid to render
@@ -327,6 +464,7 @@ def fetch_smartsheet():
     with open(out, 'w') as f:
         f.write('\n'.join(lines))
     print(f"  Saved: {out}  ({len(rows)} rows)")
+    _restore_focus()
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +522,7 @@ _ROSTER_EXTRACT_JS = r"""
 def fetch_roster_dashboards():
     """Extract program data from all GLS Roster campus and college sub-dashboards."""
     print("\n--- GLS Roster of Record (all campuses & colleges) ---")
+    _save_focus()
 
     all_dashboards = (
         [(name, token, 'campus') for name, token in _CAMPUS_DASHBOARDS.items()] +
@@ -392,18 +531,27 @@ def fetch_roster_dashboards():
 
     all_lines = []
     roster_tab_idx = None
+    opened_new_tab = False
 
     for name, token, dtype in all_dashboards:
         url = f"https://app.smartsheet.com/b/publish?EQBCT={token}"
         print(f"  {name} ({dtype})...", end='', flush=True)
 
         if roster_tab_idx is None:
-            roster_tab_idx = open_new_tab(url)
+            # Reuse any existing Smartsheet publish tab rather than opening a new one
+            roster_tab_idx = find_existing_tab("app.smartsheet.com/b/publish")
+            if roster_tab_idx is not None:
+                navigate_tab(roster_tab_idx, url)
+            else:
+                roster_tab_idx = open_new_tab(url)
+                opened_new_tab = True
+            _restore_focus()  # Chrome pops forward on tab create/navigate; restore immediately
             if roster_tab_idx is None:
                 print(" FAILED to open tab")
                 continue
         else:
             navigate_tab(roster_tab_idx, url)
+            _restore_focus()  # restore after each navigation
 
         # Wait for readyState then grid render
         deadline = time.time() + 35
@@ -438,9 +586,10 @@ def fetch_roster_dashboards():
                     count += 1
         print(f" {count} rows")
 
-    if roster_tab_idx:
+    if roster_tab_idx and opened_new_tab:
         close_tab_by_idx(roster_tab_idx)
 
+    _restore_focus()
     out = os.path.join(OUTPUT_DIR, "portfolio_roster.tsv")
     with open(out, 'w', encoding='utf-8') as f:
         f.write('\n'.join(all_lines))
