@@ -3988,11 +3988,41 @@ function getPortfolioFiltered() {
     return rows;
 }
 
+// Per-render cache: set of (subject, degree) keys that have at least one row
+// backed by a real CIM record. Used by renderPortfolioRow to decide whether
+// a row should get the amber 'Not in CIM' tint — amber applies only when
+// no row in the portfolio shares its (subject, degree) AND has a cim_program_id.
+let _portfolioFamilySet = new Set();
+function _famKey(name) {
+    // Subject = everything before the last ', DEG' / ', DEG—X' / ' (Campus)'
+    let n = (name || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    const m = n.match(/^(.+?),\s*([A-Za-z][A-Za-z0-9]*(?:[—\-][A-Za-z][\w\-]*)?)\s*$/);
+    if (!m) return null;
+    const subj = m[1].trim().toLowerCase().replace(/[—–]/g, '-');
+    // Strip deployment suffix from degree for family matching (MS—Align → MS)
+    const deg = m[2].split(/[—\-]/, 1)[0].toLowerCase();
+    return subj + '|' + deg;
+}
+function _portfolioFamilyInCim(p) {
+    if (p.cim_program_id) return true;
+    const k = _famKey(p.program_name || '');
+    return k ? _portfolioFamilySet.has(k) : false;
+}
+
 function renderPortfolioTable() {
     const container = document.getElementById('programs-table-container');
     if (!container) return;
 
     const filtered = getPortfolioFiltered();
+
+    // Rebuild family-in-CIM set: any (subject, base-degree) that has at least
+    // one row with a real cim_program_id qualifies the whole family as "in CIM".
+    _portfolioFamilySet = new Set();
+    allPortfolioPrograms.forEach(p => {
+        if (!p.cim_program_id) return;
+        const k = _famKey(p.program_name || '');
+        if (k) _portfolioFamilySet.add(k);
+    });
 
     // Index all programs by id for parent lookups
     const allById = {};
@@ -4198,14 +4228,16 @@ function renderPortfolioRow(p, opts = {}) {
     //   New          → green   (row-added)
     //   Change       → blue    (row-edited)
     //   Inactivation → red     (row-deactivated)
-    // Not-in-CIM rows (no cim_program_id) get a light-amber row tint to
-    // visually flag that the entry comes from an external feed and has
-    // no canonical CIM record yet.
+    // Amber row tint flags 'not in CIM at ALL' — i.e. neither this exact row
+    // nor any other row sharing its (subject, degree) has a cim_program_id.
+    // A new-campus-deployment of an existing CIM program family stays white
+    // because the program is already in CIM; only genuinely new programs
+    // (no CIM record at any campus) get the amber tint.
     const changeClass =
         p.cim_change_type === 'New'          ? ' row-added' :
         p.cim_change_type === 'Change'       ? ' row-edited' :
         p.cim_change_type === 'Inactivation' ? ' row-deactivated' : '';
-    const notInCim = !p.cim_program_id ? ' portfolio-not-in-cim' : '';
+    const notInCim = !_portfolioFamilyInCim(p) ? ' portfolio-not-in-cim' : '';
     const rowClass = (isPortfolioConc
         ? 'portfolio-row portfolio-concentration-row'
         : isSynthetic ? 'portfolio-row portfolio-synthetic-row' : 'portfolio-row')
