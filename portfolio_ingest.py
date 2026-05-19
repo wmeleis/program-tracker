@@ -2559,6 +2559,37 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         print(f"  Deployment-variant linking: {n_deploy_linked} linked, "
               f"{n_deploy_synth} synthetic base parents created")
 
+    # ── Step 7.5: Bubble deployment-variant concentrations up to the parent
+    # When a deployment row (MS—Align) nests under a base row (MS), the UI
+    # only shows the parent's concentrations on expand. So the parent's
+    # concentrations_json now merges in its children's concentrations
+    # (deduplicated, case-insensitive). The child rows keep their own
+    # concentrations_json too, in case the user expands the child directly.
+    for _pid, _row in tracker.items():
+        if _row.get('concentration_of'):
+            continue
+        children = [c for c in tracker.values() if c.get('concentration_of') == _pid]
+        if not children:
+            continue
+        try:
+            existing = json.loads(_row.get('concentrations_json') or '[]')
+        except Exception:
+            existing = []
+        seen = {x.strip().lower() for x in existing}
+        added = []
+        for c in children:
+            try:
+                child_concs = json.loads(c.get('concentrations_json') or '[]')
+            except Exception:
+                child_concs = []
+            for nm in child_concs:
+                key = nm.strip().lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    added.append(nm)
+        if added:
+            _row['concentrations_json'] = json.dumps(existing + added)
+
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())
     replace_all_portfolio_programs(rows)
