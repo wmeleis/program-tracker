@@ -596,7 +596,8 @@ _DEGREE_IMPLICIT_SUBJECT = {
 # Deployment suffix on subject after short-prefix parse: "MS Data Science - Align" or
 # "MS Cybersecurity, Align" → subject="...", degree="MS-Align" (matches CIM's "MS—Align")
 _DEPLOYMENT_SUFFIX_RE = re.compile(
-    r'\s*(?:[-–—]|,)\s*(align|connect|bridge|accelerated|part[\s\-]?time|online|full[\s\-]?time)\s*$',
+    r'\s*(?:[-–—]|,)\s*(align|connect|bridge|accelerated|part[\s\-]?time|online|full[\s\-]?time)'
+    r'(?:\s+Program)?\s*$',  # allow trailing "Program" noise: "Align Program" → Align
     re.I
 )
 
@@ -1307,6 +1308,15 @@ def _norm_degree(degree_str):
     }
     if upper in _CASE_MAP:
         return _CASE_MAP[upper]
+    # Hyphenated deployment degree: keep the prefix uppercase but capitalize
+    # the deployment word so the display reads "MS-Align" not "MS-ALIGN".
+    # (CIM's canonical form is em-dash; for the dedup key we still produce
+    # the hyphen variant — the em-dash → hyphen normalization at the top of
+    # this function ensures both store under the same key.)
+    if '-' in upper:
+        base, sep, suffix = upper.partition('-')
+        base_cased = _CASE_MAP.get(base, base)
+        return f"{base_cased}-{suffix.capitalize()}"
     return upper if upper else s
 
 
@@ -1391,6 +1401,15 @@ def _parse_external_name(name_raw):
     """
     s = (name_raw or '').strip()
 
+    # Strip administrative "(UIP)" / "(University Interdisciplinary Program)"
+    # tags before campus extraction. These are not campuses — they're a
+    # college/owner annotation appended by the SVT roster export. Leaving
+    # them in blocks the trailing "(Campus)" or ", Campus" detection below.
+    # The owning-college info is preserved separately on the row.
+    s = re.sub(
+        r'\s*\(\s*(?:UIP|University\s+Interdisciplinary\s+Program(?:\s*\(UIP\))?)\s*\)\s*$',
+        '', s, flags=re.I).strip()
+
     # Extract campus from trailing parens first
     campus = ''
     m = re.search(r'\(([^)]+)\)\s*$', s)
@@ -1438,6 +1457,14 @@ def _parse_external_name(name_raw):
             subj = s[mm.end():].strip().strip(',').strip()
             # Strip leading "- descriptor" (e.g. "- New Concentrations" → "")
             subj = re.sub(r'^[-–—]\s*.+$', '', subj).strip()
+            # Move deployment suffix from subject to degree, same as the
+            # short-prefix path. Catches "Master of Science in X - Align" /
+            # "Master of Science in X - Align Program" / etc.
+            deploy_m = _DEPLOYMENT_SUFFIX_RE.search(subj)
+            if deploy_m:
+                dep = deploy_m.group(1).capitalize()
+                subj = subj[:deploy_m.start()].strip()
+                short_deg = f"{short_deg}-{dep}"
             # Use implicit subject for degrees that stand alone without a subject
             if not subj and short_deg in _DEGREE_IMPLICIT_SUBJECT:
                 subj = _DEGREE_IMPLICIT_SUBJECT[short_deg]
