@@ -4094,21 +4094,27 @@ function renderPortfolioTable() {
             : (allConcsByParent[p.id] || []);
         const curriculumConcs = p.concentrations || [];
         const isExpanded = portfolioExpandedIds.has(p.id) || autoExpand.has(p.id);
+        // Show arrow if there's ANYTHING to reveal — curriculum concentrations
+        // OR linked sub-rows (Bridge Programs, "X Concentration in Y" CIM
+        // records, IPD concentration proposals, etc.). Previously the arrow
+        // only fired on curriculum concs, so parents like "Bioengineering, MS
+        // (Portland)" that have linked sub-rows but no curriculum HTML had
+        // no arrow even though sub-rows were rendered beneath them.
+        const hasAnyChildren = curriculumConcs.length > 0 || portfolioConcs.length > 0;
 
         rowHtml.push(renderPortfolioRow(p, {
-            hasConcentrations: curriculumConcs.length > 0,
+            hasConcentrations: hasAnyChildren,
             isExpanded,
         }));
 
-        // Curriculum concentrations (expand/collapse)
-        if (curriculumConcs.length > 0 && isExpanded) {
+        if (isExpanded) {
+            // Curriculum concentrations
             curriculumConcs.forEach(name => {
                 rowHtml.push(renderPortfolioConcRow(name, portfolioSearch));
             });
+            // Linked portfolio sub-rows
+            portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
         }
-
-        // Portfolio concentration rows (always shown under parent)
-        portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
     });
 
     // Use the page's existing info-tip overlay system (JS-driven, no native
