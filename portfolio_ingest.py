@@ -2493,7 +2493,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # etc.) are SEPARATE PROGRAMS in CIM, not concentrations or sub-entries
     # of their base degree. They get their own top-level Portfolio row and
     # their own concentrations expand independently. Do NOT nest them under
-    # the base degree.
+    # the base degree, and do NOT synthesize a base-degree placeholder when
+    # only a deployment variant exists at a campus.
 
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())
