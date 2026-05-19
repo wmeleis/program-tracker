@@ -3629,10 +3629,7 @@ let portfolioSearch        = '';
 // that getPortfolioFiltered() reads.
 function setPortfolioSearch(v) {
     portfolioSearch = v || '';
-    // Mirror to BOTH search inputs so the portfolio-row chip stays in sync
-    // with the always-visible header search.
-    const el = document.getElementById('portfolio-search');
-    if (el && el.value !== portfolioSearch) el.value = portfolioSearch;
+    // Keep the (single) header search input in sync.
     const hdr = document.getElementById('filter-search');
     if (hdr && hdr.value !== portfolioSearch) hdr.value = portfolioSearch;
     if (typeof updateClearButtons === 'function') updateClearButtons();
