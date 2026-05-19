@@ -3608,6 +3608,19 @@ let portfolioSortKey = '';   // '' = default (college/name), or a PORTFOLIO_COLU
 let portfolioSortDir = 1;    // 1 = asc, -1 = desc
 let portfolioSearch        = '';
 
+// Inline `oninput`/`onclick` event handlers cannot assign to `let`-scoped
+// script variables (they run in a wrapped scope that ends up creating a
+// `window.portfolioSearch` property instead). This function bridges the
+// gap — handlers call it, and it writes to the actual script-scope binding
+// that getPortfolioFiltered() reads.
+function setPortfolioSearch(v) {
+    portfolioSearch = v || '';
+    const el = document.getElementById('portfolio-search');
+    if (el && el.value !== portfolioSearch) el.value = portfolioSearch;
+    if (typeof updateClearButtons === 'function') updateClearButtons();
+    if (typeof renderPortfolioTable === 'function') renderPortfolioTable();
+}
+
 function classifyPortfolioLevel(name) {
     const n = name || '';
     if (/\b(MS|MA|MBA|MFA|MPS|MPA|MPP|MPH|MEd|MArch|MDes|MSCS|MSIS|MSOR|MSFMBA|MSEnvE|MSSBS|DNP|DPT|DMSC|EdD|PhD|LLM|JD|CERTG)\b/.test(n) ||

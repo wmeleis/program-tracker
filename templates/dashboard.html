@@ -126,8 +126,8 @@
         <div class="filter-group">
             <div class="filter-select-wrap">
                 <input type="text" id="portfolio-search" placeholder="Search programs…"
-                       oninput="portfolioSearch=this.value; updateClearButtons(); renderPortfolioTable()" style="width:200px">
-                <span class="filter-clear" onclick="portfolioSearch=''; document.getElementById('portfolio-search').value=''; updateClearButtons(); renderPortfolioTable()" title="Clear">&times;</span>
+                       oninput="setPortfolioSearch(this.value)" style="width:200px">
+                <span class="filter-clear" onclick="setPortfolioSearch('')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
