@@ -4025,12 +4025,10 @@ function getPortfolioFiltered() {
     if (portfolioLevelFilter)   rows = rows.filter(p => classifyPortfolioLevel(p.program_name)  === portfolioLevelFilter);
     if (portfolioDegreeFilter)  rows = rows.filter(p => classifyPortfolioDegree(p.program_name) === portfolioDegreeFilter);
     // Lifecycle status button row:
-    //   underdev   = tracked in IPD/SVT but no CIM record yet
     //   inworkflow = active CIM workflow step set
     //   catalog    = CIM workflow complete (completion_date) and no active step
-    if (portfolioStatusFilter === 'underdev') {
-        rows = rows.filter(p => !p.cim_program_id && (p.ipd_status || p.svt_status));
-    } else if (portfolioStatusFilter === 'inworkflow') {
+    // ('underdev' branch removed — In CIM=No covers it plus synthetic parents.)
+    if (portfolioStatusFilter === 'inworkflow') {
         rows = rows.filter(p => p.cim_step);
     } else if (portfolioStatusFilter === 'catalog') {
         rows = rows.filter(p => p.cim_completion_date && !p.cim_step);

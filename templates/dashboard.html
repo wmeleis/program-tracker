@@ -102,7 +102,8 @@
             <button class="portfolio-deg-btn" data-deg="Dual Degree" onclick="setPortfolioDegree(this,'Dual Degree')">Dual Degree</button>
         </div>
         <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-            <button class="portfolio-status-btn" data-status="underdev"   onclick="setPortfolioStatus('underdev')"><span class="info-tip-wrap">Under Development<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs tracked in IPD as new proposals that have not yet been submitted to CIM.</span></span></span></button>
+            <!-- 'Under Development' button removed — In CIM=No covers the
+                 same rows plus the synthetic parents. -->
             <button class="portfolio-status-btn" data-status="inworkflow" onclick="setPortfolioStatus('inworkflow')"><span class="info-tip-wrap">In Workflow<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with an active proposal currently moving through CIM approval steps.</span></span></span></button>
             <button class="portfolio-status-btn" data-status="catalog"    onclick="setPortfolioStatus('catalog')"><span class="info-tip-wrap">Fully Approved<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have completed the full CIM approval process. May still be pending catalog publication.</span></span></span></button>
         </div>
