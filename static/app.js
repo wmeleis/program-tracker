@@ -4133,7 +4133,16 @@ function renderPortfolioTable() {
     const nameArrow = (!portfolioSortKey || portfolioSortKey === 'name') ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
     const nameActive = !portfolioSortKey || portfolioSortKey === 'name';
     const nameHelp = _help('Canonical program name from CIM. Combined-major and concentration rows are nested under their parent and revealed with the expand caret.');
-    container.innerHTML = `
+    // Legend matches the CIM Programs tab — same class, same structure,
+    // rendered just above the table inside the container.
+    const portfolioLegend = `
+        <div class="table-legend">
+            <span class="legend-item"><span class="legend-swatch new"></span> New program</span>
+            <span class="legend-item"><span class="legend-swatch change"></span> Program change</span>
+            <span class="legend-item"><span class="legend-swatch inactivation"></span> Inactivation</span>
+            <span class="legend-item"><span class="legend-swatch not-in-cim"></span> Not in CIM</span>
+        </div>`;
+    container.innerHTML = portfolioLegend + `
         <table class="program-table">
             <thead><tr>
                 <th class="sortable-header${nameActive ? ' sort-active' : ''}" onclick="sortPortfolioBy('name')">Program${nameHelp}${nameArrow}</th>
