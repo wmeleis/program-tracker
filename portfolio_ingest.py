@@ -1111,7 +1111,6 @@ def _extract_parent_name(name):
 
 # Program names to exclude entirely (descriptive notes, course codes, fragments).
 _PORTFOLIO_REMOVE = frozenset({
-    'AI (New COE Concentration in High Performance and Edge AI), MS',
     'Healthcare program expansion to Saudi Arabia',
     'Half-Major in Sustainability Studies',
     'Jewish Community Chaplaincy on Campus',
@@ -1136,10 +1135,16 @@ _PORTFOLIO_REMOVE = frozenset({
 _PORTFOLIO_RENAME = {
     'Data Science, MS - new CAMD concentration':
         ('Data Science, MS', 'Office of the Provost', ''),
+    # IPD concentration proposals — rename to the concentration name itself
+    # so they become sub-rows under their parent program (linked via
+    # _EXPLICIT_CONC_PARENTS below). Preserves the IPD status and the fact
+    # that someone is proposing this specific concentration.
     'AI (New COE Concentration in Human-AI Collaboration), MS':
-        ('Artificial Intelligence, MS', 'College of Engineering', ''),
+        ('Human-AI Collaboration', 'College of Engineering', 'Boston'),
+    'AI (New COE Concentration in High Performance and Edge AI), MS':
+        ('High Performance and Edge AI', 'College of Engineering', 'Boston'),
     'Computational Creativity Concentration for UIP Masters in AI':
-        ('Computational Creativity, MS', 'Office of the Provost', ''),
+        ('Computational Creativity', 'Office of the Provost', 'Boston'),
     'Doctor of Professional Studies at Roux':
         ('Professional Studies, DPS', 'Coll of Professional Studies', 'Portland'),
     'at Roux, EDD':
@@ -1191,6 +1196,14 @@ _EXPLICIT_CONC_PARENTS = [
     # "AI - X Concentration, MS" → AI MS (the canonical Boston program;
     # synonym 'AI' for 'Artificial Intelligence').
     (re.compile(r'^AI\s*[-—,]\s*.+?\s+Concentration\b', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
+    # IPD concentration proposals renamed to the concentration name itself
+    # — link them as sub-rows under AI MS Boston.
+    (re.compile(r'^Human-AI Collaboration$', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
+    (re.compile(r'^High Performance and Edge AI$', re.I),
+     'Artificial Intelligence, MS', 'Boston'),
+    (re.compile(r'^Computational Creativity$', re.I),
      'Artificial Intelligence, MS', 'Boston'),
 ]
 
@@ -1902,10 +1915,37 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # Health Informatics, Charlotte"). They should NOT create a standalone
     # portfolio row; instead the IPD status overlays on the parent CIM program
     # ("Health Informatics, MS (Charlotte)").
+    # "X Concentration in the DEGREE in Y, Campus" (and variants)
     _CONC_IN_DEGREE_IN_RE = re.compile(
-        r'^.+?\s+Concentration\s+in\s+the\s+(MS|MA|PhD|MBA|MPS|MFA|MEd|MArch|DNP|DPT|EdD|MPH|MPA|MPP)\s+in\s+(.+)$',
+        r'^(.+?)\s+Concentration\s+in\s+the\s+(MS|MA|PhD|MBA|MPS|MFA|MEd|MArch|DNP|DPT|EdD|MPH|MPA|MPP)\s+in\s+(.+)$',
         re.I
     )
+    # "X Concentration for ... Masters in Y" — e.g. "Computational Creativity
+    # Concentration for UIP Masters in AI"
+    _CONC_FOR_RE = re.compile(
+        r'^(.+?)\s+Concentration\s+for\s+.+?\s+Masters?\s+in\s+(.+)$',
+        re.I
+    )
+
+    def _create_conc_subrow(conc_name, parent_subj, parent_deg, parent_camp, ipd_row):
+        """Create a tracker sub-row for an IPD-proposed concentration,
+        linked under its parent CIM program. Returns True if created."""
+        parent, _ = _lookup_cim(parent_subj, parent_deg, parent_camp)
+        if not parent:
+            return False
+        # Build a unique pid for the sub-row from concentration + parent
+        camp = parent.get('campus') or parent_camp or 'Boston'
+        sub_pid = _make_id(f"conc_{conc_name}_{parent.get('id', '')}", camp)
+        if sub_pid not in tracker:
+            new_row = _make_row(sub_pid, conc_name.strip(),
+                                ipd_row.get('ipd_college', '') or parent.get('college', ''),
+                                camp)
+            new_row['concentration_of']        = parent.get('id', '')
+            new_row['ipd_status']              = ipd_row.get('ipd_status', '')
+            new_row['ipd_proposal_type']       = ipd_row.get('ipd_proposal_type', '')
+            new_row['ipd_additional_college']  = ipd_row.get('ipd_additional_college', '')
+            tracker[sub_pid] = new_row
+        return True
 
     for p in ipd_rows_data:
         if _is_non_program(p['program_name']):
@@ -1918,20 +1958,19 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 })
             continue
 
-        # "X Concentration in the DEGREE in Y, Campus" → overlay IPD status on
-        # the parent program ("Y, DEGREE (Campus)") instead of mismatching or
-        # creating a standalone concentration row.
+        # Concentration-proposal patterns: create a sub-row named after the
+        # concentration, link to its parent CIM program. Carries the IPD
+        # status on the sub-row (NOT the parent — the parent has its own
+        # IPD/SVT record).
         conc_m = _CONC_IN_DEGREE_IN_RE.match(p['program_name'])
         if conc_m:
-            parent_deg  = _norm_degree(conc_m.group(1))
-            parent_rest = conc_m.group(2).strip()
+            conc_name   = conc_m.group(1).strip()
+            parent_deg  = _norm_degree(conc_m.group(2))
+            parent_rest = conc_m.group(3).strip()
             parent_camp = ''
             cm = re.search(r',\s*([A-Za-z][A-Za-z\s]+?)\s*$', parent_rest)
             if cm:
                 cand = cm.group(1).strip()
-                # A trailing ", Word" is the campus when the word resolves to a
-                # known campus (either via _CAMPUS_NAMES code→name map values
-                # or a direct case-insensitive match against full names).
                 _known = {v.lower() for v in _CAMPUS_NAMES.values()} | {
                     'boston','oakland','portland','toronto','seattle','miami',
                     'arlington','vancouver','charlotte','london','silicon valley',
@@ -1939,19 +1978,28 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 if cand.lower() in _known:
                     parent_camp = cand
                     parent_rest = parent_rest[:cm.start()].strip()
-            row, _ = _lookup_cim(parent_rest, parent_deg, parent_camp)
-            if row:
+            if _create_conc_subrow(conc_name, parent_rest, parent_deg, parent_camp, p):
                 n_ipd_matched += 1
-                if not row.get('ipd_status'):
-                    row['ipd_status']             = p['ipd_status']
-                    row['ipd_proposal_type']      = p['ipd_proposal_type']
-                    row['ipd_additional_college'] = p.get('ipd_additional_college', '')
-                if not row.get('college'):
-                    nc = _normalize_college(p.get('ipd_college') or '')
-                    if nc:
-                        row['college'] = nc
                 continue
             # Parent not found; fall through to normal handling
+
+        conc_m2 = _CONC_FOR_RE.match(p['program_name'])
+        if conc_m2:
+            conc_name   = conc_m2.group(1).strip()
+            parent_rest = conc_m2.group(2).strip()
+            # Expand common acronyms so the parent lookup finds the canonical
+            # CIM subject (e.g. 'AI' → 'Artificial Intelligence').
+            _SUBJ_ALIAS = {
+                'ai':  'Artificial Intelligence',
+                'cs':  'Computer Science',
+                'ds':  'Data Science',
+            }
+            if parent_rest.lower() in _SUBJ_ALIAS:
+                parent_rest = _SUBJ_ALIAS[parent_rest.lower()]
+            # Default to MS for "Masters in X" pattern
+            if _create_conc_subrow(conc_name, parent_rest, 'MS', '', p):
+                n_ipd_matched += 1
+                continue
         # Expand multi-campus entries (e.g. "X in Boston and Oakland") into one per campus.
         # For simplicity, process each expansion independently using the same matching logic.
         _ipd_expansions = _expand_multi_campus(p['program_name'], '')
