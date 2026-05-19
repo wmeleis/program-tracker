@@ -3620,6 +3620,9 @@ function setPortfolioSearch(v) {
     if (typeof updateClearButtons === 'function') updateClearButtons();
     if (typeof renderPortfolioTable === 'function') renderPortfolioTable();
 }
+// Belt-and-suspenders: explicit window-level export so inline handlers
+// always resolve setPortfolioSearch regardless of script-scope nuances.
+if (typeof window !== 'undefined') window.setPortfolioSearch = setPortfolioSearch;
 
 function classifyPortfolioLevel(name) {
     const n = name || '';
