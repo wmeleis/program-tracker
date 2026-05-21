@@ -384,76 +384,137 @@ def _match_scoring_2025(scoring_entries, portfolio_norm_key):
 # Parse SVT Roster of Record TSV
 # ---------------------------------------------------------------------------
 
-def parse_roster(path=ROSTER_PATH):
-    """Parse the SVT roster TSV produced by fetch_portfolio_data.fetch_roster_dashboards().
+# Prefixes that SVT entries sometimes wrap around an actual program name —
+# strip them before parsing so the underlying program is matchable.
+# Examples handled:
+#   "Launch of the MFA in Creative Practices and Technology"
+#     → "MFA in Creative Practices and Technology"  (HCWHY classifies as
+#        Network Deployment or New Program — the tracker row IS the program,
+#        not a "launch announcement")
+#   "Launch of DLP in Charlotte" → "DLP in Charlotte"
+#   "Suspension of MPS Insurance Analytics and Management"
+#     → "MPS Insurance Analytics and Management" (HCWHY="Inactivate…"
+#        classifies this as Inactivation)
+_SVT_NAME_PREFIX_RE = re.compile(
+    r'^\s*(?:'
+    r'Launch\s+of\s+the\s+'
+    r'|Launch\s+of\s+'
+    r'|Suspension\s+of\s+'
+    r')',
+    re.I,
+)
 
-    Each line: source_name \\t source_type \\t program_name \\t col5_value \\t
-               col5_label \\t status \\t sub_status \\t proposal_type \\t launch_date
+
+def _strip_svt_prefix(name):
+    """Strip "Launch of (the) " / "Suspension of " status prefix so the
+    remaining text parses as a real program name."""
+    if not name:
+        return name
+    return _SVT_NAME_PREFIX_RE.sub('', name).strip()
+
+
+# SVT "How Can We Help You" picklist value → portfolio cim_change_type style
+# proposal classification. Values not in this map fall through to '' (Other).
+# Source: distinct values observed in the SVT sheet 2026-05-20.
+_SVT_HCWHY_TO_TYPE = {
+    'New Program':                                'New',
+    'Inactivate an existing or launching program': 'Inactivation',
+    'Redesign an existing program':               'Change',
+    'Revamp an Existing Program':                 'Change',
+    'Term change request':                        'Change',
+    'Launch term change request':                 'Change',
+    'Deploy Program to Network':                  'Network Deployment',
+}
+# HCWHY values that indicate this is NOT a program proposal — skipped silently
+# (they go into the non_programs bucket of portfolio_mismatches.json).
+_SVT_HCWHY_NON_PROGRAM = {
+    'Digital Badge Credential Proposal',
+    'New Product (e.g. student experience program)',
+    'Net New Product',
+    'General market research',
+    'General Market Research (for existing Global Network)',
+    'Market Research',
+    'International Opportunity',
+    'Course development consultation',
+}
+
+
+def parse_svt(path=None):
+    """Parse the SVT Source Data Smartsheet JSON produced by
+    fetch_portfolio_data.fetch_svt_sheet() via the Smartsheet REST API.
+
+    Returns a list of dicts with normalized fields:
+      {program_code, program_name, college, campus, program_level,
+       degree_type, status, sub_status, speed_to_market, hcwhy,
+       actual_launch_date, uip_program}
     """
+    if path is None:
+        # Default lives in data/portfolio_feeds/ alongside the other feeds.
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'data', 'portfolio_feeds', 'svt.json')
     if not os.path.exists(path):
         return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return []
 
-    programs = []
-    seen = set()
+    col_by_id = {c['id']: c['title'] for c in data.get('columns', [])}
+    KEEP = {
+        'Program Code', 'Program Name', 'College', 'Campus',
+        'Program Level', 'Degree Type', 'Status', 'Launch Sub-Status',
+        'Speed to Market?', 'How Can We Help You', 'Actual Launch Date',
+        'UIP Program',
+    }
 
-    with open(path, encoding='utf-8') as f:
-        for line in f:
-            parts = line.rstrip('\n').split('\t')
-            if len(parts) < 6:
+    out = []
+    for row in data.get('rows', []):
+        rec = {}
+        for cell in row.get('cells', []):
+            title = col_by_id.get(cell.get('columnId'))
+            if title not in KEEP:
                 continue
+            v = cell.get('value')
+            if v is None:
+                v = cell.get('displayValue', '')
+            if v is None:
+                v = ''
+            rec[title] = str(v).strip() if not isinstance(v, bool) else ('True' if v else 'False')
 
-            source_name  = parts[0]   # e.g., 'Arlington', 'Bouve'
-            source_type  = parts[1]   # 'campus' or 'college'
-            prog_name    = parts[2].strip()
-            col5_value   = parts[3].strip()
-            # col5_label   = parts[4]  # 'Campus' or 'College' (informational)
-            status       = parts[5].strip()
-            sub_status   = parts[6].strip() if len(parts) > 6 else ''
-            proposal     = parts[7].strip() if len(parts) > 7 else ''
-            launch_date  = parts[8].strip() if len(parts) > 8 else ''
+        # Skip header rows / blank rows
+        if not rec.get('Program Name'):
+            continue
 
-            if not prog_name or prog_name == 'Primary':
-                continue
+        # Normalize campus: drop placeholder values.
+        camp = rec.get('Campus', '')
+        if camp in ('Not Applicable', 'N/A', ''):
+            camp = ''
 
-            # Skip multi-program bundle rows (Smartsheet groups, e.g. "- *Program A* - *Program B*")
-            if prog_name.startswith('- *') or ('* - *' in prog_name):
-                continue
+        # Normalize college. UIP variants → "Office of the Provost" so the
+        # College filter groups them under Provost (per Waleed's request).
+        col = rec.get('College', '')
+        if col in ('Not Applicable', 'All', ''):
+            col = ''
+        elif col == 'University Interdisciplinary Program (UIP)':
+            col = 'Office of the Provost'
 
-            # Skip market-research / non-degree entries
-            _prop_lower = proposal.lower()
-            if any(kw in _prop_lower for kw in (
-                    'market research', 'general market', 'market study',
-                    'market analysis', 'feasibility')):
-                continue
+        out.append({
+            'program_code':       rec.get('Program Code', ''),
+            'program_name':       rec.get('Program Name', ''),
+            'college':            col,
+            'campus':             camp,
+            'program_level':      rec.get('Program Level', ''),
+            'degree_type':        rec.get('Degree Type', ''),
+            'status':             rec.get('Status', ''),
+            'sub_status':         rec.get('Launch Sub-Status', ''),
+            'speed_to_market':    rec.get('Speed to Market?', ''),
+            'hcwhy':              rec.get('How Can We Help You', ''),
+            'actual_launch_date': rec.get('Actual Launch Date', ''),
+            'uip_program':        rec.get('UIP Program', ''),
+        })
 
-            # Determine campus and college from source context
-            if source_type == 'campus':
-                campus  = source_name
-                college = col5_value
-            else:  # college
-                campus  = col5_value
-                college = source_name
-
-            # Normalise placeholder campus values
-            if campus in ('Not Applicable', 'N/A', 'Online', ''):
-                campus = campus if campus == 'Online' else ''
-
-            key = (_norm(prog_name), _norm(campus))
-            if key in seen:
-                continue
-            seen.add(key)
-
-            programs.append({
-                'program_name':       prog_name,
-                'campus':             campus,
-                'college':            college,
-                'svt_status':         status,
-                'roster_sub_status':  sub_status,
-                'roster_proposal_type': proposal,
-                'roster_launch_date': launch_date,
-            })
-
-    return programs
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -596,10 +657,18 @@ _DEGREE_IMPLICIT_SUBJECT = {
 # Deployment suffix on subject after short-prefix parse: "MS Data Science - Align" or
 # "MS Cybersecurity, Align" → subject="...", degree="MS-Align" (matches CIM's "MS—Align")
 _DEPLOYMENT_SUFFIX_RE = re.compile(
-    r'\s*(?:[-–—]|,)\s*(align|connect|bridge|accelerated|part[\s\-]?time|online|full[\s\-]?time)'
-    r'(?:\s+Program)?\s*$',  # allow trailing "Program" noise: "Align Program" → Align
+    # Variant attached via dash, comma, "+", OR plain whitespace.
+    # Whitespace-only and "+" separators are accepted because SVT names often
+    # write the variant unseparated (e.g. "Speech-Language Pathology Connect",
+    # "Information Systems + Bridge"). "Online" is excluded from the bare-
+    # whitespace branch because the word appears in legitimate program names;
+    # it must be preceded by a dash, comma, or "+".
+    r'\s*(?:\+\s*|[-–—]|,)?\s+(align|connect|bridge|accelerated|part[\s\-]?time|full[\s\-]?time)'
+    r'(?:\s+Program)?\s*$|'
+    r'\s*(?:\+\s*|[-–—]|,)\s*(online)(?:\s+Program)?\s*$',
     re.I
 )
+_DEPLOYMENT_GROUP_ANY = lambda m: m.group(1) or m.group(2)
 
 # Short degree prefix pattern (e.g. "MS Computer Science", "PhD Biology")
 _SHORT_DEGREE_PREFIX_RE = re.compile(
@@ -704,7 +773,6 @@ _NON_PROGRAM_RE = re.compile(
     r'|\bgis\s+at\b'                         # "GIS at Northeastern"
     r'|badging\b'                            # "Global Leadership Summit badging"
     r'|\binactivate\b'                       # "Inactivate EdD in Workplace Learning"
-    r'|\bsuspension\s+of\b'                  # "Suspension of MPS Insurance Analytics"
     r'|\bdeactivation\b'                     # "Global Health and Nutrition Cert deactivation"
     r'|\bworkforce\s+development\b'          # "Energy workforce development"
     r'|\bsummer[\s-]?in\b'                   # "SummerIn Portland"
@@ -712,7 +780,11 @@ _NON_PROGRAM_RE = re.compile(
     r'|\bcourses\s*\('                       # "Security Ops Center Courses (AAI 0500-0509)"
     r'|\bpre[\s-]?college\b'                 # "Pre-College" / "Pre-CollEDGE"
     r'|\bsurvey\b'                           # "Doctor of Law & Policy Survey"
-    r'|\blaunch\s+of\s+the\b'               # "Launch of the MFA in X" (status update, not program)
+    r'|\bplacing\s+(phd|graduate)\s+students?\b'  # "Placing PhD students in the network..."
+    # NOTE: "Launch of the …" and "Suspension of …" are NOT filtered — they
+    # represent real proposals (new deployment / inactivation). The "Launch
+    # of " / "Suspension of " prefix is stripped before name parsing via
+    # _strip_svt_prefix() so the underlying program can be matched.
     r')\b',
     re.I
 )
@@ -759,9 +831,7 @@ _SILENT_NON_PROGRAM_RE = re.compile(
     r';'                                # multi-program semicolon bundles
     r'|\binactivate\b'                  # "Inactivate EdD in ..."
     r'|\bdeactivation\b'               # "Global Health and Nutrition Cert deactivation"
-    r'|\bsuspension\s+of\b'            # "Suspension of MPS Insurance Analytics"
     r'|\bexit[\s-]?only\s+degree\b'    # "Exit-Only Degree Program"
-    r'|\blaunch\s+of\s+the\b'          # "Launch of the MFA in X"
     r'|\band/or\b',                    # "Executive MBA and/or MS Management"
     re.I
 )
@@ -917,6 +987,7 @@ _COLLEGE_ALIASES = {
 # names, and similar mismaps that have leaked into the college field. These
 # are blanked at normalization time so they never reach the dropdown.
 _COLLEGE_BLOCKLIST = {
+    'all',
     'deploy program to network',
     'launch term change request',
     'new program',
@@ -1239,7 +1310,17 @@ def _extract_concentrations_from_html(html):
             continue
         if _CONC_SKIP.search(h):
             continue
-        h = re.sub(r'\s*[—]\s*\S.*College.*$', '', h).strip()
+        # Capture the trailing attribution "—…College…" or " - …College…"
+        # (em-dash OR hyphen with surrounding whitespace) so we can surface
+        # the college in the row's College column, then strip the suffix
+        # from the heading so the displayed name is just the concentration
+        # topic. CIM authors are inconsistent: some use em-dashes, some use
+        # plain hyphens.
+        conc_college = ''
+        m_col = re.search(r'\s*(?:[—]|\s-)\s*(.*\bCollege\b.*)$', h)
+        if m_col:
+            conc_college = _normalize_college(m_col.group(1).strip())
+            h = h[:m_col.start()].strip()
         h = re.sub(r'\s*\([Oo]ptional\)$', '', h).strip()
         h = re.sub(r'\s*\([Rr]equired\)$', '', h).strip()
         h = h.rstrip('*† ').strip()
@@ -1277,7 +1358,7 @@ def _extract_concentrations_from_html(html):
             continue
         if h and h.lower() not in seen:
             seen.add(h.lower())
-            results.append(h)
+            results.append({'name': h, 'college': conc_college})
     return results
 
 
@@ -1291,13 +1372,37 @@ def _normalize_college(college):
     - Returns the input unchanged for anything else (e.g.
       "University Interdisciplinary Program (UIP)" which is legitimate).
     """
+    import unicodedata
     c = (college or '').strip()
     if not c:
         return ''
-    key = c.lower()
+    # Strip diacritics for both blocklist and alias lookup ("Bouvé" → "Bouve",
+    # "Mills (at Roux)" etc. — CIM HTML occasionally has accented spellings).
+    def _no_diacritics(s):
+        return ''.join(ch for ch in unicodedata.normalize('NFD', s)
+                       if unicodedata.category(ch) != 'Mn')
+    key = _no_diacritics(c).lower()
     if key in _COLLEGE_BLOCKLIST:
         return ''
-    return _COLLEGE_ALIASES.get(key, c)
+    # Try direct match first, then a punctuation-stripped variant so
+    # CIM HTML spellings like "College of Arts, Media, and Design" or
+    # "Khoury College of Computer Science" match the (no-comma) keys
+    # in _COLLEGE_ALIASES.
+    if key in _COLLEGE_ALIASES:
+        return _COLLEGE_ALIASES[key]
+    stripped = re.sub(r'[,\.]', '', key)
+    stripped = re.sub(r'\s+', ' ', stripped).strip()
+    if stripped in _COLLEGE_ALIASES:
+        return _COLLEGE_ALIASES[stripped]
+    # Handle singular/plural variants ("Computer Science" vs "Computer Sciences")
+    stripped2 = re.sub(r'\bscience\b', 'sciences', stripped)
+    if stripped2 in _COLLEGE_ALIASES:
+        return _COLLEGE_ALIASES[stripped2]
+    # Handle "Health Sciences" vs "Hlth Sciences" (CIM's canonical short form).
+    stripped3 = stripped.replace('health sciences', 'hlth sciences')
+    if stripped3 in _COLLEGE_ALIASES:
+        return _COLLEGE_ALIASES[stripped3]
+    return c
 
 
 def _norm_campus(campus):
@@ -1431,6 +1536,19 @@ def _parse_external_name(name_raw):
 
     Campus extraction: from trailing parens OR trailing ", CampusName" suffix.
     """
+    subj, deg, campus = _parse_external_name_inner(name_raw)
+    # Promote a leading-"Online" marker (stashed via global below) onto the
+    # degree as an "—Online" variant suffix so it routes through the same
+    # variant-in-subject lookup as native CIM —Online programs.
+    if _PARSE_LEADING_ONLINE.get('flag'):
+        _PARSE_LEADING_ONLINE['flag'] = False
+        if deg and 'online' not in deg.lower():
+            deg = f"{deg}-Online"
+    return subj, deg, campus
+
+_PARSE_LEADING_ONLINE = {'flag': False}
+
+def _parse_external_name_inner(name_raw):
     s = (name_raw or '').strip()
 
     # Strip administrative "(UIP)" / "(University Interdisciplinary Program)"
@@ -1468,6 +1586,29 @@ def _parse_external_name(name_raw):
             campus = mt.group(1)
             s = s[:mt.start()].strip()
 
+    # Extract campus from trailing " in CampusName" — covers SVT-style names
+    # like "DLP in Charlotte" or "Masters of Security and Intelligence Studies
+    # in Arlington" where the campus follows "in" with no comma.
+    if not campus:
+        campus_in_re = re.compile(
+            r'\s+in\s+(Boston|Oakland|Portland|Toronto|Seattle|Miami|Arlington|'
+            r'Vancouver|Charlotte|London|Silicon Valley)\s*$',
+            re.I)
+        mi = campus_in_re.search(s)
+        if mi:
+            campus = mi.group(1)
+            s = s[:mi.start()].strip()
+
+    # Strip leading "Online" — names like "Online MS Business Analytics" or
+    # "Online Graduate Certificate in Data Analytics Engineering" are
+    # —Online deployment variants. Promote the variant onto a flag so the
+    # short-prefix / long-form parse below produces the bare degree, then
+    # the variant gets re-attached at the end.
+    online_m = re.match(r'^Online\s+(?=(?:Master|Bachelor|Graduate|Undergraduate|MS|MA|MBA|MFA|MEd|MPS|MPA|MPP|MPH|MAT|MArch|MDes|MEM|MSCS|MSIS|MSECE|MSME|MSBA|MSF|PhD|EdD|DNP|DPT|JD|LLM|CERTG?)\b)', s, re.I)
+    if online_m:
+        s = s[online_m.end():].strip()
+        _PARSE_LEADING_ONLINE['flag'] = True
+
     # Strip "at Roux" suffix — "Bioengineering at Roux, MS" → "Bioengineering, MS" + campus=Portland
     roux_m = re.search(r'\s+at\s+Roux\b', s, re.I)
     if roux_m and not campus:
@@ -1482,6 +1623,34 @@ def _parse_external_name(name_raw):
     if s_nodot != s:
         s = s_nodot
 
+    # Bare degree token (no subject) — e.g. "DLP" left after stripping
+    # "Launch of " prefix and " in Charlotte" campus suffix. Use the degree's
+    # implicit subject when one is defined. Restricted to single-token
+    # short codes so multi-word phrases like "Masters of X" still flow to
+    # the long-form prefix matcher below.
+    if re.match(r'^[A-Za-z]{1,10}$', s) and _is_valid_degree(s):
+        deg = _norm_degree(s)
+        subj = _DEGREE_IMPLICIT_SUBJECT.get(deg, '')
+        return subj, deg, campus
+
+    # "Master of <Field> (<Abbrev>) in <Subject>" — explicit parenthetical
+    # degree abbreviation overrides the long-form prefix. Catches names like
+    # "Master of Design (MDes) in Sustainable Urban Environments (SUEN)".
+    abbrev_in_m = re.match(
+        r'^Master(?:s|\s+of)?\s+[A-Za-z]+\s+\(([A-Z][A-Za-z0-9]{1,9})\)\s+in\s+(.+)$',
+        s, re.I)
+    if abbrev_in_m and _is_valid_degree(abbrev_in_m.group(1)):
+        deg_abbrev = _norm_degree(abbrev_in_m.group(1))
+        rest = abbrev_in_m.group(2).strip()
+        # Strip trailing "(CODE)" program-code abbreviation like " (SUEN)"
+        rest = re.sub(r'\s*\([A-Z]{2,8}\)\s*$', '', rest).strip()
+        deploy_m = _DEPLOYMENT_SUFFIX_RE.search(rest)
+        if deploy_m:
+            dep = _DEPLOYMENT_GROUP_ANY(deploy_m).capitalize()
+            rest = rest[:deploy_m.start()].strip()
+            deg_abbrev = f"{deg_abbrev}-{dep}"
+        return rest, deg_abbrev, campus
+
     # Try long-form degree prefix
     for pat, short_deg in _LONG_DEGREE_MAP:
         mm = pat.match(s)
@@ -1494,7 +1663,7 @@ def _parse_external_name(name_raw):
             # "Master of Science in X - Align Program" / etc.
             deploy_m = _DEPLOYMENT_SUFFIX_RE.search(subj)
             if deploy_m:
-                dep = deploy_m.group(1).capitalize()
+                dep = _DEPLOYMENT_GROUP_ANY(deploy_m).capitalize()
                 subj = subj[:deploy_m.start()].strip()
                 short_deg = f"{short_deg}-{dep}"
             # Use implicit subject for degrees that stand alone without a subject
@@ -1511,9 +1680,12 @@ def _parse_external_name(name_raw):
         # "Data Science - Align" + "MS" → subject="Data Science", degree="MS-Align"
         deploy_m = _DEPLOYMENT_SUFFIX_RE.search(subj)
         if deploy_m:
-            dep = deploy_m.group(1).capitalize()
+            dep = _DEPLOYMENT_GROUP_ANY(deploy_m).capitalize()
             subj = subj[:deploy_m.start()].strip()
             deg = f"{deg}-{dep}"
+        # Use implicit subject for degrees that stand alone without a subject
+        if not subj and deg in _DEGREE_IMPLICIT_SUBJECT:
+            subj = _DEGREE_IMPLICIT_SUBJECT[deg]
         return subj, deg, campus
 
     # CIM format: "Subject, Degree" (also handles "Degree, Subject" swap)
@@ -1630,6 +1802,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         'ipd_status': '', 'ipd_proposal_type': '', 'ipd_additional_college': '',
         'svt_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
         'roster_launch_date': '',
+        'speed_to_market': '',
         'gls_status': '',
         'concentration_of': '',
         'concentrations_json': '',
@@ -1663,7 +1836,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     _STATUS_LABEL = {'Added': 'New', 'Edited': 'Change', 'Deactivated': 'Inactivation'}
     with get_db() as conn:
         raw_rows = conn.execute("""
-            SELECT id, name, college, current_step, completion_date, status, eff_cat
+            SELECT id, name, college, current_step, completion_date, status, eff_cat,
+                   banner_code
             FROM programs
             WHERE (current_step IS NOT NULL AND current_step != '')
                OR (completion_date IS NOT NULL AND completion_date != '')
@@ -1702,6 +1876,11 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     cim_exact_index = {}   # full 3-tuple key
     cim_nameDeg_index = {} # (norm_subject, norm_degree) → list of row dicts
     cim_entries_list = []  # flat list for best-guess fallback
+    # SVT match index: banner_code (uppercase, normalized) → list of row dicts.
+    # SVT's "Program Code" field equals CIM's banner_code (e.g. "MS-PRHL").
+    # Multiple campuses can share the same banner_code, so we resolve campus
+    # ambiguity by also matching SVT's Campus field against the row's campus.
+    cim_banner_index = {}
 
     for r in by_name.values():
         name = r['name'] or ''
@@ -1748,6 +1927,14 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             'campus': campus_resolved,
             'row': row,
         })
+
+        # SVT Program Code → CIM banner_code lookup. Index uppercase + stripped
+        # so "ms-prhl", "MS-PRHL", " MS-PRHL " all collide cleanly.
+        bc = (r['banner_code'] or '').strip().upper()
+        if bc:
+            cim_banner_index.setdefault(bc, []).append({
+                'row': row, 'campus': campus_resolved, 'pid': pid,
+            })
 
     n_cim_seed = len(tracker)
 
@@ -1798,8 +1985,19 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         # "MS Data Science - Align"), try the base degree. Handles CIM programs that
         # store the deployment in the degree field differently or not at all.
         if '-' in norm_deg:
-            base_deg = norm_deg.split('-')[0]
+            base_deg, variant = norm_deg.split('-', 1)
             if base_deg:
+                # Variant-in-subject FIRST: some CIM programs store the
+                # deployment variant inside the subject name (e.g. "Applied
+                # AI—Connect, MPS"), not the degree. Try (subject+"-variant",
+                # base_degree) before bare base_degree, otherwise a
+                # "MS-Connect at SV" lookup falls through to the base "MS at
+                # SV" program instead of the Connect variant.
+                if variant:
+                    subj_with_var = f'{norm_subj}-{variant}'
+                    row, mt = _try(subj_with_var, base_deg, norm_campus_str)
+                    if row:
+                        return row, mt
                 row, mt = _try(norm_subj, base_deg, norm_campus_str)
                 if row:
                     return row, mt
@@ -1919,7 +2117,10 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             # Found a match — normalize via the existing extractor's rules
             extracted = _extract_concentrations_from_html(f'<h2>{h}</h2>')
             if extracted:
-                return extracted[0]
+                # Extractor now returns dicts {name, college}; callers here
+                # expect just the concentration name.
+                first = extracted[0]
+                return first['name'] if isinstance(first, dict) else first
         return None
 
     def _parse_deg_in_subj(s):
@@ -2061,103 +2262,189 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 existing[fld] = src_row[fld]
         return True
 
-    # ── Step 1: Overlay SVT Roster ────────────────────────────────────────────
-    roster_rows_data = parse_roster(roster_path)
+    # ── Step 1: Overlay SVT Source Data ───────────────────────────────────────
+    # SVT pipeline rewritten 2026-05-20 to use the new "SVT Source Data"
+    # Smartsheet (via REST API, sheet id 3889012330680196). Match key is
+    # Program Code → CIM banner_code, with Campus disambiguation. Falls
+    # back to name parsing (Program Level + Degree Type + Program Name)
+    # for rows with no Program Code.
+    svt_rows_data = parse_svt()
     n_svt_matched = 0
     n_svt_added   = 0
     n_svt_mismatch = 0
     n_svt_nonprog = 0
-    for p in roster_rows_data:
-        if _is_non_program(p['program_name']):
+
+    def _apply_svt_fields(row, p):
+        """Overlay SVT fields onto a tracker row (only if currently empty)."""
+        if not row.get('svt_status') and p.get('status'):
+            row['svt_status'] = p['status']
+        if not row.get('roster_sub_status') and p.get('sub_status'):
+            row['roster_sub_status'] = p['sub_status']
+        # roster_proposal_type now holds the HCWHY-derived classification
+        # (was the raw "Proposal Type" column in the old roster).
+        if not row.get('roster_proposal_type') and p.get('hcwhy'):
+            classified = _SVT_HCWHY_TO_TYPE.get(p['hcwhy'], p['hcwhy'])
+            row['roster_proposal_type'] = classified
+        if not row.get('roster_launch_date') and p.get('actual_launch_date'):
+            row['roster_launch_date'] = p['actual_launch_date']
+        if not row.get('speed_to_market') and p.get('speed_to_market'):
+            row['speed_to_market'] = p['speed_to_market']
+
+    for p in svt_rows_data:
+        # Strip "Launch of (the) " / "Suspension of " status prefix so the
+        # underlying program is matchable. The original name is preserved in
+        # mismatch logs via p['program_name']; the stripped form is used for
+        # CIM lookup + parsing only.
+        original_name = p.get('program_name', '')
+        cleaned_name  = _strip_svt_prefix(original_name)
+
+        code = (p.get('program_code') or '').strip().upper()
+
+        # HCWHY non-program filter — but bypass it when a Program Code is
+        # present (Program Code in SVT == CIM banner_code, so the row IS a
+        # real program record even if the HCWHY value is something like
+        # "General Market Research"). Without this override, e.g. CERTG AI
+        # Applications (SV) was being dropped despite having code CERTG-AIAP.
+        if p.get('hcwhy') in _SVT_HCWHY_NON_PROGRAM and not code:
             n_svt_nonprog += 1
-            if not _is_silent_non_program(p['program_name']):
+            non_programs.append({
+                'source':      'SVT',
+                'source_name': original_name,
+                'campus':      p.get('campus', ''),
+                'reason':      f"HCWHY={p.get('hcwhy', '')}",
+            })
+            continue
+        # Existing non-program filters (multi-program bundles, course-code-as-name, …)
+        if _is_non_program(cleaned_name):
+            n_svt_nonprog += 1
+            if not _is_silent_non_program(cleaned_name):
                 non_programs.append({
                     'source':      'SVT',
-                    'source_name': p['program_name'],
-                    'campus':      p['campus'],
+                    'source_name': original_name,
+                    'campus':      p.get('campus', ''),
                 })
             continue
 
-        # Concentration-proposal patterns: route to a sub-row under the parent
-        # CIM program instead of creating a top-level row.
-        if _try_concentration_preprocess(p):
+        camp_norm = _normalize_campus(p.get('campus', '')) if p.get('campus') else ''
+
+        # Path A: match by Program Code → CIM banner_code.
+        matched = None
+        if code and code in cim_banner_index:
+            candidates = cim_banner_index[code]
+            if len(candidates) == 1:
+                matched = candidates[0]['row']
+            else:
+                # Multiple campuses share the banner_code — pick the one whose
+                # campus matches SVT's Campus field.
+                for c in candidates:
+                    if c['campus'] == camp_norm:
+                        matched = c['row']
+                        break
+                # No banner-code candidate at this campus — try a name-based
+                # rescue before falling back to Boston. Handles the common
+                # case where CIM has the campus deployment but its banner_code
+                # field is empty (so it's not in cim_banner_index even though
+                # the row exists). e.g. SVT "MPS in Applied AI, Silicon Valley"
+                # → CIM 1797 "Applied AI, MPS (Silicon Valley)" with no banner.
+                if not matched and camp_norm and camp_norm != 'Boston':
+                    rescue_subj, rescue_deg, rescue_camp = _parse_external_name(cleaned_name)
+                    if rescue_subj and not rescue_camp:
+                        rescue_camp = camp_norm
+                    if rescue_subj and rescue_camp:
+                        rescue_row, _ = _lookup_cim(rescue_subj, rescue_deg, rescue_camp)
+                        if rescue_row and rescue_row not in (c['row'] for c in candidates):
+                            matched = rescue_row
+                if not matched:
+                    for c in candidates:
+                        if c['campus'] == 'Boston':
+                            matched = c['row']
+                            break
+                if not matched:
+                    matched = candidates[0]['row']
+
+        if matched:
             n_svt_matched += 1
+            _apply_svt_fields(matched, p)
+            _new_col = _normalize_college(p.get('college') or '')
+            if not matched.get('college') and _new_col:
+                matched['college'] = _new_col
             continue
 
-        # Expand multi-campus entries (e.g. "X, Boston and Oakland, GC") into one per campus
-        _svt_expansions = _expand_multi_campus(p['program_name'], p.get('campus', ''))
+        # Path B: no Program Code or banner_code didn't match — fall back to
+        # name parsing (uses the existing _parse_external_name + _lookup_cim
+        # flow). If still no match, synthesize a row from Program Level +
+        # Degree Type + Program Name. Use cleaned_name (with "Launch of"/
+        # "Suspension of" prefix removed) for parsing.
+        subject, degree, campus_from_name = _parse_external_name(cleaned_name)
+        if not campus_from_name and camp_norm:
+            campus_from_name = camp_norm
 
-        for _svt_name, _svt_campus_override in _svt_expansions:
-            norm_campus = _normalize_campus(_svt_campus_override or p['campus'])
-            subject, degree, campus_from_name = _parse_external_name(_svt_name)
-            if not campus_from_name and norm_campus:
-                campus_from_name = norm_campus
+        # If _parse_external_name couldn't extract a degree, fall back to
+        # SVT's Degree Type field.
+        if not degree and p.get('degree_type'):
+            _DEG_TYPE_MAP = {
+                'Masters':                  'MS',
+                'Bachelors':                'BS',
+                'PhD':                      'PhD',
+                'Professional Doctorate':   'ProfDoc',
+                'Graduate Certificate':     'Graduate Certificate',
+                'Undergraduate Certificate': 'Undergraduate Certificate',
+            }
+            degree = _DEG_TYPE_MAP.get(p['degree_type'], '')
 
-            row, match_type = _lookup_cim(subject, degree, campus_from_name)
-            if row:
-                n_svt_matched += 1
-                if not row.get('svt_status'):
-                    row['svt_status']           = p['svt_status']
-                    row['roster_sub_status']    = p['roster_sub_status']
-                    row['roster_proposal_type'] = p['roster_proposal_type']
-                    row['roster_launch_date']   = p['roster_launch_date']
-                _new_col = _normalize_college(p.get('college') or '')
-                if not row.get('college') and _new_col:
-                    row['college'] = _new_col
-            else:
-                if _is_valid_degree(degree):
-                    # Add new tracker entry from SVT — store the program_name
-                    # in CIM canonical format "Subject, Degree (Campus)" so
-                    # the Portfolio's credential-extraction and display logic
-                    # works the same on external-added rows as on CIM-seeded rows.
-                    campus_store = campus_from_name or 'Boston'
-                    cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
-                    cim_display = (cim_fmt if campus_store == 'Boston'
-                                   else f"{cim_fmt} ({campus_store})")
-                    pid = _make_id(cim_display, campus_store)
-                    if pid not in tracker:
-                        new_row = _make_row(pid, cim_display,
-                                            p.get('college', ''), campus_store)
-                        tracker[pid] = new_row
-                        n_svt_added += 1
-                        svt_added_log.append({
-                            'original_name': p['program_name'],
-                            'cim_format':    cim_fmt,
-                            'campus':        campus_store,
-                        })
-                        # Also index the new row so later IPD step can find it
-                        key3 = _cim_index_keys(subject, degree, campus_store)
-                        if key3 not in cim_exact_index:
-                            cim_exact_index[key3] = tracker[pid]
-                        key2 = _subject_degree_keys(subject, degree)
-                        cim_nameDeg_index.setdefault(key2, []).append(tracker[pid])
-                        cim_entries_list.append({
-                            'pid': pid,
-                            'program_name': _svt_name,
-                            'subject': subject,
-                            'degree': degree,
-                            'degree_norm': _norm_degree(degree).lower(),
-                            'campus': campus_store,
-                            'row': tracker[pid],
-                        })
-                    row = tracker[pid]
-                    if not row.get('svt_status'):
-                        row['svt_status']           = p['svt_status']
-                        row['roster_sub_status']    = p['roster_sub_status']
-                        row['roster_proposal_type'] = p['roster_proposal_type']
-                        row['roster_launch_date']   = p['roster_launch_date']
-                else:
-                    n_svt_mismatch += 1
-                    best = _best_guess(subject, degree, cim_entries_list,
-                                       prefer_campus=campus_from_name or '')
-                    svt_mismatches.append({
-                        'source_name':   p['program_name'],
-                        'source_campus': _svt_campus_override or p['campus'],
-                        'reason':        'no CIM match' if not degree else 'no recognizable degree',
-                        'best_guess':    best,
-                    })
+        row, _ = _lookup_cim(subject, degree, campus_from_name) if subject else (None, None)
+        if row:
+            n_svt_matched += 1
+            _apply_svt_fields(row, p)
+            _new_col = _normalize_college(p.get('college') or '')
+            if not row.get('college') and _new_col:
+                row['college'] = _new_col
+            continue
 
-    print(f"  SVT Roster: {len(roster_rows_data)} entries, {n_svt_matched} matched, "
+        if subject and _is_valid_degree(degree):
+            campus_store = campus_from_name or 'Boston'
+            cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
+            cim_display = (cim_fmt if campus_store == 'Boston'
+                           else f"{cim_fmt} ({campus_store})")
+            pid = _make_id(cim_display, campus_store)
+            if pid not in tracker:
+                new_row = _make_row(pid, cim_display,
+                                    p.get('college', ''), campus_store)
+                tracker[pid] = new_row
+                n_svt_added += 1
+                svt_added_log.append({
+                    'original_name': p.get('program_name', ''),
+                    'cim_format':    cim_fmt,
+                    'campus':        campus_store,
+                })
+                key3 = _cim_index_keys(subject, degree, campus_store)
+                if key3 not in cim_exact_index:
+                    cim_exact_index[key3] = tracker[pid]
+                key2 = _subject_degree_keys(subject, degree)
+                cim_nameDeg_index.setdefault(key2, []).append(tracker[pid])
+                cim_entries_list.append({
+                    'pid': pid,
+                    'program_name': cim_display,
+                    'subject': subject,
+                    'degree': degree,
+                    'degree_norm': _norm_degree(degree).lower(),
+                    'campus': campus_store,
+                    'row': tracker[pid],
+                })
+            _apply_svt_fields(tracker[pid], p)
+        else:
+            n_svt_mismatch += 1
+            best = _best_guess(subject, degree, cim_entries_list,
+                               prefer_campus=campus_from_name or '')
+            svt_mismatches.append({
+                'source_name':   p.get('program_name', ''),
+                'source_code':   code,
+                'source_campus': p.get('campus', ''),
+                'reason':        'no banner_code match and no recognizable subject+degree',
+                'best_guess':    best,
+            })
+
+    print(f"  SVT: {len(svt_rows_data)} entries, {n_svt_matched} matched, "
           f"{n_svt_added} added, {n_svt_mismatch} mismatches, {n_svt_nonprog} non-programs")
 
     # ── Step 2: Overlay IPD ───────────────────────────────────────────────────

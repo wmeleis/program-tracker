@@ -114,9 +114,9 @@ header h1 {
 
 /* Pipeline Summary */
 .pipeline-section {
-    padding: 20px 24px;
+    padding: 12px 24px;
     background: var(--surface);
-    margin: 16px 24px;
+    margin: 8px 24px;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
 }
@@ -182,9 +182,12 @@ header h1 {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 24px;
-    margin: 12px 24px 0;
+    padding: 8px 24px 4px;
+    margin: 8px 24px 0;
     flex-wrap: wrap;
+    /* Portfolio-style soft blue tint, block 1 (the button rows). */
+    background: #d8e6f6;
+    border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .view-group {
@@ -231,8 +234,16 @@ header h1 {
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
-    padding: 0 24px;
-    margin: 0 24px 12px;
+    padding: 4px 24px;
+    margin: 0 24px;
+    /* Same block-1 tint as smart-views-section; continues the visual band. */
+    background: #d8e6f6;
+}
+.smart-actions-section {
+    /* Last row of block 1 — round bottom corners and add bottom padding. */
+    padding-bottom: 8px;
+    margin-bottom: 0;
+    border-radius: 0 0 var(--radius) var(--radius);
 }
 
 .kind-btn {
@@ -371,9 +382,11 @@ header h1 {
     display: flex;
     align-items: center;
     gap: 16px;
-    padding: 12px 24px;
-    margin: 0 24px;
-    background: var(--surface);
+    padding: 8px 24px;
+    margin: 4px 24px 0;
+    /* Portfolio-style block 2 (the dropdown filters). Lighter tint than
+       block 1 so the two bands are visually distinct. */
+    background: #e0ecfa;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     flex-wrap: wrap;
@@ -407,14 +420,16 @@ header h1 {
 }
 
 .filter-clear {
-    display: none;
+    display: inline-block;
     cursor: pointer;
-    color: var(--text-secondary);
-    font-size: 16px;
+    color: #64748b;
+    font-size: 11px;
     line-height: 1;
-    padding: 2px 5px;
+    padding: 1px 3px;
     border-radius: 50%;
     flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: -2px;
 }
 
 .filter-clear:hover {
@@ -422,8 +437,9 @@ header h1 {
     background: var(--border);
 }
 
-.filter-select-wrap.has-value .filter-clear {
-    display: block;
+.filter-select-wrap.has-value .filter-clear,
+.filter-multi-wrap.has-value .filter-clear {
+    color: var(--text);
 }
 
 /* Multi-select checkbox filter dropdowns */
@@ -450,9 +466,6 @@ header h1 {
     background: #eff6ff;
     border-color: var(--accent);
     color: var(--accent);
-}
-.filter-multi-wrap.has-value .filter-clear {
-    display: block;
 }
 .filter-multi-dropdown {
     display: none;
@@ -619,24 +632,41 @@ header h1 {
     font-weight: 600;
 }
 
-/* Row-level visual distinction for new vs changed programs */
-.program-row.row-added td:first-child,
-.portfolio-row.row-added td:first-child {
+/* Row-level visual distinction for new vs changed programs.
+   CIM Programs table keeps its colored left-border marker; Portfolio
+   rows get a full-row very-light tint matching the same colors so a
+   user scanning the table can see status at a glance. */
+.program-row.row-added td:first-child {
     border-left: 4px solid #22c55e;
     padding-left: 10px;
 }
-
-.program-row.row-edited td:first-child,
-.portfolio-row.row-edited td:first-child {
+.program-row.row-edited td:first-child {
     border-left: 4px solid #3b82f6;
     padding-left: 10px;
 }
-
-.program-row.row-deactivated td:first-child,
-.portfolio-row.row-deactivated td:first-child {
+.program-row.row-deactivated td:first-child {
     border-left: 4px solid #ef4444;
     padding-left: 10px;
 }
+
+/* Portfolio rows: very light full-row tint (~5% opacity) instead of a
+   border marker. Kept faint so the row text stays readable and the
+   different states stand out only on glance. */
+/* Portfolio: very light pastels (default) */
+.portfolio-row.row-added td             { background: #f7fdf9; }
+.portfolio-row.row-edited td            { background: #f7fbff; }
+.portfolio-row.row-deactivated td       { background: #fdf7f7; }
+.portfolio-row.row-added:hover td       { background: #ecfdf5; }
+.portfolio-row.row-edited:hover td      { background: #eff6ff; }
+.portfolio-row.row-deactivated:hover td { background: #fef2f2; }
+/* CIM Programs / Courses: slightly darker tint than Portfolio so the
+   row status reads more clearly against the table's white background. */
+.program-row.row-added td               { background: #ecfdf3; }
+.program-row.row-edited td              { background: #eff5fe; }
+.program-row.row-deactivated td         { background: #fdeeee; }
+.program-row.row-added:hover td         { background: #dcfce7; }
+.program-row.row-edited:hover td        { background: #dbeafe; }
+.program-row.row-deactivated:hover td   { background: #fee2e2; }
 
 /* Portfolio rows for programs that don't exist in CIM (external-feed-only).
    Very light amber tint across all cells flags 'no CIM record yet'. */
@@ -960,12 +990,23 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 .header-search-clear.visible { display: block; }
 
 /* Subtle links row below the header — lower-priority actions */
-.subtle-links {
-    display: flex;
-    justify-content: flex-end;
-    gap: 16px;
-    padding: 4px 24px 0;
-    font-size: 12px;
+/* Secondary action button in the page header (e.g. "References" — opens
+   the custom-reference-curriculum manager modal on the Programs view). */
+.header-secondary-btn {
+    padding: 8px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+.header-secondary-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: #eff6ff;
 }
 .subtle-links a {
     color: var(--text-secondary);
@@ -1750,13 +1791,25 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 }
 
 .portfolio-filters-section {
+    display: block;
+    padding: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+.portfolio-filter-block {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    row-gap: 4px;
+    column-gap: 12px;
+    padding: 6px 16px;
+}
+.portfolio-filter-block-1 {
+    background: #d8e6f6;  /* a touch darker, still soft */
+    border-bottom: 1px solid #c7dcf2;
+}
+.portfolio-filter-block-2 {
+    background: #e0ecfa;  /* faint blue */
 }
 
 .portfolio-badge {
@@ -1817,32 +1870,70 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     padding: 8px 10px;
 }
 
-.portfolio-conc-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    margin-right: 5px;
-    padding: 0;
-    background: none;
-    border: 1px solid #cbd5e1;
-    border-radius: 3px;
-    font-size: 0.65em;
-    color: #64748b;
-    cursor: pointer;
-    vertical-align: middle;
-    line-height: 1;
-    flex-shrink: 0;
+/* Column resize handle on the Portfolio (and any program-table) headers.
+   Sits flush against the right edge; cursor flips to col-resize on hover. */
+.col-resize {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 5;
+    background: transparent;
 }
-.portfolio-conc-toggle:hover { background: #f1f5f9; border-color: #94a3b8; }
-.portfolio-conc-toggle.expanded { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
+.col-resize:hover,
+.col-resize:active {
+    background: rgba(59,130,246,0.35);
+}
+
+/* Parent-row expansion affordance — no dedicated toggle column.
+   The program-name cell becomes clickable when the row has children, gets
+   a semibold name + an inline chevron suffix that flips on expand. */
+.portfolio-parent-name {
+    cursor: pointer;
+}
+.portfolio-parent-name:hover {
+    background: #f1f5f9;
+}
+.portfolio-conc-chevron {
+    display: inline-block;
+    margin-left: 5px;
+    font-size: 15px;
+    line-height: 1;
+    color: #64748b;
+    vertical-align: middle;
+    transition: color 0.12s ease;
+}
+.portfolio-parent-name:hover .portfolio-conc-chevron,
+.portfolio-conc-chevron.expanded {
+    color: var(--text);
+}
+
+/* Campus quick-shortcut button (e.g. "Boston") next to the Campus filter. */
+.portfolio-campus-shortcut {
+    font-size: 0.85em;
+    padding: 4px 10px;
+    margin-left: 4px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.portfolio-campus-shortcut:hover {
+    background: #eff6ff;
+    border-color: var(--accent);
+    color: var(--accent);
+}
 
 .portfolio-curriculum-conc-row {
     background: #f8fafc;
 }
 .portfolio-curriculum-conc-row td {
-    font-size: 0.9em;
+    font-size: 12px;
     color: #475569;
     padding-top: 4px;
     padding-bottom: 4px;
@@ -1881,7 +1972,6 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 
 .portfolio-synthetic-row td {
     color: #64748b;
-    font-style: italic;
 }
 
 .portfolio-conc-badge {

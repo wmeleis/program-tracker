@@ -35,12 +35,9 @@
             </div>
             <button id="scan-btn" onclick="triggerScan()">Update</button>
             <button id="console-btn" onclick="openConsoleModal()">Console</button>
+            <button id="refs-btn" class="header-secondary-btn" onclick="openReferencesModal()" title="Manage custom reference curricula">References</button>
         </div>
     </header>
-
-    <div class="subtle-links">
-        <a href="#" id="refs-btn" onclick="openReferencesModal(); return false;" title="Manage custom reference curricula">Manage custom references</a>
-    </div>
 
     <!-- Console modal (local-only, hidden on static site) -->
     <div id="console-modal" class="modal-overlay" style="display: none;" onclick="closeConsoleModalIfBackdrop(event)">
@@ -87,6 +84,7 @@
 
     <!-- Portfolio filter bar (visible only in portfolio view) -->
     <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
+      <div class="portfolio-filter-block portfolio-filter-block-1">
         <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
             <button class="portfolio-lvl-btn" data-lvl="Undergraduate" onclick="setPortfolioLevel(this,'Undergraduate')">Undergraduate</button>
             <button class="portfolio-lvl-btn" data-lvl="Graduate" onclick="setPortfolioLevel(this,'Graduate')">Graduate</button>
@@ -101,26 +99,11 @@
             <button class="portfolio-deg-btn" data-deg="Minor" onclick="setPortfolioDegree(this,'Minor')">Minor</button>
             <button class="portfolio-deg-btn" data-deg="Dual Degree" onclick="setPortfolioDegree(this,'Dual Degree')">Dual Degree</button>
         </div>
-        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-            <!-- 'Under Development' button removed — In CIM=No covers the
-                 same rows plus the synthetic parents. -->
-            <button class="portfolio-status-btn" data-status="inworkflow" onclick="setPortfolioStatus('inworkflow')"><span class="info-tip-wrap">In Workflow<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with an active proposal currently moving through CIM approval steps.</span></span></span></button>
-            <button class="portfolio-status-btn" data-status="catalog"    onclick="setPortfolioStatus('catalog')"><span class="info-tip-wrap">Fully Approved<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have completed the full CIM approval process. May still be pending catalog publication.</span></span></span></button>
-        </div>
-        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-            <span class="portfolio-btn-row-label">In CIM:</span>
-            <button class="portfolio-incim-btn" data-incim="Yes" onclick="setPortfolioInCim(this,'Yes')">Yes</button>
-            <button class="portfolio-incim-btn" data-incim="No" onclick="setPortfolioInCim(this,'No')">No</button>
-            <span class="portfolio-btn-row-label" style="margin-left:14px">CIM Change:</span>
-            <button class="portfolio-cimchg-btn cimchg-new"    data-cimchg="New"          onclick="setPortfolioCimChange(this,'New')">New</button>
-            <button class="portfolio-cimchg-btn cimchg-edit"   data-cimchg="Change"       onclick="setPortfolioCimChange(this,'Change')">Change</button>
-            <button class="portfolio-cimchg-btn cimchg-inact"  data-cimchg="Inactivation" onclick="setPortfolioCimChange(this,'Inactivation')">Inactivation</button>
-        </div>
-        <div class="filter-group" style="flex-basis:100%; margin:0; padding:4px 0 0"></div>
+        <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
         <div class="filter-group">
             <label>College:</label>
             <div class="filter-multi-wrap" id="fmw-portfolio-filter-college">
-                <button class="filter-multi-btn" id="portfolio-filter-college" onclick="togglePortfolioMultiFilter('portfolio-filter-college', event)">— select — ▾</button>
+                <button class="filter-multi-btn" id="portfolio-filter-college" onclick="togglePortfolioMultiFilter('portfolio-filter-college', event)">All Colleges ▾</button>
                 <div class="filter-multi-dropdown" id="fmd-portfolio-filter-college"></div>
                 <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-college')" title="Clear">&times;</span>
             </div>
@@ -128,80 +111,28 @@
         <div class="filter-group">
             <label>Campus:</label>
             <div class="filter-multi-wrap" id="fmw-portfolio-filter-campus">
-                <button class="filter-multi-btn" id="portfolio-filter-campus" onclick="togglePortfolioMultiFilter('portfolio-filter-campus', event)">— select — ▾</button>
+                <button class="filter-multi-btn" id="portfolio-filter-campus" onclick="togglePortfolioMultiFilter('portfolio-filter-campus', event)">All Campuses ▾</button>
                 <div class="filter-multi-dropdown" id="fmd-portfolio-filter-campus"></div>
                 <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-campus')" title="Clear">&times;</span>
             </div>
+            <button class="portfolio-campus-shortcut" style="margin-left:14px" onclick="setPortfolioCampusBoston()" title="Filter to Boston only">Boston</button>
+        </div>
+      </div>
+      <div class="portfolio-filter-block portfolio-filter-block-2">
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span class="portfolio-btn-row-label">CIM:</span>
+            <button class="portfolio-incim-btn" data-incim="Yes" onclick="setPortfolioInCim(this,'Yes')"><span class="info-tip-wrap">In CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Program exists in CourseLeaf CIM — active in workflow or already approved/historical.</span></span></span></button>
+            <button class="portfolio-incim-btn" data-incim="No"  onclick="setPortfolioInCim(this,'No')"><span class="info-tip-wrap">Not in CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Portfolio entry has no CIM record — appears only in external feeds (SVT, IPD, OTP).</span></span></span></button>
+            <button class="portfolio-cimchg-btn cimchg-new"   data-cimchg="New"          style="margin-left:24px" onclick="setPortfolioCimChange(this,'New')">New</button>
+            <button class="portfolio-cimchg-btn cimchg-edit"  data-cimchg="Change"       onclick="setPortfolioCimChange(this,'Change')">Change</button>
+            <button class="portfolio-cimchg-btn cimchg-inact" data-cimchg="Inactivation" onclick="setPortfolioCimChange(this,'Inactivation')">Inactivation</button>
+            <button class="portfolio-status-btn" data-status="inworkflow" style="margin-left:24px" onclick="setPortfolioStatus('inworkflow')"><span class="info-tip-wrap">In Workflow<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with an active proposal currently moving through CIM approval steps.</span></span></span></button>
+            <button class="portfolio-status-btn" data-status="catalog"    onclick="setPortfolioStatus('catalog')"><span class="info-tip-wrap">Completed Approval<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs approved at least once — either observed completing CIM, or currently undergoing a Change/Inactivation proposal (which implies a prior approval). A program in a new proposal still counts here AND in "In Workflow" until it completes.</span></span></span></button>
         </div>
         <!-- Portfolio search is the header #filter-search; applyFilters()
              routes it through setPortfolioSearch() on Portfolio view. No
              separate Portfolio search input here. -->
         <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
-        <div class="filter-group">
-            <label>SVT Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch status from the SVT (Strategic Vision Team) tracker.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-roster">
-                <button class="filter-multi-btn" id="portfolio-filter-roster" onclick="togglePortfolioMultiFilter('portfolio-filter-roster', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-roster"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-roster')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group">
-            <label>GLS Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch status from the GLS (Global Launch Strategy) Roster of Record.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-gls">
-                <button class="filter-multi-btn" id="portfolio-filter-gls" onclick="togglePortfolioMultiFilter('portfolio-filter-gls', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-gls"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-gls')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group">
-            <label>IPD Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Development status from the IPD (Instructional and Program Design) Smartsheet.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-ipd">
-                <button class="filter-multi-btn" id="portfolio-filter-ipd" onclick="togglePortfolioMultiFilter('portfolio-filter-ipd', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-ipd"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-ipd')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group">
-            <label>OTP Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Approval and market status from the OTP (Office of Transformative Programs) tracker.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-otp">
-                <button class="filter-multi-btn" id="portfolio-filter-otp" onclick="togglePortfolioMultiFilter('portfolio-filter-otp', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-otp"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-otp')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
-        <div class="filter-group">
-            <label>CIM Step:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the current approval step in the CIM workflow.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-cim">
-                <button class="filter-multi-btn" id="portfolio-filter-cim" onclick="togglePortfolioMultiFilter('portfolio-filter-cim', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-cim"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-cim')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group">
-            <label>CIM Change:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by proposal type: New program, Change to existing program, or Inactivation.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-cimchange">
-                <button class="filter-multi-btn" id="portfolio-filter-cimchange" onclick="togglePortfolioMultiFilter('portfolio-filter-cimchange', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-cimchange"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-cimchange')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group">
-            <label>In CIM:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Whether the program exists in CourseLeaf CIM at all — active in workflow or already approved/historical. No means the portfolio entry comes only from an external feed (SVT, IPD, OTP) with no CIM record.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-inworkflow">
-                <button class="filter-multi-btn" id="portfolio-filter-inworkflow" onclick="togglePortfolioMultiFilter('portfolio-filter-inworkflow', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-inworkflow"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inworkflow')" title="Clear">&times;</span>
-            </div>
-        </div>
-        <div class="filter-group">
-            <label>Inact. of Admission:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Admissions inactivation status from the GLS Roster of Record.</span></span></label>
-            <div class="filter-multi-wrap" id="fmw-portfolio-filter-inactadmit">
-                <button class="filter-multi-btn" id="portfolio-filter-inactadmit" onclick="togglePortfolioMultiFilter('portfolio-filter-inactadmit', event)">— select — ▾</button>
-                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-inactadmit"></div>
-                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactadmit')" title="Clear">&times;</span>
-            </div>
-        </div>
         <div class="filter-group">
             <label>Admitting Today:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Whether the program is currently admitting students. Yes = active, no inactivation in progress. No = inactivation underway or complete.</span></span></label>
             <div class="filter-select-wrap">
@@ -209,6 +140,56 @@
                 <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inacttoday')" title="Clear">&times;</span>
             </div>
         </div>
+        <div class="filter-group">
+            <label>Inact. of Admission:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Admissions inactivation status from the GLS Roster of Record.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-inactadmit">
+                <button class="filter-multi-btn" id="portfolio-filter-inactadmit" onclick="togglePortfolioMultiFilter('portfolio-filter-inactadmit', event)">All Semesters ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-inactadmit"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactadmit')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Status from the SVT Source Data Smartsheet (Intake, Discovery, Launch in Progress, Complete, etc.).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-roster">
+                <button class="filter-multi-btn" id="portfolio-filter-roster" onclick="togglePortfolioMultiFilter('portfolio-filter-roster', event)">All Statuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-roster"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-roster')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Sub-status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch Sub-Status from the SVT Source Data Smartsheet.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-substatus">
+                <button class="filter-multi-btn" id="portfolio-filter-substatus" onclick="togglePortfolioMultiFilter('portfolio-filter-substatus', event)">All Sub-statuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-substatus"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-substatus')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Speed to Market:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Speed to Market flag from the SVT Source Data Smartsheet (True / False / blank).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-speed">
+                <button class="filter-multi-btn" id="portfolio-filter-speed" onclick="togglePortfolioMultiFilter('portfolio-filter-speed', event)">All ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-speed"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-speed')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>GLS Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch status from the GLS (Global Launch Strategy) Roster of Record.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-gls">
+                <button class="filter-multi-btn" id="portfolio-filter-gls" onclick="togglePortfolioMultiFilter('portfolio-filter-gls', event)">All GLS ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-gls"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-gls')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>OTP Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Approval and market status from the OTP (Office of Transformative Programs) tracker.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-otp">
+                <button class="filter-multi-btn" id="portfolio-filter-otp" onclick="togglePortfolioMultiFilter('portfolio-filter-otp', event)">All OTP ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-otp"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-otp')" title="Clear">&times;</span>
+            </div>
+        </div>
+      </div>
     </section>
 
     <!-- Portfolio table toolbar -->
@@ -240,7 +221,7 @@
             <span class="info-tip-wrap"><button class="proposal-btn" id="btn-proposal-new" onclick="setProposalFilter('Added')">New Programs</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to create a brand-new academic program.</span></span></span>
             <span class="info-tip-wrap"><button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to modify an existing program's requirements, name, or structure.</span></span></span>
             <span class="info-tip-wrap"><button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to retire and stop admitting students to an existing program.</span></span></span>
-            <span class="info-tip-wrap"><button class="proposal-btn" id="btn-proposal-complete" onclick="togglePipelineFilter('__complete__')">Complete</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have finished the full approval workflow and are no longer in the active pipeline.</span></span></span>
+            <span class="info-tip-wrap"><button class="proposal-btn" id="btn-proposal-complete" onclick="setProposalFilter('__complete__')">Complete</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have finished the full approval workflow and are no longer in the active pipeline.</span></span></span>
         </div>
     </section>
 
@@ -251,6 +232,7 @@
         <button class="kind-btn" data-kind="phd" onclick="setProgramKindFilter('phd')">PhD</button>
         <button class="kind-btn" data-kind="profdoc" onclick="setProgramKindFilter('profdoc')">Prof. Doctorate</button>
         <button class="kind-btn" data-kind="certificate" onclick="setProgramKindFilter('certificate')">Certificate</button>
+        <button class="kind-btn" data-kind="cags" onclick="setProgramKindFilter('cags')">CAGS</button>
         <button class="kind-btn" data-kind="minor" onclick="setProgramKindFilter('minor')">Minor</button>
         <button class="kind-btn" data-kind="plusone" onclick="setProgramKindFilter('plusone')">PlusOne</button>
         <button class="kind-btn" data-kind="concentration" onclick="setProgramKindFilter('concentration')">Concentration</button>

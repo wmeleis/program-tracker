@@ -45,6 +45,23 @@ scan_status = {
     'progress': 0,  # 0-100
 }
 
+# Path to scan log and mismatch files
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+_SCAN_LOG_PATH = os.path.join(_DATA_DIR, 'scan_log.json')
+_MISMATCHES_PATH = os.path.join(_DATA_DIR, 'portfolio_mismatches.json')
+_MAX_SCAN_LOG = 50
+
+def _load_scan_log():
+    try:
+        with open(_SCAN_LOG_PATH) as f:
+            return _json.load(f)
+    except Exception:
+        return []
+
+def _save_scan_log(entries):
+    with open(_SCAN_LOG_PATH, 'w') as f:
+        _json.dump(entries[-_MAX_SCAN_LOG:], f, indent=2)
+
 @app.route('/')
 def dashboard():
     """Serve the main dashboard."""
@@ -369,9 +386,26 @@ def api_scan_status():
 
 @app.route('/api/session/check')
 def api_session_check():
-    """Quickly verify that the CourseLeaf session is authenticated."""
-    result = check_courseleaf_session()
-    status_code = 200 if result.get('ok') else 503
+    """Verify the CourseLeaf session and all portfolio data source logins."""
+    from fetch_portfolio_data import check_portfolio_sessions
+    cim = check_courseleaf_session()
+    portfolio = check_portfolio_sessions()
+    all_ok = cim.get('ok') and all(s['ok'] for s in portfolio)
+    missing = []
+    if not cim.get('ok'):
+        missing.append(f"CIM: {cim.get('detail', 'session invalid')}")
+    for s in portfolio:
+        if not s['ok']:
+            missing.append(f"{s['source']}: {s['detail']}")
+    result = {
+        'ok': all_ok,
+        'cim': cim,
+        'portfolio': portfolio,
+    }
+    if missing:
+        result['error'] = 'session_invalid'
+        result['detail'] = ' | '.join(missing)
+    status_code = 200 if all_ok else 503
     return jsonify(result), status_code
 
 
@@ -487,14 +521,20 @@ def api_scan_trigger():
     if scan_status['running']:
         return jsonify({'error': 'Scan already in progress'}), 409
 
-    # Fast session probe (~1-3s); abort scan if not logged in / Chrome unreachable
+    # Fast session probe (~1-3s per source); abort scan if any required login is missing.
+    from fetch_portfolio_data import check_portfolio_sessions
     session = check_courseleaf_session()
+    portfolio_sessions = check_portfolio_sessions()
+    missing = []
     if not session.get('ok'):
-        scan_status['error'] = session.get('detail', 'CourseLeaf session invalid')
-        return jsonify({
-            'error': session.get('error', 'session_invalid'),
-            'detail': session.get('detail', 'CourseLeaf session invalid')
-        }), 503
+        missing.append(f"CIM: {session.get('detail', 'session invalid')}")
+    for s in portfolio_sessions:
+        if not s['ok']:
+            missing.append(f"{s['source']}: {s['detail']}")
+    if missing:
+        detail = ' | '.join(missing)
+        scan_status['error'] = detail
+        return jsonify({'error': 'session_invalid', 'detail': detail}), 503
 
     def do_quick_role_update(label='quick role update'):
         """Force-fetch every DB-active program and course's workflow div,
@@ -566,6 +606,7 @@ def api_scan_trigger():
             scan_status['error'] = None
             scan_status['phase'] = 'Discovering programs (discovering roles)...'
             scan_status['progress'] = 5
+            started_at = datetime.now().isoformat()
 
             # Scan programs (full path: A1 discovery + force-fetch + reconcile)
             print("\n>>> STARTING RUN_FULL_SCAN", flush=True)
@@ -743,8 +784,15 @@ def api_scan_trigger():
                 # or expired session must not block the rest of the scan.
                 print(f"Regulatory fetch error: {e}")
 
-            # Portfolio: re-extract concentrations from freshly-updated curriculum_html.
-            # Best-effort — a failure must not block export or deployment.
+            # Portfolio: re-download feeds from SharePoint/Smartsheet, then ingest.
+            # Both steps are best-effort — failures must not block export or deployment.
+            try:
+                import subprocess, sys
+                script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fetch_portfolio_data.py')
+                subprocess.run([sys.executable, script], check=True, timeout=300)
+                print("Portfolio feeds downloaded.")
+            except Exception as e:
+                print(f"Portfolio feed download error (non-fatal): {e}")
             try:
                 from portfolio_ingest import ingest as portfolio_ingest
                 portfolio_ingest()
@@ -805,10 +853,32 @@ def api_scan_trigger():
                     result.get('programs_with_workflow', 0) if result else 0,
                     result.get('changes', 0) if result else 0,
                 )
+                log_entries = _load_scan_log()
+                log_entries.append({
+                    'started_at': started_at,
+                    'completed_at': completion_time,
+                    'programs_scanned': result.get('programs_scanned', 0) if result else 0,
+                    'changes': result.get('changes', 0) if result else 0,
+                    'error': None,
+                })
+                _save_scan_log(log_entries)
             except Exception as e:
                 print(f"Failed to record scan completion: {e}")
         except Exception as e:
             scan_status['error'] = str(e)
+            try:
+                completion_time = datetime.now().isoformat()
+                log_entries = _load_scan_log()
+                log_entries.append({
+                    'started_at': started_at,
+                    'completed_at': completion_time,
+                    'programs_scanned': 0,
+                    'changes': 0,
+                    'error': str(e),
+                })
+                _save_scan_log(log_entries)
+            except Exception:
+                pass
         finally:
             scan_status['running'] = False
             scan_status['phase'] = ''
@@ -818,6 +888,26 @@ def api_scan_trigger():
     thread.start()
 
     return jsonify({'status': 'scan_started'})
+
+
+@app.route('/api/console')
+def api_console():
+    """Return scan history and portfolio mismatch data for the Console modal."""
+    scan_log = _load_scan_log()
+    mismatches = {}
+    mismatch_report = {}
+    try:
+        with open(_MISMATCHES_PATH) as f:
+            mismatches = _json.load(f)
+    except Exception:
+        pass
+    _REPORT_PATH = os.path.join(_DATA_DIR, 'portfolio_mismatch_report.json')
+    try:
+        with open(_REPORT_PATH) as f:
+            mismatch_report = _json.load(f)
+    except Exception:
+        pass
+    return jsonify({'scan_log': scan_log, 'mismatches': mismatches, 'mismatch_report': mismatch_report})
 
 
 @app.route('/api/colleges')

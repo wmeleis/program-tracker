@@ -501,13 +501,22 @@ def _gate_html(cache_bust: int) -> str:
   }
 
   async function fetchAndDecrypt(path) {
-    if (cache.has(path)) return cache.get(path);
-    const r = await fetch(path + '.enc?v=' + CACHE_BUST);
+    // data.json is the primary program list and is re-fetched every 2 min
+    // by the dashboard's auto-refresh loop — always pull fresh from origin
+    // (no in-memory cache, no browser cache). The bulkier lazy-loaded files
+    // (curriculum.json, reference.json, regulatory.json, campus_groups.json)
+    // are still cached after first fetch since they're requested on-demand
+    // from row expansions and don't need to track live scan updates.
+    const noCache = (path === 'data.json');
+    if (!noCache && cache.has(path)) return cache.get(path);
+    const ts = Date.now();
+    const r = await fetch(path + '.enc?v=' + CACHE_BUST + '&t=' + ts,
+                          {cache: 'no-store'});
     if (!r.ok) throw new Error('fetch ' + path + '.enc failed');
     const blob = new Uint8Array(await r.arrayBuffer());
     const plaintext = await decryptBlob(cryptoKey, blob);
     const obj = JSON.parse(plaintext);
-    cache.set(path, obj);
+    if (!noCache) cache.set(path, obj);
     return obj;
   }
 

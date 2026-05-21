@@ -324,14 +324,43 @@ def run_js_in_tab(tab_identifier, js_code, match_by='title', timeout=30):
 def scrape_approve_pages_role(role_name):
     """Select a role on the Approve Pages tab and get pending programs with IDs.
 
-    Uses async poll-until-stable on the pending-list DOM: CourseLeaf loads the
-    list asynchronously after `showPendingList()` fires, and a hardcoded short
-    wait undercounts roles where the fetch takes longer (leaving programs
-    invisible and their dashboard bucket showing 0). We poll up to 15s,
-    returning as soon as the extracted list is non-empty and stable across
-    two consecutive polls, or after max wait if it's still empty (no programs
-    at that role is a valid state).
+    NAVIGATION-PER-ROLE: Before each query, navigate the Approve Pages tab to
+    `?role=X` and let the page fully reload. CIM's `showPendingList(role)` JS
+    function mutates the listing DOM in-place; after many sequential role
+    queries, the DOM can drift into a state where some role queries return
+    stale or partial data (observed: a deployment program at Provost Review
+    that was missed entirely until we forced a Cmd-R on the tab). A full
+    navigation gives each query a clean server-fresh DOM.
+
+    Cost: each role query adds ~2-3s for page reload. With ~215 roles in a
+    full heal, that's ~7-10 min extra wall-clock — accepted in exchange for
+    consistency.
+
+    Uses async poll-until-stable on the pending-list DOM after navigation:
+    CourseLeaf still populates the list via AJAX after page load. We poll
+    up to 20s for non-empty stability, or bail early after 12 consecutive
+    empty polls + ≥7s elapsed (legitimately empty role).
     """
+    import urllib.parse
+    encoded = urllib.parse.quote(role_name)
+    target_url = (
+        f"https://nextcatalog.northeastern.edu/courseleaf/approve/?role={encoded}"
+    )
+
+    # Step 1: navigate the Approve Pages tab to the role URL. window.location
+    # assignment triggers a full page reload — the existing JS context dies
+    # and a fresh DOM is built from the server response.
+    nav_js = f'window.location.href = {json.dumps(target_url)};'
+    run_js_in_tab("courseleaf/approve", nav_js, match_by='url', timeout=10)
+
+    # Step 2: give the page a moment to start the navigation + initial render
+    # before our extraction JS runs on the new page. Without this brief wait,
+    # run_js_in_tab can execute against the OLD page that's mid-unload.
+    time.sleep(2)
+
+    # Step 3: extract from the fresh DOM via the same poll-until-stable
+    # mechanism we used pre-navigation refactor (without the showPendingList
+    # call — the URL parameter triggers CIM to auto-render the role queue).
     poll_tag = f"__approve_{int(time.time() * 1000)}"
     js = f'''
 (function() {{
@@ -342,19 +371,6 @@ def scrape_approve_pages_role(role_name):
     holder.style.display = "none";
     holder.setAttribute("data-status", "running");
     document.body.appendChild(holder);
-
-    var select = document.querySelector("select");
-    if (!select) {{
-        holder.textContent = JSON.stringify({{error: "no select"}});
-        holder.setAttribute("data-status", "done");
-        return "fired";
-    }}
-    select.value = {json.dumps(role_name)};
-    if (typeof showPendingList === "function") {{
-        showPendingList(select.value);
-    }} else {{
-        select.dispatchEvent(new Event("change", {{bubbles: true}}));
-    }}
 
     function extract() {{
         var text = document.body.innerText;
@@ -378,7 +394,15 @@ def scrape_approve_pages_role(role_name):
     }}
 
     // Poll every 500ms. Return when the list has stabilized (same size across
-    // 3 consecutive polls) and is non-empty, or after a 15s ceiling.
+    // 3 consecutive polls) and is non-empty, or after a 20s ceiling.
+    //
+    // EMPTY-LIST DETECTION: CIM populates the role queue via AJAX. The
+    // request can take 4-8 seconds to complete on some roles. If we bail
+    // too early on "consistently empty", we miss real programs and the
+    // tracker then falls back to stale per-program workflow divs.
+    // Threshold tuned to: 12 consecutive empty polls AND >=7s elapsed.
+    // That's enough time for slow AJAX to land, while still bailing
+    // promptly on legitimately empty roles (~7-8 sec).
     var lastSize = -1;
     var stableCount = 0;
     var elapsed = 0;
@@ -388,12 +412,8 @@ def scrape_approve_pages_role(role_name):
         if (progs.length === lastSize) stableCount++;
         else stableCount = 0;
         lastSize = progs.length;
-        // Done when we've seen the same non-zero count 3 polls in a row,
-        // or 5 consecutive empty polls after >=3s (most program roles
-        // legitimately have nothing — don't waste 15s on each), or 15s
-        // hard ceiling.
-        var stableEmptyDone = (progs.length === 0 && stableCount >= 5 && elapsed >= 3000);
-        if ((progs.length > 0 && stableCount >= 3) || stableEmptyDone || elapsed >= 15000) {{
+        var stableEmptyDone = (progs.length === 0 && stableCount >= 12 && elapsed >= 7000);
+        if ((progs.length > 0 && stableCount >= 3) || stableEmptyDone || elapsed >= 20000) {{
             clearInterval(interval);
             holder.textContent = JSON.stringify(progs);
             holder.setAttribute("data-status", "done");
@@ -408,7 +428,7 @@ def scrape_approve_pages_role(role_name):
 
     check_js = f'''(function(){{ var el = document.getElementById("{poll_tag}"); if (!el) return "MISSING"; return el.getAttribute("data-status") === "done" ? el.textContent : "RUNNING"; }})();'''
     payload = None
-    for _ in range(20):  # up to ~20s total
+    for _ in range(25):  # up to ~25s total (JS poll loop now bounded at 20s)
         time.sleep(1)
         r = run_js_in_tab("courseleaf/approve", check_js, match_by='url', timeout=10)
         if r and r != 'missing value' and r != 'RUNNING' and r != 'MISSING':
@@ -670,9 +690,14 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                         result.meta.proposal_type = "Program Revision Proposal";
                     }}
                 }}
+                // <deletejustification> is captured as data only — NEVER
+                // overrides proposal_type. CIM uses this field for any
+                // proposal that removes the original program record from
+                // the catalog (true inactivations AND splits/merges/major
+                // restructures). HTML / <statustype> are the authoritative
+                // proposal-type signals; trust them. See CLAUDE.md.
                 var dj = getXml("deletejustification");
                 if (dj) {{
-                    result.meta.proposal_type = "Inactivation Proposal";
                     result.meta.delete_justification = dj;
                 }}
             }})
@@ -1458,8 +1483,28 @@ def run_full_scan(force_fetch_only=False):
             if force_fetch_only:
                 existing_step = (info.get('current_step') or '').strip()
                 if existing_step and existing_step != current_step:
-                    step_names = {(s.get('name') or '').strip() for s in steps}
-                    if existing_step not in step_names:
+                    name_to_order = {(s.get('name') or '').strip(): s.get('order', -1)
+                                     for s in steps}
+                    existing_order = name_to_order.get(existing_step, None)
+                    walk_order     = name_to_order.get(current_step, None)
+                    # Case A: existing_step isn't in the workflow div at all
+                    # — it's a parallel-branch or obscure-role assignment. The
+                    # next full scan will re-verify via Approve Pages; quick
+                    # updates have no business overwriting it. Preserve.
+                    if existing_order is None:
+                        current_step = existing_step
+                        current_emails = ''
+                    # Case B: walk's result is *earlier* in the workflow than
+                    # existing_step. In parallel-branch programs, the walk
+                    # locks onto the linear branch (often a regulatory step)
+                    # while Approve Pages reports the parallel branch (e.g.,
+                    # Program Graduate Provost Review) which is further along
+                    # the linear ordering. Quick updates can't tell which is
+                    # real, so default to NOT regressing — preserve existing.
+                    # Genuine rollbacks will be picked up by the next full
+                    # discovery scan (≤50 min). Forward advancement (same or
+                    # later order) is allowed through unchanged.
+                    elif walk_order is not None and walk_order < existing_order:
                         current_step = existing_step
                         current_emails = ''
         else:
@@ -2046,63 +2091,13 @@ def heal_stale_program_steps(log=False, active_only=True):
     if log:
         print(f"\nLive: {len(live_assignments)} unique programs (pre-validation)")
 
-    # Cross-check live_assignments against each program's per-program
-    # workflow div. Approve Pages' pending list can have stale entries
-    # caused by a CIM bug — `showPendingList(role)` for an EMPTY role
-    # doesn't clear the previous role's content, and our body.innerText
-    # polling can lock onto the prior role's list and report it as the
-    # new role's pending list.
-    #
-    # SAFETY: We only DROP a program from live_assignments when we have
-    # POSITIVE proof of its actual state — that is, when we successfully
-    # fetched its workflow div, got back ≥1 step (i.e., the workflow
-    # exists), and none of those steps is marked 'current'. An empty
-    # steps array means the fetch failed (session expired, transient
-    # error, etc.) — we DO NOT treat that as "program is complete"
-    # because we'd be guessing.
-    #
-    # We also override the role mapping when the workflow div tells us
-    # the program is actually at a different step than Approve Pages
-    # claims: in that case, set live_assignments[pid] to the live current
-    # step from the workflow div.
-    if live_assignments:
-        candidate_ids = list(live_assignments.keys())
-        if log:
-            print(f"  Cross-checking {len(candidate_ids)} candidates against "
-                  f"per-program workflow divs...")
-        details = batch_fetch_program_details(candidate_ids, batch_size=25)
-        confirmed_complete = []
-        corrected = 0
-        unverifiable = 0
-        for pid, d in details.items():
-            steps = d.get('steps') or []
-            html_err = d.get('html_error')
-            if html_err or not steps:
-                # Fetch failed or workflow div missing — UNKNOWN, leave alone.
-                unverifiable += 1
-                continue
-            current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
-            if current is None:
-                # Workflow div has steps but none current → program is complete.
-                confirmed_complete.append(pid)
-            elif pid in live_assignments and current != live_assignments[pid].get('role'):
-                # Workflow div says the program is at a different step than
-                # the Approve Pages pending list said. Trust the workflow div.
-                live_assignments[pid] = dict(live_assignments[pid], role=current)
-                corrected += 1
-        if confirmed_complete:
-            if log:
-                print(f"  Confirmed complete (workflow div has no current step): "
-                      f"{len(confirmed_complete)} programs. Examples: "
-                      f"{confirmed_complete[:5]}")
-            for pid in confirmed_complete:
-                live_assignments.pop(pid, None)
-        if log:
-            print(f"  Corrected role for {corrected} programs (workflow div "
-                  f"disagreed with Approve Pages)")
-            if unverifiable:
-                print(f"  {unverifiable} programs unverifiable (fetch failed) — left as-is")
-            print(f"  After validation: {len(live_assignments)} live programs")
+    # Policy: Approve Pages is the authoritative source of truth for which
+    # role a program is currently at. CIM's per-program workflow div can
+    # lag (the `<li class="current">` marker stays on the previous step
+    # for a while after a reviewer approves), and the user has confirmed
+    # that what they see at /courseleaf/approve/?role=X is the canonical
+    # state. So we no longer cross-check workflow divs to "correct"
+    # live_assignments here — whatever Approve Pages reports stands.
 
     # Step 2: snapshot current DB state
     db_programs = {p['id']: p for p in get_all_programs()}
@@ -2156,24 +2151,16 @@ def heal_stale_program_steps(log=False, active_only=True):
     if candidate_ids:
         if log:
             print(f"  {len(candidate_ids)} candidate(s) for current_step "
-                  f"clear (in DB but not in live). Verifying...")
-        verify_details = batch_fetch_program_details(candidate_ids, batch_size=25)
-        confirmed_complete = []
-        rebound = {}  # pid -> live current step from workflow div
-        unverifiable = 0
-        for pid, d in verify_details.items():
-            steps = d.get('steps') or []
-            html_err = d.get('html_error')
-            if html_err or not steps:
-                unverifiable += 1
-                continue
-            current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
-            if current is None:
-                confirmed_complete.append(pid)
-            else:
-                rebound[pid] = current
+                  f"clear (in DB but not in any live Approve Pages queue). "
+                  f"Clearing per Approve-Pages-is-truth policy.")
+        # Policy: Approve Pages is authoritative. If a DB program no longer
+        # appears in any live role queue, treat its current_step as cleared
+        # (it has moved off all visible queues — either completed, withdrawn,
+        # or at a non-tracked obscure state). The previous "verify via
+        # workflow div before clearing" gate is removed because the workflow
+        # div is often stale relative to Approve Pages.
         with get_db() as conn:
-            for pid in confirmed_complete:
+            for pid in candidate_ids:
                 conn.execute(
                     "UPDATE programs SET current_step = '', "
                     "current_approver_emails = '', last_updated = ? "
@@ -2181,21 +2168,9 @@ def heal_stale_program_steps(log=False, active_only=True):
                     (datetime.now().isoformat(), pid),
                 )
                 fixed += 1
-            for pid, step in rebound.items():
-                conn.execute(
-                    "UPDATE programs SET current_step = ?, last_updated = ? "
-                    "WHERE id = ?",
-                    (step, datetime.now().isoformat(), pid),
-                )
-                fixed += 1
         if log:
-            if confirmed_complete:
-                print(f"    Cleared {len(confirmed_complete)} confirmed-complete programs")
-            if rebound:
-                print(f"    Reassigned {len(rebound)} programs to their actual workflow step "
-                      f"(Approve Pages had dropped them, but workflow div shows they're still active)")
-            if unverifiable:
-                print(f"    Left {unverifiable} unchanged (workflow div fetch failed)")
+            print(f"    Cleared current_step for {len(candidate_ids)} programs "
+                  f"(no longer surfaced by Approve Pages anywhere)")
 
     # Step 3c: brand-new programs — batch-fetch details for full metadata
     if new_program_ids:
@@ -2777,7 +2752,9 @@ def compute_db_fingerprint():
         "FROM catalog_pages ORDER BY id",
         "SELECT id, program_name, college, campus, cim_program_id, cim_step, "
         "cim_completion_date, cim_change_type, inactivation_admission, otp_status, ipd_status, "
-        "roster_status, roster_launch_date, market_2025, performance_2025, "
+        "svt_status, roster_sub_status, roster_proposal_type, roster_launch_date, "
+        "speed_to_market, gls_status, "
+        "market_2025, performance_2025, "
         "market_score_2025, performance_score_2025, concentration_of "
         "FROM portfolio_programs ORDER BY id",
     ]

@@ -27,8 +27,13 @@ BROWSER_APP = os.environ.get("BROWSER_APP", "Google Chrome")
 
 SHAREPOINT_URL = "https://northeastern-my.sharepoint.com/:x:/r/personal/g_wahhab_northeastern_edu/Documents/Optimization,%20Withdrawal,%20and%20Deactivation%20Tracker.xlsx?d=w8de2224c326e4b8eb46cdbc819a6ff9d&csf=1&web=1&e=DblQiu"
 SMARTSHEET_URL = "https://app.smartsheet.com/b/publish?EQBCT=65a022ed48d94beea1d54ef5b933fc48"
-GLS_ROSTER_HUB = "https://app.smartsheet.com/b/publish?EQBCT=547ce640b5bf44809634971051a0bf62"
 TABLEAU_PAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'tableau_pat.json')
+
+# SVT Source Data — fetched via Smartsheet REST API using a personal access
+# token stored at ~/.smartsheet_token (mode 600, outside git). Replaces the
+# old publish-URL Chrome-scraped GLS Roster pipeline.
+SVT_SHEET_ID = 3889012330680196
+SVT_TOKEN_PATH = os.path.expanduser('~/.smartsheet_token')
 
 # Sub-dashboard tokens extracted from the GLS hub config API
 _CAMPUS_DASHBOARDS = {
@@ -314,6 +319,43 @@ def _check_smartsheet_tab(source, url):
     return {'source': source, 'ok': True, 'detail': ''}
 
 
+def _check_svt_api_token():
+    """Verify ~/.smartsheet_token exists and works (one-time API health probe)."""
+    if not os.path.exists(SVT_TOKEN_PATH):
+        return {
+            'source': 'Smartsheet API (SVT)',
+            'ok': False,
+            'detail': (f'SVT API token file not found at {SVT_TOKEN_PATH}. '
+                       'Generate one in Smartsheet → Personal Settings → API Access '
+                       'and write the token to that path (chmod 600).'),
+        }
+    try:
+        with open(SVT_TOKEN_PATH) as f:
+            token = f.read().strip()
+        if not token:
+            raise ValueError('empty token file')
+        # Lightweight probe — fetch sheet metadata only (1 row).
+        import urllib.request
+        req = urllib.request.Request(
+            f'https://api.smartsheet.com/2.0/sheets/{SVT_SHEET_ID}?pageSize=1',
+            headers={'Authorization': f'Bearer {token}'},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            if r.status == 200:
+                return {'source': 'Smartsheet API (SVT)', 'ok': True, 'detail': ''}
+            return {
+                'source': 'Smartsheet API (SVT)',
+                'ok': False,
+                'detail': f'HTTP {r.status} from Smartsheet API',
+            }
+    except Exception as e:
+        return {
+            'source': 'Smartsheet API (SVT)',
+            'ok': False,
+            'detail': f'SVT API probe failed: {e}',
+        }
+
+
 def check_portfolio_sessions():
     """Verify that all required portfolio data sources are accessible in Chrome.
     Opens tabs automatically if not already open.
@@ -324,7 +366,7 @@ def check_portfolio_sessions():
     results.append(_check_sharepoint_tab('SharePoint (OTP)', SHAREPOINT_URL, _SP_OTP_FRAGMENT))
     results.append(_check_sharepoint_tab('SharePoint (Regulatory)', _SP_REGULATORY_URL, _SP_REGULATORY_FRAGMENT))
     results.append(_check_smartsheet_tab('Smartsheet (IPD)', SMARTSHEET_URL))
-    results.append(_check_smartsheet_tab('Smartsheet (GLS Roster)', GLS_ROSTER_HUB))
+    results.append(_check_svt_api_token())  # SVT now via API, not Chrome tab
     return results
 
 
@@ -468,12 +510,66 @@ def fetch_smartsheet():
 
 
 # ---------------------------------------------------------------------------
-# GLS Roster of Record: extract rows from all campus + college sub-dashboards
+# SVT Source Data — fetched via Smartsheet REST API
+# ---------------------------------------------------------------------------
+# Replaces the old Chrome-scraped GLS Roster pipeline. Reads the API token
+# from ~/.smartsheet_token (mode 600, gitignored), downloads the sheet's
+# full JSON to data/portfolio_feeds/svt.json. portfolio_ingest.parse_svt()
+# consumes that JSON.
+
+def fetch_svt_sheet():
+    """Download the SVT Source Data sheet as JSON via the Smartsheet REST API.
+
+    Requires ~/.smartsheet_token containing a Smartsheet Personal Access
+    Token (generated under Account → Personal Settings → API Access).
+    """
+    import urllib.request, urllib.error
+    print("\n--- SVT Source Data (Smartsheet API) ---")
+    if not os.path.exists(SVT_TOKEN_PATH):
+        print(f"  SKIP — no token at {SVT_TOKEN_PATH}")
+        return
+    try:
+        with open(SVT_TOKEN_PATH) as f:
+            token = f.read().strip()
+    except Exception as e:
+        print(f"  ERROR reading token: {e}")
+        return
+    if not token:
+        print("  SKIP — token file is empty")
+        return
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "svt.json")
+    url = f"https://api.smartsheet.com/2.0/sheets/{SVT_SHEET_ID}"
+    req = urllib.request.Request(url, headers={
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/json',
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+        with open(out_path, 'wb') as f:
+            f.write(data)
+        # Quick stats
+        import json as _json
+        d = _json.loads(data)
+        print(f"  Saved: {out_path}  ({d.get('totalRowCount', '?')} rows, "
+              f"{len(d.get('columns', []))} columns)")
+    except urllib.error.HTTPError as e:
+        print(f"  ERROR HTTP {e.code}: {e.reason}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Legacy GLS Roster scraper (REMOVED — replaced by fetch_svt_sheet() above).
+# Old _CAMPUS_DASHBOARDS / _COLLEGE_DASHBOARDS dicts and the publish-URL
+# Chrome scraper that fed the SVT roster data are gone. The JS extractor
+# that follows is dead code preserved only for historical reference; it is
+# no longer called from anywhere in the pipeline.
 # ---------------------------------------------------------------------------
 
-# JS to extract program rows from a Smartsheet grid. Each data row maps to:
-#   program_name \t col5_value \t col5_label \t status \t sub_status \t proposal_type \t launch_date
-_ROSTER_EXTRACT_JS = r"""
+_ROSTER_EXTRACT_JS_DEAD = r"""
 (function() {
     var rows = Array.from(document.querySelectorAll('tr'));
     if (rows.length < 4) return '__NOT_READY__';
@@ -717,6 +813,6 @@ if __name__ == "__main__":
     print(f"Output  : {OUTPUT_DIR}")
     fetch_sharepoint()
     fetch_smartsheet()
-    fetch_roster_dashboards()
+    fetch_svt_sheet()         # was fetch_roster_dashboards() — now API-based
     fetch_gls_tableau()
     print("\nDone.")

@@ -10,8 +10,15 @@ let detailTabState = {}; // programId/courseId -> 'workflow' | 'curriculum'
 let currentSort = { column: 'name', direction: 'asc' };
 let pipelineFilter = null;
 let smartView = 'all';
-let typeFilter = '';
-let proposalFilter = '';
+// Multi-select. Holds any combination of 'Undergraduate', 'Graduate',
+// 'Continuing', 'Other', etc. Empty set = no type filter.
+let typeFilter = new Set();
+// Multi-select. Holds any combination of 'Added', 'Edited', 'Deactivated',
+// and '__complete__'. Empty set = no proposal-type filter (show everything,
+// with the default "hide completed" rule). '__complete__' is intentionally
+// inside this set (rather than living in pipelineFilter as it used to) so
+// the user can combine Complete with proposal-type buttons in any way.
+let proposalFilter = new Set();
 // Single-select: at most one kind active at a time. '' = no filter.
 // Click the active button again to deselect (toggle).
 let programKindFilter = '';
@@ -55,15 +62,18 @@ const RECENT_CHANGE_DAYS = 14;
 const PROGRAM_KINDS = [
     { id: 'bachelors',    label: "Bachelor's"    },
     { id: 'masters',      label: "Master's"      },
-    { id: 'doctorate',    label: 'Doctorate'     },
+    { id: 'phd',          label: 'PhD'           },
+    { id: 'profdoc',      label: 'Prof. Doctorate' },
     { id: 'certificate',  label: 'Certificate'   },
+    { id: 'cags',         label: 'CAGS'          },
     { id: 'minor',        label: 'Minor'         },
     { id: 'plusone',      label: 'PlusOne'       },
     { id: 'concentration',label: 'Concentration' },
     { id: 'dual',         label: 'Dual Degree'   },
 ];
 
-const DOCTORATE_DEGREES = new Set(['PhD','EdD','EDD','DNP','DPT','DPS','DLP','PharmD','DMSc','JD']);
+const PHD_DEGREES = new Set(['PhD','PHD']);
+const PROF_DOCTORATE_DEGREES = new Set(['EdD','EDD','DNP','DPT','DPS','DLP','PharmD','PHARMD','DMSc','DMSC','JD']);
 
 function isTemplateProgram(p) {
     // CourseLeaf "TEMPLATE: ..." rows aren't real programs — they're
@@ -83,11 +93,15 @@ function classifyProgramKind(p) {
     // Dual: " / " joining two distinct degree-bearing program names,
     // e.g. "Law, JD / Public Health, MPH". Also matches ", JD/MS" style.
     if (/\s\/\s/.test(name) || /,\s*[A-Z]{2,7}\s*\/\s*[A-Z]{2,7}/.test(name)) return 'dual';
+    // CAGS is its own bucket — checked before "certificate" so the name
+    // "Certificate of Advanced Graduate Study" doesn't route to plain certs.
+    if (degree === 'CAGS' || /,\s*CAGS\b/.test(name) || /Certificate of Advanced Graduate Study/i.test(name)) return 'cags';
     if (lname.indexOf('certificate') !== -1) return 'certificate';
 
     // Degree-code-driven buckets.
-    if (degree === 'CAGS' || degree === 'CERTP') return 'certificate';
-    if (DOCTORATE_DEGREES.has(degree)) return 'doctorate';
+    if (degree === 'CERTP') return 'certificate';
+    if (PHD_DEGREES.has(degree)) return 'phd';
+    if (PROF_DOCTORATE_DEGREES.has(degree)) return 'profdoc';
     if (degree === 'LLM' || /,\s*MLS\b/.test(name)) return 'masters';
     if (/^B/.test(degree)) return 'bachelors';
     if (/^M/.test(degree)) return 'masters';
@@ -115,17 +129,18 @@ function switchView(view) {
     const btnPort = document.getElementById('btn-portfolio');
     if (btnPort) btnPort.classList.toggle('active', view === 'portfolio');
 
-    // "Manage custom references" is only relevant on the Programs view
-    const refsLink = document.querySelector('.subtle-links');
-    if (refsLink) refsLink.style.display = view === 'programs' ? '' : 'none';
+    // The "References" button (manage custom reference curricula) is only
+    // relevant on the Programs view — hide on Courses / Catalog / Portfolio.
+    const refsBtn = document.getElementById('refs-btn');
+    if (refsBtn) refsBtn.style.display = view === 'programs' ? '' : 'none';
 
     // Reset filters when switching views
     pipelineFilter = null;
-    typeFilter = '';
-    proposalFilter = '';
+    typeFilter = new Set();
+    proposalFilter = new Set();
     programKindFilter = '';
     document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.proposal-btn').forEach(btn => btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact'));
+    document.querySelectorAll('.proposal-btn').forEach(btn => btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact', 'active-complete'));
     document.querySelectorAll('.smart-view-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.kind-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById('filter-college').value = '';
@@ -165,7 +180,10 @@ function switchView(view) {
         if (portfolioFilters)    portfolioFilters.style.display = 'none';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'none';
         if (pipelineSection)     pipelineSection.style.display = 'block';
-        if (smartViewsSection)   smartViewsSection.style.display = 'flex';
+        // Catalog view has neither type nor proposal buttons — hide the
+        // whole row so the (now-tinted) band doesn't render as an empty
+        // strip between the pipeline summary and the filter dropdowns.
+        if (smartViewsSection)   smartViewsSection.style.display = view === 'catalog' ? 'none' : 'flex';
         if (kindFilterRow)       kindFilterRow.style.display = view === 'programs' ? 'flex' : 'none';
         if (smartActionsSection) smartActionsSection.style.display = view === 'catalog' ? 'none' : 'flex';
         if (filtersSection)      filtersSection.style.display = 'flex';
@@ -853,25 +871,31 @@ async function loadApprovers() {
 }
 
 function setTypeFilter(type) {
-    // Toggle: click the active button again to clear the filter.
-    typeFilter = (typeFilter === type) ? '' : type;
+    // Multi-select toggle: each click flips its type in the Set.
+    if (typeFilter.has(type)) typeFilter.delete(type);
+    else typeFilter.add(type);
     document.querySelectorAll('.type-btn').forEach(btn => {
         const btnType = btn.getAttribute('onclick').match(/'([^']*)'/)[1];
-        btn.classList.toggle('active', btnType === typeFilter && typeFilter !== '');
+        btn.classList.toggle('active', typeFilter.has(btnType));
     });
     applyFilters();
 }
 
 function setProposalFilter(status) {
-    // Toggle: click the active button again to clear.
-    proposalFilter = (proposalFilter === status) ? '' : status;
+    // Multi-select toggle: each click flips that status in the Set.
+    // 'Added' / 'Edited' / 'Deactivated' filter on item.status;
+    // '__complete__' filters on completion_date (and disables the
+    // default "hide completed" rule). Any combination is allowed.
+    if (proposalFilter.has(status)) proposalFilter.delete(status);
+    else proposalFilter.add(status);
     document.querySelectorAll('.proposal-btn').forEach(btn => {
         const btnStatus = btn.getAttribute('onclick').match(/'([^']*)'/)[1];
-        btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact');
-        if (btnStatus === proposalFilter && proposalFilter !== '') {
-            if (proposalFilter === 'Added') btn.classList.add('active-new');
-            else if (proposalFilter === 'Edited') btn.classList.add('active-edit');
-            else if (proposalFilter === 'Deactivated') btn.classList.add('active-inact');
+        btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact', 'active-complete');
+        if (proposalFilter.has(btnStatus)) {
+            if (btnStatus === 'Added')             btn.classList.add('active-new');
+            else if (btnStatus === 'Edited')       btn.classList.add('active-edit');
+            else if (btnStatus === 'Deactivated')  btn.classList.add('active-inact');
+            else if (btnStatus === '__complete__') btn.classList.add('active-complete');
         }
     });
     applyFilters();
@@ -892,12 +916,19 @@ function updateProposalCounts(programs) {
             const pool = currentView === 'courses' ? (allCourses || []) : (allPrograms || []);
             const completeCount = pool.filter(p => p.completion_date).length;
             btn.textContent = `Complete (${completeCount})`;
+            btn.classList.toggle('active-complete', proposalFilter.has('__complete__'));
             return;
         }
         const count = counts[s] || 0;
         const newLabel = currentView === 'courses' ? 'New Courses' : 'New Programs';
         const labels = { '': 'All', 'Added': newLabel, 'Edited': 'Changes', 'Deactivated': 'Inactivations' };
         btn.textContent = `${labels[s]} (${count})`;
+        btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact');
+        if (proposalFilter.has(s)) {
+            if (s === 'Added')            btn.classList.add('active-new');
+            else if (s === 'Edited')      btn.classList.add('active-edit');
+            else if (s === 'Deactivated') btn.classList.add('active-inact');
+        }
     });
 }
 
@@ -1210,11 +1241,21 @@ function getBaseFiltered(approverProgramIds, exclude) {
             const submitted = item.date_submitted ? new Date(item.date_submitted) : null;
             if (!submitted || (now - submitted) >= NEW_SUBMISSION_DAYS * 86400000) return false;
         }
-        if (!ex.type && typeFilter) {
+        if (!ex.type && typeFilter.size) {
             const lvl = currentView === 'courses' ? classifyCourseLevel(item) : item.program_type;
-            if (lvl !== typeFilter) return false;
+            if (!typeFilter.has(lvl)) return false;
         }
-        if (!ex.proposal && proposalFilter && item.status !== proposalFilter) return false;
+        if (!ex.proposal && proposalFilter.size) {
+            // Multi-select OR: keep the item if its status matches ANY
+            // selected proposal type, OR if Complete is selected and
+            // the item has a completion_date.
+            const statusMatch =
+                (proposalFilter.has('Added')       && item.status === 'Added') ||
+                (proposalFilter.has('Edited')      && item.status === 'Edited') ||
+                (proposalFilter.has('Deactivated') && item.status === 'Deactivated');
+            const completeMatch = proposalFilter.has('__complete__') && !!item.completion_date;
+            if (!statusMatch && !completeMatch) return false;
+        }
         if (!ex.kind && currentView === 'programs' && programKindFilter) {
             if (classifyProgramKind(item) !== programKindFilter) return false;
         }
@@ -1236,8 +1277,11 @@ function getBaseFiltered(approverProgramIds, exclude) {
                 !(searchSecond && searchSecond.toLowerCase().includes(search))) return false;
         }
         // Hide completed (no current step) by default. Counts and table match.
-        // Showing completed requires the dedicated "Complete" pipeline tile.
-        if (pipelineFilter !== '__complete__' && item.completion_date && !item.current_step) return false;
+        // Showing completed requires either the "Complete" proposal-row
+        // button OR the legacy '__complete__' pipeline tile (kept for
+        // backward compat in case anything still triggers it).
+        const completedShown = proposalFilter.has('__complete__') || pipelineFilter === '__complete__';
+        if (!completedShown && item.completion_date && !item.current_step) return false;
         return true;
     });
 }
@@ -2156,6 +2200,16 @@ function extractCourseLines(html) {
     const courseCodePattern = /^[A-Z]{2,5}\s+\d{4}/i;
 
     let currentSection = '';
+    // Subject-wildcard mode: triggered by a course-list "comment" row whose
+    // text matches "any of the following subject codes" (or similar). While
+    // active, rows whose cell content is just a subject prefix
+    // (e.g. "BINF" or "CS (except CS 5800 and CS 6140)") are emitted as
+    // wildcard entries that absorb individual courses with that prefix
+    // during the Compare diff. Reset when we hit a row that's not a
+    // subject prefix or a new section header.
+    let inSubjectWildcardSection = false;
+    const subjectTriggerRe = /(any of the following subject codes|any of the following subjects|from the following subject codes|courses from the following subjects)/i;
+    const subjectPrefixRowRe = /^([A-Z]{2,6})\s*(?:\(([^)]+)\))?\s*$/;
 
     // Walk all elements in document order to catch both h2/h3 headings and table rows.
     // CIM HTML uses h2/h3 for section headers outside tables (e.g., "Core Requirements",
@@ -2171,6 +2225,7 @@ function extractCourseLines(html) {
                 currentSection = text;
                 lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
             }
+            inSubjectWildcardSection = false; // new section ends any wildcard run
             return;
         }
 
@@ -2183,9 +2238,49 @@ function extractCourseLines(html) {
         const isAreaHeader = el.classList.contains('areaheader') || el.querySelector('.areaheader') !== null;
         const hasCode = parts.some(p => courseCodePattern.test(p));
         const hasOr = parts.some(p => /^or\s+[A-Z]{2,5}\s+\d{4}/i.test(p));
+        const joinedText = parts.join(' ').trim();
 
         // Skip column-header rows (Code/Title/Hours)
         if (parts.some(p => /^Code$/i.test(p)) && parts.some(p => /^Title$/i.test(p))) return;
+
+        // Detect "Complete courses from any of the following subject codes:"
+        // and similar comment rows that introduce a subject-wildcard run.
+        if (subjectTriggerRe.test(joinedText)) {
+            inSubjectWildcardSection = true;
+            return;
+        }
+
+        // While inside a subject-wildcard run, accept rows whose single
+        // cell text is a bare subject prefix (e.g. "BINF") or a prefix
+        // with an exception annotation (e.g. "CS (except CS 5800 and
+        // CS 6140)"). Emit them as wildcard entries that the Compare
+        // diff's absorption pass will use to match individual courses.
+        if (inSubjectWildcardSection && !hasCode && !hasOr) {
+            const wm = joinedText.match(subjectPrefixRowRe);
+            if (wm) {
+                const prefix = wm[1].toUpperCase();
+                const exclusions = [];
+                if (wm[2]) {
+                    const inner = wm[2];
+                    // "except CS 5800 and CS 6140" → ["CS 5800", "CS 6140"]
+                    const codes = inner.match(/[A-Z]{2,5}\s*\d{4}[A-Z]?/gi) || [];
+                    codes.forEach(c => exclusions.push(c.toUpperCase().replace(/\s+/g, ' ')));
+                }
+                lines.push({
+                    key: 'SUBJ:' + prefix,
+                    code: prefix + (exclusions.length ? ' (except ' + exclusions.join(', ') + ')' : ''),
+                    title: 'Any ' + prefix + ' course',
+                    hours: '',
+                    isHeader: false,
+                    section: currentSection,
+                    subjectWildcard: {prefix: prefix, exclusions: exclusions},
+                });
+                return;
+            }
+            // Not a subject-prefix row but we're in the section — keep
+            // the flag on unless the row looks like a new heading. (Most
+            // such rows will be the next prefix or whitespace.)
+        }
 
         if (isAreaHeader) {
             const text = standardizeHeader(parts.join(' '));
@@ -2193,7 +2288,9 @@ function extractCourseLines(html) {
                 currentSection = text;
                 lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
             }
+            inSubjectWildcardSection = false; // new sub-section ends wildcard run
         } else if (hasCode || hasOr) {
+            inSubjectWildcardSection = false; // explicit course code ends wildcard run
             const codecol = parts[0] || '';
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
@@ -2258,6 +2355,12 @@ function classifySection(sectionText) {
     // following/semester hours from, etc.
     if (/\belective/.test(s)) return 'elective';
     if (/\b(choose|select)\b/.test(s)) return 'elective';
+    // "Breadth Areas" / "Breadth Requirement" are choose-from lists in
+    // practice — students pick courses across categories. Without this,
+    // any course shared between a "Breadth Areas" section (Boston) and
+    // an "Electives" section (regional deployment) is falsely flagged as
+    // "moved" (yellow) even though both sides treat it as elective.
+    if (/\bbreadth\b/.test(s)) return 'elective';
     if (/\bcomplete\s+\w+\s+of\s+the\s+following/.test(s)) return 'elective';
     if (/\bcomplete\s+\d+\s+(?:semester\s+)?(?:sh|s\.h\.|hours?|credits?)\s+(?:from|based|in|with)/.test(s)) return 'elective';
     if (/\bin consultation\s+with/.test(s)) return 'elective';
@@ -2436,6 +2539,159 @@ function diffLines(oldLines, newLines) {
             }
         }
     }
+
+    // Third post-LCS pass: range-absorption. A row like "CS 5100 to CS 7980"
+    // on one side semantically covers every CS course in that range. When
+    // the other side enumerates individual courses (e.g. CS 5180, CS 5310)
+    // that fall within the range, treat each one as matched against the
+    // range entry. Eliminates spurious mismatches on programs (like
+    // Computer Science MSCS) where Boston uses a wildcard range but
+    // regional deployments enumerate the same electives explicitly.
+    function _parseRangeEntry(entry) {
+        if (!entry) return null;
+        // Match either the key or the code text; "to" / "through" / dash.
+        const text = (entry.code || entry.key || '');
+        const m = text.match(
+            /^([A-Z]{2,5})\s*(\d{4})\s*(?:to|through|[-–—])\s*[A-Z]{0,5}\s*(\d{4})\s*$/i);
+        if (!m) return null;
+        const lo = parseInt(m[2], 10), hi = parseInt(m[3], 10);
+        return {prefix: m[1].toUpperCase(), min: Math.min(lo, hi), max: Math.max(lo, hi)};
+    }
+    function _parseCourseCode(entry) {
+        if (!entry) return null;
+        const m = (entry.code || '').match(/^([A-Z]{2,5})\s*(\d{4})/i);
+        if (!m) return null;
+        return {prefix: m[1].toUpperCase(), num: parseInt(m[2], 10)};
+    }
+    function _codeInRange(c, r) {
+        return c && r && c.prefix === r.prefix && c.num >= r.min && c.num <= r.max;
+    }
+    // Collect range entries on each side along with their diff indices.
+    const leftRanges  = [];  // [{rangeIdx (in courseDiff), range obj, entry}]
+    const rightRanges = [];
+    courseDiff.forEach((e, idx) => {
+        if (!e) return;
+        if (e.type === 'removed' && e.left) {
+            const r = _parseRangeEntry(e.left);
+            if (r) leftRanges.push({idx, range: r, entry: e.left});
+        } else if (e.type === 'added' && e.right) {
+            const r = _parseRangeEntry(e.right);
+            if (r) rightRanges.push({idx, range: r, entry: e.right});
+        }
+    });
+    // For each right-side range, absorb matching left-side 'removed' codes.
+    rightRanges.forEach(({idx: rangeIdx, range, entry: rangeEntry}) => {
+        let absorbed = 0;
+        for (let i = 0; i < courseDiff.length; i++) {
+            const e = courseDiff[i];
+            if (!e || e.type !== 'removed') continue;
+            const c = _parseCourseCode(e.left);
+            if (_codeInRange(c, range)) {
+                courseDiff[i] = {
+                    type: 'same',
+                    leftIdx: e.leftIdx,
+                    rightIdx: rangeEntry === courseDiff[rangeIdx].right ? courseDiff[rangeIdx].rightIdx : null,
+                    left: e.left,
+                    right: rangeEntry,
+                };
+                absorbed++;
+            }
+        }
+        // If we absorbed at least one course into this range, drop the
+        // original solo 'added' range row — it's been re-emitted alongside
+        // each absorbed left-side course.
+        if (absorbed > 0) courseDiff[rangeIdx] = null;
+    });
+    // Symmetric pass: left-side ranges absorb right-side 'added' codes.
+    leftRanges.forEach(({idx: rangeIdx, range, entry: rangeEntry}) => {
+        let absorbed = 0;
+        for (let i = 0; i < courseDiff.length; i++) {
+            const e = courseDiff[i];
+            if (!e || e.type !== 'added') continue;
+            const c = _parseCourseCode(e.right);
+            if (_codeInRange(c, range)) {
+                courseDiff[i] = {
+                    type: 'same',
+                    leftIdx: rangeEntry === courseDiff[rangeIdx].left ? courseDiff[rangeIdx].leftIdx : null,
+                    rightIdx: e.rightIdx,
+                    left: rangeEntry,
+                    right: e.right,
+                };
+                absorbed++;
+            }
+        }
+        if (absorbed > 0) courseDiff[rangeIdx] = null;
+    });
+
+    // Fourth post-LCS pass: subject-wildcard absorption. Some CIM curricula
+    // list "any course in subject X" (with optional exclusions) instead of
+    // enumerating individual courses — e.g. Data Analytics Engineering MS
+    // Boston lists BINF, BIOE, CHME, CS (except CS 5800 and CS 6140), …
+    // as allowed elective prefixes. When a deployment enumerates individual
+    // courses with those prefixes (CHME 5160, CS 7140, …), each such code
+    // should match the wildcard rather than appear as a mismatch.
+    function _matchSubjectWildcard(code, wildcard) {
+        if (!code || !wildcard) return false;
+        if (code.prefix !== wildcard.prefix) return false;
+        // Exclusions: the wildcard explicitly excludes specific codes.
+        if (wildcard.exclusions && wildcard.exclusions.length) {
+            const codeStr = code.prefix + ' ' + code.num;
+            for (const ex of wildcard.exclusions) {
+                if (ex.replace(/\s+/g, ' ') === codeStr) return false;
+            }
+        }
+        return true;
+    }
+    const leftWildcards  = [];  // entries with .subjectWildcard
+    const rightWildcards = [];
+    courseDiff.forEach((e, idx) => {
+        if (!e) return;
+        if (e.type === 'removed' && e.left && e.left.subjectWildcard) {
+            leftWildcards.push({idx, wc: e.left.subjectWildcard, entry: e.left});
+        } else if (e.type === 'added' && e.right && e.right.subjectWildcard) {
+            rightWildcards.push({idx, wc: e.right.subjectWildcard, entry: e.right});
+        }
+    });
+    // Right-side wildcards absorb left-side individual codes.
+    rightWildcards.forEach(({idx: wcIdx, wc, entry: wcEntry}) => {
+        let absorbed = 0;
+        for (let i = 0; i < courseDiff.length; i++) {
+            const e = courseDiff[i];
+            if (!e || e.type !== 'removed') continue;
+            const c = _parseCourseCode(e.left);
+            if (_matchSubjectWildcard(c, wc)) {
+                courseDiff[i] = {
+                    type: 'same',
+                    leftIdx: e.leftIdx,
+                    rightIdx: null,
+                    left: e.left,
+                    right: wcEntry,
+                };
+                absorbed++;
+            }
+        }
+        if (absorbed > 0) courseDiff[wcIdx] = null;
+    });
+    // Left-side wildcards absorb right-side individual codes (symmetric).
+    leftWildcards.forEach(({idx: wcIdx, wc, entry: wcEntry}) => {
+        let absorbed = 0;
+        for (let i = 0; i < courseDiff.length; i++) {
+            const e = courseDiff[i];
+            if (!e || e.type !== 'added') continue;
+            const c = _parseCourseCode(e.right);
+            if (_matchSubjectWildcard(c, wc)) {
+                courseDiff[i] = {
+                    type: 'same',
+                    leftIdx: null,
+                    rightIdx: e.rightIdx,
+                    left: wcEntry,
+                    right: e.right,
+                };
+                absorbed++;
+            }
+        }
+        if (absorbed > 0) courseDiff[wcIdx] = null;
+    });
 
     // Filter out the nulls
     for (let idx = courseDiff.length - 1; idx >= 0; idx--) {
@@ -3475,24 +3731,26 @@ const PORTFOLIO_COLUMNS = [
         help: 'Owning college. From CIM XML for tracked programs; SVT/IPD-supplied values are normalized to the canonical CIM name so duplicates and abbreviations are merged.'},
     {key: 'campus',       label: 'Campus',
         help: 'Deployment campus. All online variants (Online, Primarily Online, "Online - Vancouver Requirements", etc.) are merged into a single "Online" campus.'},
-    {key: 'market2025',      label: '2025 Market Category',
+    {key: 'market2025',      label: '2025 Market Category', defaultHidden: true,
         help: 'Market category from the 2025 portfolio scoring workbook (Boston programs only).'},
-    {key: 'perf2025',        label: '2025 Performance Category',
+    {key: 'perf2025',        label: '2025 Performance Category', defaultHidden: true,
         help: 'Performance category from the 2025 portfolio scoring workbook (Boston programs only).'},
-    {key: 'marketscore2025', label: '2025 Market Score',
+    {key: 'marketscore2025', label: '2025 Market Score', defaultHidden: true,
         help: 'Numeric market score from the 2025 portfolio scoring workbook (Boston programs only).'},
-    {key: 'perfscore2025',   label: '2025 Performance Score',
+    {key: 'perfscore2025',   label: '2025 Performance Score', defaultHidden: true,
         help: 'Numeric performance score from the 2025 portfolio scoring workbook (Boston programs only).'},
     {key: 'otp',          label: 'OTP Status',
         help: 'Status from the "OTP Program Tracking" sheet of the Optimization, Withdrawal, and Deactivation Tracker (Boston-only; being deprecated).'},
-    {key: 'ipd',          label: 'IPD Status',
-        help: 'Development status from the IPD Smartsheet (e.g. "Approved for Development by IPD"). Tracks proposals that have not yet entered CIM workflow.'},
-    {key: 'svt',          label: 'SVT Status',
-        help: 'Roster of Record status from the GLS/SVT Smartsheet (e.g. Active, Launching, Inactivating).'},
+    {key: 'svt',          label: 'Status',
+        help: 'Status from the SVT Source Data Smartsheet (Intake, Discovery, Approved for Development by College, Launch in Progress, Complete, Inactivation In Progress, etc.).'},
+    {key: 'substatus',    label: 'Sub-status',
+        help: 'Launch sub-status from the SVT Source Data Smartsheet (e.g. "Regulatory Submission in Progress", "Post-Launch & Monitor - IPD").'},
+    {key: 'speed',        label: 'Speed to Market',
+        help: 'Speed to Market flag from the SVT Source Data Smartsheet (checkbox).'},
     {key: 'gls',          label: 'GLS Status',
         help: 'Per-campus status from the GLS Tableau dashboard (campus deployment health).'},
-    {key: 'launch',       label: 'Launch Date',
-        help: 'Planned launch date from the SVT/GLS Roster of Record.'},
+    {key: 'launch',       label: 'Actual Launch Date',
+        help: 'Actual Launch Date from the SVT Source Data Smartsheet.'},
     {key: 'cim',          label: 'CIM Step',
         help: 'Current CourseLeaf CIM workflow step (the review role currently holding the proposal). Blank when the program is not in active workflow.'},
     {key: 'cimchange',    label: 'CIM Change',
@@ -3520,12 +3778,62 @@ function _loadPortfolioCols() {
 
     const visible = Array.isArray(stored)
         ? new Set(stored)
-        : new Set(PORTFOLIO_COLUMNS.map(c => c.key));
-    // Any column key the user has never seen before defaults to visible.
-    PORTFOLIO_COLUMNS.forEach(c => { if (!knownSet.has(c.key)) visible.add(c.key); });
+        : new Set(PORTFOLIO_COLUMNS.filter(c => !c.defaultHidden).map(c => c.key));
+    // Any column key the user has never seen before defaults to visible —
+    // unless it's flagged defaultHidden (e.g. low-signal market/perf columns).
+    PORTFOLIO_COLUMNS.forEach(c => {
+        if (!knownSet.has(c.key) && !c.defaultHidden) visible.add(c.key);
+    });
     return visible;
 }
 let portfolioVisibleCols = _loadPortfolioCols();
+
+// Per-column width overrides for the Portfolio table — {colKey: widthPx}.
+// Persisted to localStorage so user-resized columns survive reloads.
+function _loadPortfolioColWidths() {
+    try {
+        const s = localStorage.getItem('cim-portfolio-col-widths');
+        const obj = s ? JSON.parse(s) : {};
+        return (obj && typeof obj === 'object') ? obj : {};
+    } catch (e) { return {}; }
+}
+let portfolioColWidths = _loadPortfolioColWidths();
+function _savePortfolioColWidths() {
+    try { localStorage.setItem('cim-portfolio-col-widths', JSON.stringify(portfolioColWidths)); }
+    catch (e) {}
+}
+
+// Mouse-drag column resizer. Called from the inline onmousedown on each
+// header's <span class="col-resize"> handle. The handle's stopPropagation
+// prevents the click from also firing the header's sort handler.
+function startPortfolioColResize(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    const th = e.target.closest('th');
+    if (!th) return;
+    const key = th.dataset.colKey;
+    if (!key) return;
+    const startX = e.clientX;
+    const startW = th.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev) => {
+        const newW = Math.max(40, Math.round(startW + (ev.clientX - startX)));
+        th.style.width = newW + 'px';
+    };
+    const onUp = (ev) => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        const newW = Math.max(40, Math.round(startW + (ev.clientX - startX)));
+        portfolioColWidths[key] = newW;
+        _savePortfolioColWidths();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+}
+if (typeof window !== 'undefined') window.startPortfolioColResize = startPortfolioColResize;
 
 function _rebuildColDropdownItems(dd) {
     dd.innerHTML =
@@ -3587,18 +3895,41 @@ document.addEventListener('click', e => {
 });
 
 // Returns <td> for a portfolio column, or '' if hidden.
-function _pc(key, content, cls) {
+function _pc(key, content, cls, titleAttr) {
     if (!portfolioVisibleCols.has(key)) return '';
-    return cls ? `<td class="${cls}">${content}</td>` : `<td>${content}</td>`;
+    const t = titleAttr ? ` title="${escapeHtml(titleAttr)}"` : '';
+    return cls ? `<td class="${cls}"${t}>${content}</td>` : `<td${t}>${content}</td>`;
 }
 
 let allPortfolioPrograms   = [];
 let portfolioExpandedIds   = new Set();
+// IDs the user has explicitly collapsed. Used to override a search-driven
+// auto-expand: if the user clicks a chevron on an auto-expanded row, the
+// row should collapse even though `autoExpand` still wants it open.
+let portfolioCollapsedIds  = new Set();
+// Snapshot of the autoExpand set computed during the last renderPortfolio
+// render, so the toggle handler (outside the render closure) can see it.
+let _portfolioAutoExpand   = new Set();
 let portfolioCollegeFilter   = new Set();
 let portfolioCampusFilter    = new Set();
+
+// Shortcut: clear the Campus multi-select and set it to just "Boston".
+// If Boston is already the sole active value, toggle it off (clear).
+function setPortfolioCampusBoston() {
+    const s = portfolioCampusFilter;
+    const onlyBoston = (s.size === 1 && s.has('Boston'));
+    s.clear();
+    if (!onlyBoston) s.add('Boston');
+    _updateMultiFilterBtn('portfolio-filter-campus', s);
+    updateClearButtons();
+    renderPortfolioTable();
+}
+if (typeof window !== 'undefined') window.setPortfolioCampusBoston = setPortfolioCampusBoston;
 let portfolioOtpFilter       = new Set();
 let portfolioIpdFilter       = new Set();
-let portfolioRosterFilter    = new Set();  // SVT Status filter
+let portfolioRosterFilter    = new Set();  // SVT Status filter (legacy id)
+let portfolioSubStatusFilter = new Set();  // SVT Sub-status (Launch Sub-Status)
+let portfolioSpeedFilter     = new Set();  // Speed to Market
 let portfolioGlsFilter       = new Set();
 let portfolioCimFilter       = new Set();
 let portfolioCimChangeFilter  = new Set();
@@ -3661,18 +3992,21 @@ function _inactAdmittingToday(p) {
 // A program is only "Inactive" once its inactivation workflow has fully completed.
 // While an inactivation proposal is still moving through CIM (cim_step is set),
 // the program is still running (teach-out phase) and should show as "Active".
-let portfolioLevelFilter   = '';
-let portfolioStatusFilter  = '';  // '', 'underdev', 'inworkflow', 'catalog'
+// Multi-select sets for the Portfolio button-row filters. Each Set
+// holds the currently-active values; clicking a button toggles its
+// value in the set, and the row's filter is OR'd across the set.
+let portfolioLevelFilter   = new Set();   // 'Undergraduate', 'Graduate'
+let portfolioStatusFilter  = new Set();   // 'inworkflow', 'catalog'
+let portfolioDegreeFilter  = new Set();   // "Bachelor's", "Master's", ...
 
 function setPortfolioStatus(val) {
-    portfolioStatusFilter = (portfolioStatusFilter === val) ? '' : val;
+    if (portfolioStatusFilter.has(val)) portfolioStatusFilter.delete(val);
+    else portfolioStatusFilter.add(val);
     document.querySelectorAll('.portfolio-status-btn').forEach(b =>
-        b.classList.toggle('active',
-            b.dataset.status === portfolioStatusFilter && portfolioStatusFilter !== ''));
+        b.classList.toggle('active', portfolioStatusFilter.has(b.dataset.status)));
     renderPortfolioTable();
 }
 if (typeof window !== 'undefined') window.setPortfolioStatus = setPortfolioStatus;
-let portfolioDegreeFilter  = '';
 let portfolioSortKey = '';   // '' = default (college/name), or a PORTFOLIO_COLUMNS key or 'name'
 let portfolioSortDir = 1;    // 1 = asc, -1 = desc
 let portfolioSearch        = '';
@@ -3807,14 +4141,18 @@ function classifyPortfolioDegree(name) {
 }
 
 function setPortfolioLevel(btn, val) {
-    portfolioLevelFilter = (portfolioLevelFilter === val) ? '' : val;
-    document.querySelectorAll('.portfolio-lvl-btn').forEach(b => b.classList.toggle('active', b.dataset.lvl === portfolioLevelFilter && portfolioLevelFilter !== ''));
+    if (portfolioLevelFilter.has(val)) portfolioLevelFilter.delete(val);
+    else portfolioLevelFilter.add(val);
+    document.querySelectorAll('.portfolio-lvl-btn').forEach(b =>
+        b.classList.toggle('active', portfolioLevelFilter.has(b.dataset.lvl)));
     renderPortfolioTable();
 }
 
 function setPortfolioDegree(btn, val) {
-    portfolioDegreeFilter = (portfolioDegreeFilter === val) ? '' : val;
-    document.querySelectorAll('.portfolio-deg-btn').forEach(b => b.classList.toggle('active', b.dataset.deg === portfolioDegreeFilter && portfolioDegreeFilter !== ''));
+    if (portfolioDegreeFilter.has(val)) portfolioDegreeFilter.delete(val);
+    else portfolioDegreeFilter.add(val);
+    document.querySelectorAll('.portfolio-deg-btn').forEach(b =>
+        b.classList.toggle('active', portfolioDegreeFilter.has(b.dataset.deg)));
     renderPortfolioTable();
 }
 
@@ -3829,10 +4167,17 @@ function sortPortfolioBy(key) {
 }
 
 function togglePortfolioConcentrations(id) {
-    if (portfolioExpandedIds.has(id)) {
+    // Flip current effective state (which may come from autoExpand, not
+    // just portfolioExpandedIds). Maintain a parallel collapsed-set so a
+    // user-collapsed-during-search row stays collapsed.
+    const wasExpanded = (portfolioExpandedIds.has(id) || _portfolioAutoExpand.has(id))
+        && !portfolioCollapsedIds.has(id);
+    if (wasExpanded) {
         portfolioExpandedIds.delete(id);
+        portfolioCollapsedIds.add(id);
     } else {
         portfolioExpandedIds.add(id);
+        portfolioCollapsedIds.delete(id);
     }
     renderPortfolioTable();
 }
@@ -3850,6 +4195,7 @@ async function loadPortfolioDashboard() {
             p.concentrations = p.concentrations_json ? JSON.parse(p.concentrations_json) : [];
         });
         portfolioExpandedIds = new Set();
+        portfolioCollapsedIds = new Set();
         populatePortfolioFilters();
         renderPortfolioTable();
     } catch(e) {
@@ -3865,6 +4211,8 @@ function _getPortfolioFilterValues() {
         'portfolio-filter-otp':        [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort(),
         'portfolio-filter-ipd':        [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort(),
         'portfolio-filter-roster':     [...new Set(programs.map(p => p.svt_status).filter(Boolean))].sort(),
+        'portfolio-filter-substatus':  [...new Set(programs.map(p => p.roster_sub_status).filter(Boolean))].sort(),
+        'portfolio-filter-speed':      ['True', 'False'],
         'portfolio-filter-gls':        [...new Set(programs.map(p => p.gls_status).filter(Boolean))].sort(),
         'portfolio-filter-cim':        [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort(),
         'portfolio-filter-cimchange':  [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort(),
@@ -3881,8 +4229,24 @@ function _updateMultiFilterBtn(id, filterSet) {
     const labelFor = (id === 'portfolio-filter-college')
         ? (v => abbreviateCollege(v))
         : (v => v);
+    // Default label = "All X ▾" (where X is the column name) for parity
+    // with the CIM-tab "All Colleges" / "All Campuses" / etc. dropdowns.
+    const ALL_LABEL = {
+        'portfolio-filter-college':    'All Colleges',
+        'portfolio-filter-campus':     'All Campuses',
+        'portfolio-filter-otp':        'All OTP',
+        'portfolio-filter-ipd':        'All IPD',
+        'portfolio-filter-roster':     'All Statuses',
+        'portfolio-filter-substatus':  'All Sub-statuses',
+        'portfolio-filter-speed':      'All',
+        'portfolio-filter-gls':        'All GLS',
+        'portfolio-filter-cim':        'All Steps',
+        'portfolio-filter-cimchange':  'All Changes',
+        'portfolio-filter-inworkflow': 'All',
+        'portfolio-filter-inactadmit': 'All Semesters',
+    };
     if (filterSet.size === 0) {
-        btn.textContent = '— select — ▾';
+        btn.textContent = (ALL_LABEL[id] || 'All') + ' ▾';
         if (wrap) wrap.classList.remove('has-value');
     } else if (filterSet.size === 1) {
         btn.textContent = labelFor([...filterSet][0]) + ' ▾';
@@ -3897,6 +4261,7 @@ function populatePortfolioFilters() {
     const multiIds = [
         'portfolio-filter-college', 'portfolio-filter-campus',
         'portfolio-filter-otp', 'portfolio-filter-ipd', 'portfolio-filter-roster',
+        'portfolio-filter-substatus', 'portfolio-filter-speed',
         'portfolio-filter-gls',
         'portfolio-filter-cim', 'portfolio-filter-cimchange',
         'portfolio-filter-inworkflow', 'portfolio-filter-inactadmit',
@@ -3907,6 +4272,8 @@ function populatePortfolioFilters() {
         'portfolio-filter-otp':        portfolioOtpFilter,
         'portfolio-filter-ipd':        portfolioIpdFilter,
         'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-substatus':  portfolioSubStatusFilter,
+        'portfolio-filter-speed':      portfolioSpeedFilter,
         'portfolio-filter-gls':        portfolioGlsFilter,
         'portfolio-filter-cim':        portfolioCimFilter,
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
@@ -3933,6 +4300,8 @@ const _portfolioFilterVars = {
     'portfolio-filter-otp':        () => { portfolioOtpFilter.clear();        _updateMultiFilterBtn('portfolio-filter-otp',        portfolioOtpFilter); },
     'portfolio-filter-ipd':        () => { portfolioIpdFilter.clear();        _updateMultiFilterBtn('portfolio-filter-ipd',        portfolioIpdFilter); },
     'portfolio-filter-roster':     () => { portfolioRosterFilter.clear();     _updateMultiFilterBtn('portfolio-filter-roster',     portfolioRosterFilter); },
+    'portfolio-filter-substatus':  () => { portfolioSubStatusFilter.clear();  _updateMultiFilterBtn('portfolio-filter-substatus',  portfolioSubStatusFilter); },
+    'portfolio-filter-speed':      () => { portfolioSpeedFilter.clear();      _updateMultiFilterBtn('portfolio-filter-speed',      portfolioSpeedFilter); },
     'portfolio-filter-gls':        () => { portfolioGlsFilter.clear();        _updateMultiFilterBtn('portfolio-filter-gls',        portfolioGlsFilter); },
     'portfolio-filter-cim':        () => { portfolioCimFilter.clear();        _updateMultiFilterBtn('portfolio-filter-cim',        portfolioCimFilter); },
     'portfolio-filter-cimchange':  () => { portfolioCimChangeFilter.clear();  _updateMultiFilterBtn('portfolio-filter-cimchange',  portfolioCimChangeFilter); },
@@ -3966,6 +4335,8 @@ function togglePortfolioMultiFilter(id, e) {
         'portfolio-filter-otp':        portfolioOtpFilter,
         'portfolio-filter-ipd':        portfolioIpdFilter,
         'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-substatus':  portfolioSubStatusFilter,
+        'portfolio-filter-speed':      portfolioSpeedFilter,
         'portfolio-filter-gls':        portfolioGlsFilter,
         'portfolio-filter-cim':        portfolioCimFilter,
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
@@ -4004,6 +4375,8 @@ function togglePortfolioMultiValue(id, value, checked) {
         'portfolio-filter-otp':        portfolioOtpFilter,
         'portfolio-filter-ipd':        portfolioIpdFilter,
         'portfolio-filter-roster':     portfolioRosterFilter,
+        'portfolio-filter-substatus':  portfolioSubStatusFilter,
+        'portfolio-filter-speed':      portfolioSpeedFilter,
         'portfolio-filter-gls':        portfolioGlsFilter,
         'portfolio-filter-cim':        portfolioCimFilter,
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
@@ -4022,22 +4395,36 @@ function togglePortfolioMultiValue(id, value, checked) {
 
 function getPortfolioFiltered() {
     let rows = allPortfolioPrograms.slice();
-    if (portfolioLevelFilter)   rows = rows.filter(p => classifyPortfolioLevel(p.program_name)  === portfolioLevelFilter);
-    if (portfolioDegreeFilter)  rows = rows.filter(p => classifyPortfolioDegree(p.program_name) === portfolioDegreeFilter);
+    if (portfolioLevelFilter.size)
+        rows = rows.filter(p => portfolioLevelFilter.has(classifyPortfolioLevel(p.program_name)));
+    if (portfolioDegreeFilter.size)
+        rows = rows.filter(p => portfolioDegreeFilter.has(classifyPortfolioDegree(p.program_name)));
     // Lifecycle status button row:
     //   inworkflow = active CIM workflow step set
-    //   catalog    = CIM workflow complete (completion_date) and no active step
-    // ('underdev' branch removed — In CIM=No covers it plus synthetic parents.)
-    if (portfolioStatusFilter === 'inworkflow') {
-        rows = rows.filter(p => p.cim_step);
-    } else if (portfolioStatusFilter === 'catalog') {
-        rows = rows.filter(p => p.cim_completion_date && !p.cim_step);
+    //   catalog    = approved at least once — either we observed completion
+    //                (cim_completion_date set), OR the program is currently
+    //                undergoing a Change/Inactivation proposal (which implies
+    //                a prior approval that predates our scrape history).
+    //                Re-entering workflow with a new proposal still counts
+    //                here AND also matches inworkflow until completion.
+    //   Multi-select OR — passing rows match ANY active status.
+    if (portfolioStatusFilter.size) {
+        const wantWf  = portfolioStatusFilter.has('inworkflow');
+        const wantCat = portfolioStatusFilter.has('catalog');
+        rows = rows.filter(p =>
+            (wantWf  && p.cim_step) ||
+            (wantCat && (p.cim_completion_date ||
+                         p.cim_change_type === 'Change' ||
+                         p.cim_change_type === 'Inactivation'))
+        );
     }
     if (portfolioCollegeFilter.size)    rows = rows.filter(p => portfolioCollegeFilter.has(p.college || ''));
     if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
     if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
     if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
     if (portfolioRosterFilter.size)     rows = rows.filter(p => portfolioRosterFilter.has(p.svt_status || ''));
+    if (portfolioSubStatusFilter.size)  rows = rows.filter(p => portfolioSubStatusFilter.has(p.roster_sub_status || ''));
+    if (portfolioSpeedFilter.size)      rows = rows.filter(p => portfolioSpeedFilter.has(p.speed_to_market || ''));
     if (portfolioGlsFilter.size)        rows = rows.filter(p => portfolioGlsFilter.has(p.gls_status || ''));
     if (portfolioCimFilter.size)        rows = rows.filter(p => portfolioCimFilter.has(p.cim_step || ''));
     if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
@@ -4046,10 +4433,32 @@ function getPortfolioFiltered() {
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
+        // Build a set of parent IDs whose curriculum-extracted concentrations
+        // OR linked concentration sub-rows match the search. We need parents
+        // in the filtered result so the renderer's nest logic (which only
+        // shows a sub-row under a parent that ALSO survives the filter) can
+        // surface the matching child. Without this, searching "Robotics"
+        // would hide "Artificial Intelligence, MS (Boston)" (whose curric
+        // includes "Robotics and Agent-Based Systems" and whose linked
+        // sub-row is "AI - Robotics Concentration, MS") even though the
+        // concentration topic clearly matches.
+        const parentIdsViaConc = new Set();
+        allPortfolioPrograms.forEach(p => {
+            if (p.concentrations && p.concentrations.some(c => {
+                const n = (typeof c === 'string') ? c : (c && c.name) || '';
+                return n.toLowerCase().includes(q);
+            })) {
+                parentIdsViaConc.add(p.id);
+            }
+            if (p.concentration_of && (p.program_name || '').toLowerCase().includes(q)) {
+                parentIdsViaConc.add(p.concentration_of);
+            }
+        });
         rows = rows.filter(p =>
             (p.program_name || '').toLowerCase().includes(q) ||
             (p.college      || '').toLowerCase().includes(q) ||
-            (p.campus       || '').toLowerCase().includes(q)
+            (p.campus       || '').toLowerCase().includes(q) ||
+            parentIdsViaConc.has(p.id)
         );
     }
     return rows;
@@ -4129,6 +4538,8 @@ function renderPortfolioTable() {
             case 'otp':       av = a.otp_status || ''; bv = b.otp_status || ''; break;
             case 'ipd':       av = a.ipd_status || ''; bv = b.ipd_status || ''; break;
             case 'svt':       av = a.svt_status || ''; bv = b.svt_status || ''; break;
+            case 'substatus': av = a.roster_sub_status || ''; bv = b.roster_sub_status || ''; break;
+            case 'speed':     av = a.speed_to_market || ''; bv = b.speed_to_market || ''; break;
             case 'gls':       av = a.gls_status || ''; bv = b.gls_status || ''; break;
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
@@ -4147,23 +4558,33 @@ function renderPortfolioTable() {
         return av.localeCompare(bv) * portfolioSortDir;
     });
 
-    const anyFilterActive = portfolioLevelFilter || portfolioDegreeFilter || portfolioStatusFilter ||
+    const anyFilterActive = portfolioLevelFilter.size || portfolioDegreeFilter.size || portfolioStatusFilter.size ||
         portfolioCollegeFilter.size || portfolioCampusFilter.size ||
         portfolioOtpFilter.size || portfolioIpdFilter.size ||
-        portfolioRosterFilter.size || portfolioGlsFilter.size || portfolioCimFilter.size ||
+        portfolioRosterFilter.size || portfolioSubStatusFilter.size || portfolioSpeedFilter.size ||
+        portfolioGlsFilter.size || portfolioCimFilter.size ||
         portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
         portfolioInactAdmitFilter.size || portfolioInactTodayFilter || portfolioSearch;
 
-    // Determine which programs should be auto-expanded (search matches a curriculum concentration)
+    // Determine which programs should be auto-expanded (search matches a
+    // curriculum concentration OR a linked concentration sub-row).
     const autoExpand = new Set();
     if (portfolioSearch) {
         const q = portfolioSearch.toLowerCase();
         allPortfolioPrograms.forEach(p => {
-            if (p.concentrations && p.concentrations.some(c => c.toLowerCase().includes(q))) {
+            if (p.concentrations && p.concentrations.some(c => {
+                const n = (typeof c === 'string') ? c : (c && c.name) || '';
+                return n.toLowerCase().includes(q);
+            })) {
                 autoExpand.add(p.id);
+            }
+            if (p.concentration_of && (p.program_name || '').toLowerCase().includes(q)) {
+                autoExpand.add(p.concentration_of);
             }
         });
     }
+    // Mirror to module scope so togglePortfolioConcentrations() can read it.
+    _portfolioAutoExpand = autoExpand;
 
     const countEl = document.getElementById('portfolio-result-count');
     if (countEl) countEl.textContent = `${topLevel.length} programs`;
@@ -4179,7 +4600,8 @@ function renderPortfolioTable() {
             ? (matchingConcsByParent[p.id] || [])
             : (allConcsByParent[p.id] || []);
         const curriculumConcs = p.concentrations || [];
-        const isExpanded = portfolioExpandedIds.has(p.id) || autoExpand.has(p.id);
+        const isExpanded = !portfolioCollapsedIds.has(p.id)
+            && (portfolioExpandedIds.has(p.id) || autoExpand.has(p.id));
         // Show arrow if there's ANYTHING to reveal — curriculum concentrations
         // OR linked sub-rows (Bridge Programs, "X Concentration in Y" CIM
         // records, IPD concentration proposals, etc.). Previously the arrow
@@ -4194,12 +4616,25 @@ function renderPortfolioTable() {
         }));
 
         if (isExpanded) {
-            // Curriculum concentrations
-            curriculumConcs.forEach(name => {
-                rowHtml.push(renderPortfolioConcRow(name, portfolioSearch));
+            // Curriculum concentrations (entries may be strings (legacy)
+            // or {name, college} objects (current)). Inherit the parent
+            // program's college (unless the concentration declares its
+            // own — typical for Provost-owned programs whose
+            // concentrations live in subject-specific colleges) and the
+            // parent's campus (always — concentrations are bound to the
+            // parent's deployment).
+            curriculumConcs.forEach(c => {
+                const name    = (typeof c === 'string') ? c : (c && c.name)    || '';
+                const college = (typeof c === 'string') ? ''  : (c && c.college) || '';
+                rowHtml.push(renderPortfolioConcRow(
+                    name, portfolioSearch, college,
+                    p.college || '', p.campus || ''));
             });
-            // Linked portfolio sub-rows
-            portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(c, {isPortfolioConc: true})));
+            // Linked portfolio sub-rows — pass the parent so the sub-row
+            // can inherit college/campus the same way and force the
+            // credential cell to "Concentration".
+            portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(
+                c, {isPortfolioConc: true, parent: p})));
         }
     });
 
@@ -4209,12 +4644,17 @@ function renderPortfolioTable() {
     const _help = (text) => text
         ? `<span class="info-tip" onclick="event.stopPropagation()"><i class="tip-icon">i</i><span class="tip-bubble">${escapeHtml(text)}</span></span>`
         : '';
+    const _savedWidth = (key) => {
+        const w = portfolioColWidths[key];
+        return (typeof w === 'number' && w > 0) ? ` style="width:${w}px"` : '';
+    };
+    const _resizeHandle = '<span class="col-resize" onmousedown="startPortfolioColResize(event)" onclick="event.stopPropagation()"></span>';
     const visibleHeaders = PORTFOLIO_COLUMNS
         .filter(c => portfolioVisibleCols.has(c.key))
         .map(c => {
             const active = portfolioSortKey === c.key;
             const arrow = active ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
-            return `<th class="sortable-header${active ? ' sort-active' : ''}" onclick="sortPortfolioBy('${c.key}')">${escapeHtml(c.label)}${_help(c.help)}${arrow}</th>`;
+            return `<th class="sortable-header${active ? ' sort-active' : ''}" data-col-key="${c.key}"${_savedWidth(c.key)} onclick="sortPortfolioBy('${c.key}')">${escapeHtml(c.label)}${_help(c.help)}${arrow}${_resizeHandle}</th>`;
         }).join('');
     const nameArrow = (!portfolioSortKey || portfolioSortKey === 'name') ? (portfolioSortDir === 1 ? ' ▲' : ' ▼') : '';
     const nameActive = !portfolioSortKey || portfolioSortKey === 'name';
@@ -4231,37 +4671,71 @@ function renderPortfolioTable() {
     container.innerHTML = portfolioLegend + `
         <table class="program-table">
             <thead><tr>
-                <th class="sortable-header${nameActive ? ' sort-active' : ''}" onclick="sortPortfolioBy('name')">Program${nameHelp}${nameArrow}</th>
+                <th class="sortable-header${nameActive ? ' sort-active' : ''}" data-col-key="name"${_savedWidth('name')} onclick="sortPortfolioBy('name')">Program${nameHelp}${nameArrow}${_resizeHandle}</th>
                 ${visibleHeaders}
             </tr></thead>
             <tbody>${rowHtml.join('')}</tbody>
         </table>`;
 }
 
-function renderPortfolioConcRow(name, search) {
+function renderPortfolioConcRow(name, search, college, parentCollege, parentCampus) {
     const hl = search
         ? escapeHtml(name).replace(new RegExp(`(${escapeHtml(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
             '<mark>$1</mark>')
         : escapeHtml(name);
-    const blankCells = PORTFOLIO_COLUMNS
+    // College: prefer the concentration's own (typical for Provost
+    // programs whose concentrations belong to other colleges); fall
+    // back to the parent's.
+    const effectiveCollege = college || parentCollege || '';
+    const collegeAbbrev = effectiveCollege ? escapeHtml(abbreviateCollege(effectiveCollege)) : '—';
+    const collegeTitle  = effectiveCollege ? ` title="${escapeHtml(effectiveCollege)}"` : '';
+    // Campus always inherits from the parent program.
+    const campusAbbrev = parentCampus ? escapeHtml(abbreviateCampus(parentCampus)) : '—';
+    const campusTitle  = parentCampus ? ` title="${escapeHtml(parentCampus)}"` : '';
+    const cellHtml = PORTFOLIO_COLUMNS
         .filter(c => portfolioVisibleCols.has(c.key))
-        .map(() => '<td>—</td>').join('');
+        .map(c => {
+            if (c.key === 'college') return `<td${collegeTitle}>${collegeAbbrev}</td>`;
+            if (c.key === 'campus')  return `<td${campusTitle}>${campusAbbrev}</td>`;
+            // Credential cell is fixed to "Concentration" for concentration sub-rows.
+            if (c.key === 'degree')  return '<td>Concentration</td>';
+            return '<td>—</td>';
+        })
+        .join('');
     return `<tr class="portfolio-row portfolio-curriculum-conc-row">
-        <td class="program-name-cell"><span class="portfolio-curriculum-conc-indent">↳</span>${hl}</td>
-        ${blankCells}
+        <td class="program-name-cell">${hl}</td>
+        ${cellHtml}
     </tr>`;
 }
 
 function renderPortfolioRow(p, opts = {}) {
-    const {hasConcentrations = false, isExpanded = false, isPortfolioConc = false} = opts;
+    const {hasConcentrations = false, isExpanded = false, isPortfolioConc = false, parent = null} = opts;
+    // For linked concentration sub-rows, inherit college from parent when
+    // the sub-row's own college is blank; inherit campus from parent
+    // always (concentrations live in the parent's deployment). Credential
+    // cell is forced to "Concentration" below.
+    let effectiveCollege = p.college || '';
+    let effectiveCampus  = p.campus  || '';
+    if (isPortfolioConc && parent) {
+        if (!effectiveCollege) effectiveCollege = parent.college || '';
+        effectiveCampus = parent.campus || effectiveCampus;
+    }
 
     const otpBadge    = p.otp_status
         ? `<span class="portfolio-badge otp-badge">${escapeHtml(p.otp_status)}</span>` : '—';
     const ipdBadge    = p.ipd_status
         ? `<span class="portfolio-badge ipd-badge">${escapeHtml(p.ipd_status)}</span>` : '—';
+    // SVT "Status" column. Sub-status used to be shown as a subtitle here;
+    // it now lives in its own column (key 'substatus') with its own filter.
     const svtBadge = p.svt_status
-        ? `<span class="portfolio-badge roster-badge">${escapeHtml(p.svt_status)}</span>
-           ${p.roster_sub_status ? `<br><span class="muted" style="font-size:0.8em">${escapeHtml(p.roster_sub_status)}</span>` : ''}` : '—';
+        ? `<span class="portfolio-badge roster-badge">${escapeHtml(p.svt_status)}</span>` : '—';
+    const subStatusBadge = p.roster_sub_status
+        ? escapeHtml(p.roster_sub_status) : '—';
+    const speedBadge = p.speed_to_market === 'True'
+        ? '<span class="portfolio-badge badge-good">Yes</span>'
+        : (p.speed_to_market === 'False'
+            ? '<span class="portfolio-badge badge-bad">No</span>'
+            : '—');
     const glsBadge = p.gls_status
         ? `<span class="portfolio-badge gls-badge">${escapeHtml(p.gls_status)}</span>` : '—';
     const cimStep  = p.cim_step ? escapeHtml(p.cim_step) : '';
@@ -4280,30 +4754,39 @@ function renderPortfolioRow(p, opts = {}) {
     const isSynthetic = (p.id || '').startsWith('synth_');
     const concBadge = isPortfolioConc
         ? `<span class="portfolio-conc-badge">Conc.</span> ` : '';
-    // CIM-change-type left-border color (matches the Programs tab):
+    // CIM-change-type row tint:
     //   New          → green   (row-added)
     //   Change       → blue    (row-edited)
     //   Inactivation → red     (row-deactivated)
-    // Amber row tint flags 'not in CIM' at the row level — matches exactly
-    // what the In CIM column reports (cim_program_id presence). New campus
-    // deployments of an existing CIM program family are still amber because
-    // there's no canonical CIM record at THAT specific (subject, degree,
-    // campus) — only when a row has a real cim_program_id is it 'in CIM'.
-    const changeClass =
+    // ONLY applies when the program is currently in an active workflow
+    // (cim_step set). Programs whose workflow has completed retain the
+    // historical cim_change_type in the database (so the Completed
+    // Approval filter can use it as a "prior approval" proxy for legacy
+    // entries), but the row is rendered with no tint and the CIM Change
+    // cell shows '—' — see the cimchange override below. Otherwise we'd
+    // visually flag a completed program as if it were still being edited.
+    const activeInWorkflow = !!p.cim_step;
+    const changeClass = activeInWorkflow ? (
         p.cim_change_type === 'New'          ? ' row-added' :
         p.cim_change_type === 'Change'       ? ' row-edited' :
-        p.cim_change_type === 'Inactivation' ? ' row-deactivated' : '';
+        p.cim_change_type === 'Inactivation' ? ' row-deactivated' : ''
+    ) : '';
     const notInCim = !p.cim_program_id ? ' portfolio-not-in-cim' : '';
     const rowClass = (isPortfolioConc
         ? 'portfolio-row portfolio-concentration-row'
         : isSynthetic ? 'portfolio-row portfolio-synthetic-row' : 'portfolio-row')
         + changeClass + notInCim;
 
-    const toggleBtn = hasConcentrations
-        ? `<button class="portfolio-conc-toggle${isExpanded ? ' expanded' : ''}"
-               onclick="event.stopPropagation();togglePortfolioConcentrations('${escapeHtml(p.id)}')"
-               title="${isExpanded ? 'Collapse' : 'Show'} concentrations">${isExpanded ? '▼' : '▶'}</button>`
+    // Expansion affordance: no dedicated arrow column. The program name
+    // itself is clickable when the row has concentrations, with a tiny
+    // chevron appended after the name (rotates on expand) plus cursor
+    // pointer + hover tint via CSS. Zero extra column width.
+    const toggleChevron = hasConcentrations
+        ? ` <span class="portfolio-conc-chevron${isExpanded ? ' expanded' : ''}">${isExpanded ? '▾' : '▸'}</span>`
         : '';
+    const nameCellAttrs = hasConcentrations
+        ? ` class="program-name-cell portfolio-parent-name" onclick="togglePortfolioConcentrations('${escapeHtml(p.id)}')"`
+        : ' class="program-name-cell"';
 
     // For nested concentration sub-rows, prefer a short display name that
     // shows just the concentration topic (not the parent program's name).
@@ -4311,12 +4794,13 @@ function renderPortfolioRow(p, opts = {}) {
     function _shortConcName(full) {
         const n = (full || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
         let m;
+        // ORDER MATTERS — more specific patterns must come before generic
+        // "X Y Concentration" because the latter is greedy enough to match
+        // (and mis-capture) the former. See "Robotics with Concentration
+        // in Mechanical Engineering, MS" where the generic pattern would
+        // grab "with" as the capture group.
         // "X, concentration in Y, DEG"  →  "Y"
         m = n.match(/^.+?,\s*concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        // "X CONCENTRATION_NAME Concentration ..., DEG"  →  "CONCENTRATION_NAME"
-        // e.g. "Bioengineering Biomedical Devices and Bioimaging Concentration Bridge Program, MS"
-        m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i);
         if (m) return m[1].trim();
         // "X with Concentration in Y, DEG"  →  "Y"
         m = n.match(/^.+?\s+with\s+Concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
@@ -4324,27 +4808,33 @@ function renderPortfolioRow(p, opts = {}) {
         // "X - Y Concentration, DEG"  →  "Y"
         m = n.match(/^.+?\s*[-—]\s*(.+?)\s+Concentration,?\s+[A-Z]{1,7}\s*$/i);
         if (m) return m[1].trim();
+        // Generic fallback: "X CONCENTRATION_NAME Concentration ..., DEG"
+        //   →  "CONCENTRATION_NAME"
+        // e.g. "Bioengineering Biomedical Devices and Bioimaging Concentration Bridge Program, MS"
+        m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i);
+        if (m) return m[1].trim();
         return n;
     }
     const displayName = isPortfolioConc
         ? _shortConcName(p.program_name)
         : normalizePortfolioName(stripCampusFromName(p.program_name));
     return `<tr class="${rowClass}" title="${escapeHtml(p.program_name)}">
-        <td class="program-name-cell">${toggleBtn}${concBadge}${escapeHtml(displayName)}${subStatus}</td>
-        ${_pc('degree',     extractPortfolioDegree(p.program_name))}
-        ${_pc('college',    abbreviateCollege(p.college))}
-        ${_pc('campus',     abbreviateCampus(p.campus))}
+        <td${nameCellAttrs}>${concBadge}${escapeHtml(displayName)}${toggleChevron}${subStatus}</td>
+        ${_pc('degree',     isPortfolioConc ? 'Concentration' : extractPortfolioDegree(p.program_name))}
+        ${_pc('college',    abbreviateCollege(effectiveCollege), null, effectiveCollege || '')}
+        ${_pc('campus',     abbreviateCampus(effectiveCampus))}
         ${_pc('market2025',      market2025Badge)}
         ${_pc('perf2025',        perf2025Badge)}
         ${_pc('marketscore2025', escapeHtml(p.market_score_2025 || ''))}
         ${_pc('perfscore2025',   escapeHtml(p.performance_score_2025 || ''))}
         ${_pc('otp',        otpBadge)}
-        ${_pc('ipd',     ipdBadge)}
         ${_pc('svt',     svtBadge)}
+        ${_pc('substatus', subStatusBadge)}
+        ${_pc('speed',   speedBadge)}
         ${_pc('gls',     glsBadge)}
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
-        ${_pc('cimchange',   p.cim_change_type ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
+        ${_pc('cimchange',   (activeInWorkflow && p.cim_change_type) ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
         ${_pc('inworkflow',  p.cim_program_id ? 'Yes' : 'No')}
         ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
         ${_pc('inacttoday', (() => {
