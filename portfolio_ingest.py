@@ -2447,8 +2447,13 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     print(f"  SVT: {len(svt_rows_data)} entries, {n_svt_matched} matched, "
           f"{n_svt_added} added, {n_svt_mismatch} mismatches, {n_svt_nonprog} non-programs")
 
-    # ── Step 2: Overlay IPD ───────────────────────────────────────────────────
-    ipd_rows_data = parse_smartsheet(tsv_path)
+    # ── Step 2: Overlay IPD ── DISABLED (per project direction 2026-05-22) ───
+    # The IPD Smartsheet is no longer authoritative for portfolio status; SVT
+    # is the single source of program-status truth. Keeping the parser import
+    # so the overlay can be re-enabled by flipping the flag without other
+    # code changes, but skipping the entire reconciliation loop.
+    IPD_OVERLAY_ENABLED = False
+    ipd_rows_data = parse_smartsheet(tsv_path) if IPD_OVERLAY_ENABLED else []
     n_ipd_matched = 0
     n_ipd_added   = 0
     n_ipd_mismatch = 0

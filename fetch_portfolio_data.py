@@ -365,7 +365,8 @@ def check_portfolio_sessions():
     results = []
     results.append(_check_sharepoint_tab('SharePoint (OTP)', SHAREPOINT_URL, _SP_OTP_FRAGMENT))
     results.append(_check_sharepoint_tab('SharePoint (Regulatory)', _SP_REGULATORY_URL, _SP_REGULATORY_FRAGMENT))
-    results.append(_check_smartsheet_tab('Smartsheet (IPD)', SMARTSHEET_URL))
+    # IPD Smartsheet tab no longer required — IPD overlay is disabled.
+    # results.append(_check_smartsheet_tab('Smartsheet (IPD)', SMARTSHEET_URL))
     results.append(_check_svt_api_token())  # SVT now via API, not Chrome tab
     return results
 
@@ -812,7 +813,9 @@ if __name__ == "__main__":
     print(f"Browser : {BROWSER_APP}")
     print(f"Output  : {OUTPUT_DIR}")
     fetch_sharepoint()
-    fetch_smartsheet()
+    # fetch_smartsheet() — IPD Dashboard, disabled per project direction
+    # 2026-05-22. portfolio_ingest's IPD overlay is also off; SVT is the
+    # single source of program-status truth now.
     fetch_svt_sheet()         # was fetch_roster_dashboards() — now API-based
     fetch_gls_tableau()
     print("\nDone.")
