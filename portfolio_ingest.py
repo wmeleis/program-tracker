@@ -785,6 +785,11 @@ _NON_PROGRAM_RE = re.compile(
     r'|^semester\s+in\s*:'                   # "Semester In: Rural Health Immersion"
     r'|\brural\s+health\s+immersion\b'       # safety net for the same entry
     r'|\bexecutive\s+credential\b'           # "Executive Credential in X"
+    r'|\bgraduate\s+certificates\b'          # "Online Graduate Certificates with EDGE"
+                                             # — plural form is always a meta
+                                             # category/bundle, not a single
+                                             # program. Real CIM credentials
+                                             # use singular "Graduate Certificate".
     # NOTE: "Launch of the …" and "Suspension of …" are NOT filtered — they
     # represent real proposals (new deployment / inactivation). The "Launch
     # of " / "Suspension of " prefix is stripped before name parsing via
