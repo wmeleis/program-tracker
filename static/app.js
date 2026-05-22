@@ -1937,7 +1937,15 @@ async function buildRefSourcePickerHtml(programId, data) {
         for (const c of candidates) {
             const sel = activeProg === c.id ? ' selected' : '';
             const campusTag = c.campus ? ` — ${escapeHtml(c.campus)}` : '';
-            options.push(`<option value="prog:${c.id}"${sel}>${escapeHtml(c.name)}${campusTag}</option>`);
+            // State badge: "in workflow" (likely to keep changing — caveat
+            // the user) or the completion catalog (stable target).
+            let stateTag = '';
+            if (c.state === 'in_workflow') {
+                stateTag = ' ⟳ in workflow';
+            } else if (c.state === 'completed' && c.completion_date) {
+                stateTag = ` · ${escapeHtml(c.completion_date)}`;
+            }
+            options.push(`<option value="prog:${c.id}"${sel}>${escapeHtml(c.name)}${campusTag}${stateTag}</option>`);
         }
         options.push('</optgroup>');
     } else {

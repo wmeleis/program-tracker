@@ -323,10 +323,16 @@ def api_programs_comparable():
     if not target:
         return jsonify({'error': 'program_not_found'}), 404
 
+    def _attach_state(p):
+        cs = (p.get('current_step') or '').strip()
+        cd = (p.get('completion_date') or '').strip()
+        state = 'in_workflow' if cs else ('completed' if cd else 'unknown')
+        return {'id': p['id'], 'name': p['name'], 'degree': p['degree'],
+                'campus': p.get('campus', ''), 'state': state,
+                'current_step': cs, 'completion_date': cd}
+
     if scope == 'all':
-        out = [{'id': p['id'], 'name': p['name'], 'degree': p['degree'],
-                'campus': p.get('campus', '')}
-               for p in programs if p['id'] != program_id]
+        out = [_attach_state(p) for p in programs if p['id'] != program_id]
     else:
         # Same subject + base degree family. Strip variant suffixes
         # ("—Bridge", "—Online") from the degree code so a Bridge variant
@@ -347,8 +353,27 @@ def api_programs_comparable():
             if p['id'] == program_id: continue
             if base_subject(p['name']) != target_subject: continue
             if target_deg and base_deg(p['degree']) != target_deg: continue
-            out.append({'id': p['id'], 'name': p['name'],
-                        'degree': p['degree'], 'campus': p.get('campus', '')})
+            out.append(_attach_state(p))
+
+    # Dedupe duplicate rows (CIM occasionally has two records with the
+    # same name — e.g. Pharmacy PharmD Boston as both 541 and 543).
+    # Within each (name, campus) bucket, prefer the one in workflow,
+    # else the one completed most recently (highest id as tiebreaker).
+    by_key = {}
+    state_priority = {'in_workflow': 2, 'completed': 1, 'unknown': 0}
+    for c in out:
+        key = ((c['name'] or '').lower(), (c['campus'] or '').lower())
+        prev = by_key.get(key)
+        if prev is None:
+            by_key[key] = c
+            continue
+        # Pick the better candidate
+        if state_priority.get(c['state'], 0) > state_priority.get(prev['state'], 0):
+            by_key[key] = c
+        elif state_priority.get(c['state'], 0) == state_priority.get(prev['state'], 0):
+            if (c['id'] or 0) > (prev['id'] or 0):
+                by_key[key] = c
+    out = list(by_key.values())
     out.sort(key=lambda r: (r['name'] or '').lower())
     return jsonify({'candidates': out, 'scope': scope})
 
