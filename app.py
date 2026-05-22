@@ -745,9 +745,152 @@ def api_heal():
                     'active_only': active_only, 'deploy': deploy})
 
 
+def _select_scan_mode():
+    """Pick scan mode based on what's been run recently.
+
+    Modes:
+      'full'      — complete pipeline (~30-50 min): full discovery + course
+                    + catalog + reference history + regulatory + sweeps.
+                    Runs when the last full scan completed >60 min ago,
+                    or no full scan on record.
+      'quick_p'   — programs-only Approve Pages quick scan (~3-5 min).
+                    Authoritative role transitions for the 46 program roles.
+      'quick_pc'  — programs + courses Approve Pages quick scan (~7-10 min).
+                    Runs every other quick cycle, so courses get transitions
+                    detected at roughly half the cadence of programs.
+
+    Sentinels in `scans.programs_scanned`:
+       >0 → completed full scan (actual count)
+       -1 → weekly sweep
+       -2 → quick_p completion
+       -3 → interleaved quick role update (force_fetch_only, inside do_scan)
+       -4 → quick_pc completion
+    """
+    from database import get_db
+    with get_db() as conn:
+        last_full = conn.execute(
+            "SELECT scan_time FROM scans WHERE programs_scanned > 0 "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        last_quick = conn.execute(
+            "SELECT programs_scanned FROM scans WHERE programs_scanned IN (-2, -4) "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    if not last_full:
+        return 'full'
+    try:
+        last_full_dt = datetime.fromisoformat(last_full['scan_time'])
+    except Exception:
+        return 'full'
+    if (datetime.now() - last_full_dt).total_seconds() > 3600:
+        return 'full'
+    # Within the hour since last full → quick. Alternate programs-only /
+    # programs+courses so courses get covered at half the cadence.
+    if last_quick and last_quick['programs_scanned'] == -2:
+        return 'quick_pc'
+    return 'quick_p'
+
+
+def _publish_if_changed(label):
+    """Compute fingerprint and push docs/ if DB content has changed.
+
+    Returns True if a push happened, False otherwise. Shared by the quick
+    scans and (callable elsewhere) any post-scan publish path.
+    """
+    import subprocess
+    from scraper import compute_db_fingerprint
+    cwd = os.path.dirname(os.path.abspath(__file__))
+    fp_path = os.path.join(cwd, 'data', 'last_export_fingerprint')
+    current_fp = compute_db_fingerprint()
+    prev_fp = ''
+    if os.path.exists(fp_path):
+        try:
+            with open(fp_path) as f:
+                prev_fp = f.read().strip()
+        except Exception:
+            prev_fp = ''
+    if current_fp == prev_fp:
+        print(f">>> {label.upper()} no DB changes (fp unchanged)", flush=True)
+        return False
+    try:
+        subprocess.run(['python3', 'export_static.py'], cwd=cwd, timeout=300)
+        subprocess.run(['git', 'add', 'docs/'], cwd=cwd, timeout=30)
+        subprocess.run(['git', 'commit', '-m',
+                        f'{label} {datetime.now().strftime("%Y-%m-%d %H:%M")}'],
+                       cwd=cwd, timeout=30)
+        subprocess.run(['git', 'push'], cwd=cwd, timeout=180)
+        with open(fp_path, 'w') as f:
+            f.write(current_fp)
+        print(f">>> {label.upper()} pushed (fp {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)", flush=True)
+        return True
+    except Exception as e:
+        print(f">>> {label} publish error: {e}", flush=True)
+        return False
+
+
+def do_quick_scan(include_courses=False):
+    """Approve Pages-based quick scan for fast role-transition detection.
+
+    Programs: ~3-5 min (Approve Pages discovery for the 46 tracked
+    pipeline + college roles, then batch-fetch detail for changed
+    programs only, then reconcile). Courses (optional): adds ~3-5 min.
+
+    No reference history fetch, no regulatory, no portfolio re-download,
+    no sweeps — those are full-scan responsibilities.
+    """
+    try:
+        scan_status['running'] = True
+        scan_status['error']   = None
+        started_at = datetime.now().isoformat()
+        from scraper import (
+            run_full_scan as _scraper_run_full_scan,
+            process_course_scans as _scraper_process_course_scans,
+        )
+        label = 'Quick scan ' + ('p+c' if include_courses else 'p')
+        print(f"\n>>> {label.upper()} START at {started_at}", flush=True)
+
+        # Programs (always)
+        scan_status['phase']    = 'Quick scan: programs discovery…'
+        scan_status['progress'] = 15
+        prog_result = _scraper_run_full_scan()
+        scan_status['progress'] = 55
+
+        # Courses (every other quick cycle)
+        if include_courses:
+            scan_status['phase']    = 'Quick scan: courses discovery…'
+            try:
+                _scraper_process_course_scans([])
+            except Exception as e:
+                print(f">>> {label} courses error: {e}", flush=True)
+            scan_status['progress'] = 80
+
+        # Publish if changed
+        scan_status['phase']    = 'Quick scan: publishing…'
+        _publish_if_changed(label)
+        scan_status['progress'] = 100
+
+        # Record sentinel row so the dashboard "Updated" timestamp ticks
+        # and mode selection can alternate p / p+c.
+        try:
+            record_scan(datetime.now().isoformat(),
+                        -4 if include_courses else -2, 0, 0)
+        except Exception:
+            pass
+    except Exception as e:
+        scan_status['error'] = str(e)
+        print(f">>> Quick scan error: {e}", flush=True)
+    finally:
+        scan_status['running']  = False
+        scan_status['phase']    = ''
+        scan_status['progress'] = 0
+
+
 @app.route('/api/scan/trigger', methods=['POST'])
 def api_scan_trigger():
     """Trigger a manual scan.
+
+    Auto-selects mode based on time since last full scan + alternation
+    state (see _select_scan_mode). Override via {"mode": "full"|"quick_p"|"quick_pc"}.
 
     Preflight: verify the CourseLeaf session is authenticated before spending
     10+ minutes on a scan that would silently do nothing.
@@ -1118,10 +1261,22 @@ def api_scan_trigger():
             scan_status['phase'] = ''
             scan_status['progress'] = 0
 
-    thread = threading.Thread(target=do_scan, daemon=True)
+    # Mode selection — explicit body override wins, else auto-pick.
+    body = request.get_json(silent=True) or {}
+    mode = body.get('mode') or _select_scan_mode()
+    if mode == 'full':
+        target = do_scan
+    elif mode == 'quick_p':
+        target = lambda: do_quick_scan(include_courses=False)
+    elif mode == 'quick_pc':
+        target = lambda: do_quick_scan(include_courses=True)
+    else:
+        return jsonify({'error': 'invalid_mode',
+                        'detail': f"Mode must be one of: full, quick_p, quick_pc (got {mode!r})"}), 400
+    print(f"\n>>> Scan triggered, mode={mode}", flush=True)
+    thread = threading.Thread(target=target, daemon=True)
     thread.start()
-
-    return jsonify({'status': 'scan_started'})
+    return jsonify({'status': 'scan_started', 'mode': mode})
 
 
 @app.route('/api/console')

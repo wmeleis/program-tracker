@@ -338,8 +338,8 @@ def scrape_approve_pages_role(role_name):
 
     Uses async poll-until-stable on the pending-list DOM after navigation:
     CourseLeaf still populates the list via AJAX after page load. We poll
-    up to 20s for non-empty stability, or bail early after 12 consecutive
-    empty polls + ≥7s elapsed (legitimately empty role).
+    up to 10s for non-empty stability, or bail early after 6 consecutive
+    empty polls + ≥3s elapsed (legitimately empty role).
     """
     import urllib.parse
     encoded = urllib.parse.quote(role_name)
@@ -394,15 +394,14 @@ def scrape_approve_pages_role(role_name):
     }}
 
     // Poll every 500ms. Return when the list has stabilized (same size across
-    // 3 consecutive polls) and is non-empty, or after a 20s ceiling.
+    // 3 consecutive polls) and is non-empty, or after a 10s ceiling.
     //
-    // EMPTY-LIST DETECTION: CIM populates the role queue via AJAX. The
-    // request can take 4-8 seconds to complete on some roles. If we bail
-    // too early on "consistently empty", we miss real programs and the
-    // tracker then falls back to stale per-program workflow divs.
-    // Threshold tuned to: 12 consecutive empty polls AND >=7s elapsed.
-    // That's enough time for slow AJAX to land, while still bailing
-    // promptly on legitimately empty roles (~7-8 sec).
+    // EMPTY-LIST DETECTION: CIM populates the role queue via AJAX. Most
+    // empty roles return their (empty) result within ~2 seconds; the prior
+    // 7s/12-poll threshold was extra-cautious and dominated quick-scan
+    // wall time. Tightened to 3s/6-poll for the new Approve Pages quick
+    // scan use case (where we iterate 46 roles per pass and need to
+    // finish within ~3-4 min).
     var lastSize = -1;
     var stableCount = 0;
     var elapsed = 0;
@@ -412,8 +411,8 @@ def scrape_approve_pages_role(role_name):
         if (progs.length === lastSize) stableCount++;
         else stableCount = 0;
         lastSize = progs.length;
-        var stableEmptyDone = (progs.length === 0 && stableCount >= 12 && elapsed >= 7000);
-        if ((progs.length > 0 && stableCount >= 3) || stableEmptyDone || elapsed >= 20000) {{
+        var stableEmptyDone = (progs.length === 0 && stableCount >= 6 && elapsed >= 3000);
+        if ((progs.length > 0 && stableCount >= 3) || stableEmptyDone || elapsed >= 10000) {{
             clearInterval(interval);
             holder.textContent = JSON.stringify(progs);
             holder.setAttribute("data-status", "done");
@@ -428,7 +427,7 @@ def scrape_approve_pages_role(role_name):
 
     check_js = f'''(function(){{ var el = document.getElementById("{poll_tag}"); if (!el) return "MISSING"; return el.getAttribute("data-status") === "done" ? el.textContent : "RUNNING"; }})();'''
     payload = None
-    for _ in range(25):  # up to ~25s total (JS poll loop now bounded at 20s)
+    for _ in range(13):  # up to ~13s total (JS poll loop now bounded at 10s)
         time.sleep(1)
         r = run_js_in_tab("courseleaf/approve", check_js, match_by='url', timeout=10)
         if r and r != 'missing value' and r != 'RUNNING' and r != 'MISSING':
