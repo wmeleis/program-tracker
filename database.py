@@ -786,35 +786,86 @@ def delete_custom_reference(ref_id):
         return cleared
 
 
-def set_program_reference_override(program_id, custom_reference_id):
-    """Set or clear a program's custom reference override."""
+def set_program_reference_override(program_id, custom_reference_id=None, reference_program_id=None):
+    """Set or clear a program's reference override.
+
+    Exactly one of custom_reference_id / reference_program_id should be set
+    at a time — picking one clears the other. Passing both as None clears
+    both (i.e. revert to Auto resolution).
+    """
     with get_db() as conn:
-        if custom_reference_id is None:
-            conn.execute("UPDATE programs SET custom_reference_id = NULL WHERE id = ?", (program_id,))
+        if custom_reference_id is None and reference_program_id is None:
+            conn.execute(
+                "UPDATE programs SET custom_reference_id = NULL, "
+                "reference_program_id = NULL WHERE id = ?",
+                (program_id,),
+            )
+        elif custom_reference_id is not None:
+            conn.execute(
+                "UPDATE programs SET custom_reference_id = ?, "
+                "reference_program_id = NULL WHERE id = ?",
+                (custom_reference_id, program_id),
+            )
         else:
             conn.execute(
-                "UPDATE programs SET custom_reference_id = ? WHERE id = ?",
-                (custom_reference_id, program_id),
+                "UPDATE programs SET reference_program_id = ?, "
+                "custom_reference_id = NULL WHERE id = ?",
+                (reference_program_id, program_id),
             )
 
 
-def get_program_reference_override_id(program_id):
-    """Return the custom_reference_id for a program, or None."""
+def get_program_reference_override(program_id):
+    """Return {'custom_reference_id': N|None, 'reference_program_id': N|None}.
+
+    Both keys present; at most one is non-None.
+    """
     with get_db() as conn:
         row = conn.execute(
-            "SELECT custom_reference_id FROM programs WHERE id = ?",
+            "SELECT custom_reference_id, reference_program_id FROM programs WHERE id = ?",
             (program_id,),
         ).fetchone()
-        return row['custom_reference_id'] if row else None
+        if not row:
+            return {'custom_reference_id': None, 'reference_program_id': None}
+        return {
+            'custom_reference_id': row['custom_reference_id'],
+            'reference_program_id': row['reference_program_id'],
+        }
+
+
+# Back-compat shim — older callers still ask for just the custom_reference_id.
+def get_program_reference_override_id(program_id):
+    return get_program_reference_override(program_id).get('custom_reference_id')
 
 
 def get_all_program_reference_overrides():
-    """Return {program_id: custom_reference_id} for all programs with an override."""
+    """Return {program_id: {'custom_reference_id': N|None, 'reference_program_id': N|None}}
+    for programs with any override set.
+    """
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT id, custom_reference_id FROM programs WHERE custom_reference_id IS NOT NULL"
+            "SELECT id, custom_reference_id, reference_program_id FROM programs "
+            "WHERE custom_reference_id IS NOT NULL OR reference_program_id IS NOT NULL"
         ).fetchall()
-        return {r['id']: r['custom_reference_id'] for r in rows}
+        return {r['id']: {
+            'custom_reference_id': r['custom_reference_id'],
+            'reference_program_id': r['reference_program_id'],
+        } for r in rows}
+
+
+def get_referenced_by(program_id):
+    """Reverse lookup: which programs explicitly point at THIS program
+    via reference_program_id? Returns a list of (id, name) tuples.
+
+    Does NOT include implicit Boston-counterpart references (those are
+    computed at scan time from the campus group map).
+    """
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, name FROM programs WHERE reference_program_id = ? "
+            "ORDER BY name",
+            (program_id,),
+        ).fetchall()
+        return [{'id': r['id'], 'name': r['name']} for r in rows]
 
 
 def upsert_course(course_data):
@@ -1450,6 +1501,17 @@ def migrate_db():
                 print("  Added column: custom_reference_id")
             except sqlite3.OperationalError:
                 pass  # already added
+
+        # Add reference_program_id column to programs if missing.
+        # Used when a user picks "Another program" in the Reference picker —
+        # an explicit pointer at another CIM program. Resolves before the
+        # auto-Boston-counterpart fallback (which happens at fetch time).
+        if 'reference_program_id' not in existing_cols:
+            try:
+                conn.execute("ALTER TABLE programs ADD COLUMN reference_program_id INTEGER")
+                print("  Added column: reference_program_id")
+            except sqlite3.OperationalError:
+                pass
 
         # Portfolio tables (idempotent)
         init_portfolio_tables(conn)

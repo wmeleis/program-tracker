@@ -1522,16 +1522,18 @@ function renderTable(items) {
             const tabs = isCourseView ?
                 `<button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}"
                     onclick="event.stopPropagation(); switchDetailTab('${id}', 'workflow')">Workflow</button>` :
-                `<button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}"
+                `<button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}" data-tab="workflow"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'workflow')">Workflow</button>
-                <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}"
+                <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}" data-tab="curriculum"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'curriculum')">Curriculum</button>
-                <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}"
+                <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}" data-tab="reference"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Reference</button>
-                <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Compare</button>` +
+                <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}" data-tab="compare"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment</button>
+                <button class="detail-tab ${activeTab === 'changes' ? 'active' : ''}" data-tab="changes"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'changes')">Changes</button>` +
                 (hasReg ? `
-                <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}"
+                <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}" data-tab="regulatory"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory</button>` : '');
 
             html += `
@@ -1564,6 +1566,7 @@ function renderTable(items) {
         else if (!isCourseView) {
             if (tab === 'reference') loadReferenceDetail(id);
             else if (tab === 'compare') loadCompareDetail(id);
+            else if (tab === 'changes') loadChangesDetail(id);
             else if (tab === 'regulatory') loadRegulatoryDetail(id);
             else loadCurriculumDetail(id);
         }
@@ -1865,34 +1868,107 @@ async function deleteCustomRef(refId, name) {
     }
 }
 
-async function setProgramReferenceOverride(programId, customRefId) {
+async function setProgramReferenceOverride(programId, selectorValue) {
+    // selectorValue formats:
+    //   "auto"        — clear all overrides
+    //   "file:N"      — pick uploaded file with id=N
+    //   "prog:N"      — pick another CIM program with id=N
+    let body = {};
+    if (selectorValue !== 'auto') {
+        const [kind, idStr] = String(selectorValue).split(':');
+        const id = parseInt(idStr, 10);
+        if (kind === 'file') body = { custom_reference_id: id };
+        else if (kind === 'prog') body = { reference_program_id: id };
+    }
     try {
         await fetch(`/api/program/${programId}/reference_override`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ custom_reference_id: customRefId === 'auto' ? null : parseInt(customRefId, 10) })
+            body: JSON.stringify(body)
         });
-        // Reload the reference tab
         loadReferenceDetail(programId);
     } catch (e) {
         alert('Failed to set override: ' + e.message);
     }
 }
 
-async function buildRefSourcePickerHtml(programId, activeCustomRefId) {
+// Cache of comparable-program candidates per program, populated lazily.
+const _comparableCache = new Map();
+async function loadComparableCandidates(programId, scope) {
+    const key = `${programId}:${scope || 'family'}`;
+    if (_comparableCache.has(key)) return _comparableCache.get(key);
+    try {
+        const res = await fetch(`/api/programs/comparable?program_id=${programId}&scope=${scope || 'family'}`);
+        const data = res.ok ? await res.json() : { candidates: [] };
+        _comparableCache.set(key, data.candidates || []);
+        return data.candidates || [];
+    } catch (e) {
+        return [];
+    }
+}
+
+async function buildRefSourcePickerHtml(programId, data) {
     // Hide picker on the static site — no backend to accept the change
     if (window._staticMode) return '';
-    const refs = await loadCustomRefs();
-    if (!refs.length && !activeCustomRefId) return '';
-    const options = ['<option value="auto"' + (!activeCustomRefId ? ' selected' : '') + '>Auto (Boston / CIM history)</option>'];
-    for (const r of refs) {
-        const sel = activeCustomRefId === r.id ? ' selected' : '';
-        options.push(`<option value="${r.id}"${sel}>Custom: ${escapeHtml(r.name)}</option>`);
+    const source     = data && data.source;
+    const activeFile = source === 'custom'  ? data.custom_reference_id   : null;
+    const activeProg = source === 'program' ? data.reference_program_id  : null;
+
+    const refs       = await loadCustomRefs();
+    const candidates = await loadComparableCandidates(programId, 'family');
+
+    const options = [
+        `<option value="auto"${!activeFile && !activeProg ? ' selected' : ''}>Auto (Boston counterpart or own history)</option>`,
+    ];
+    if (candidates.length) {
+        options.push('<optgroup label="Another program">');
+        for (const c of candidates) {
+            const sel = activeProg === c.id ? ' selected' : '';
+            const campusTag = c.campus ? ` — ${escapeHtml(c.campus)}` : '';
+            options.push(`<option value="prog:${c.id}"${sel}>${escapeHtml(c.name)}${campusTag}</option>`);
+        }
+        options.push('</optgroup>');
     }
+    if (refs.length) {
+        options.push('<optgroup label="Uploaded file">');
+        for (const r of refs) {
+            const sel = activeFile === r.id ? ' selected' : '';
+            options.push(`<option value="file:${r.id}"${sel}>${escapeHtml(r.name)}</option>`);
+        }
+        options.push('</optgroup>');
+    }
+
     return `<div class="ref-source-picker">
         <label>Reference source:</label>
         <select onchange="setProgramReferenceOverride(${programId}, this.value)">${options.join('')}</select>
     </div>`;
+}
+
+// Reverse-lookup banner: shows "This program is the reference for: …".
+// Returns '' when nobody points at this program.
+async function buildReferencedByBanner(programId) {
+    try {
+        const res = await fetch(`/api/program/${programId}/referenced_by`);
+        if (!res.ok) return '';
+        const data = await res.json();
+        const all = [...(data.explicit || []), ...(data.implicit || [])];
+        if (!all.length) return '';
+        // De-dup by id (a program can show up under both lists in edge cases)
+        const seen = new Set();
+        const items = [];
+        for (const r of all) {
+            if (seen.has(r.id)) continue;
+            seen.add(r.id);
+            items.push(`<li>${escapeHtml(r.name)}</li>`);
+        }
+        const count = items.length;
+        return `<div class="referenced-by-banner">
+            <strong>This program is the reference for ${count} other program${count === 1 ? '' : 's'}:</strong>
+            <ul>${items.join('')}</ul>
+        </div>`;
+    } catch (e) {
+        return '';
+    }
 }
 
 // Format CIM's version_date for display. Input comes in a few shapes:
@@ -1923,24 +1999,81 @@ async function loadReferenceDetail(programId) {
     try {
         const res = await fetch(`/api/program/${programId}/reference`);
         const data = res.ok ? await res.json() : {};
-        const activeCustomRefId = data.source === 'custom' ? data.custom_reference_id : null;
-        const picker = await buildRefSourcePickerHtml(programId, activeCustomRefId);
+        const picker = await buildRefSourcePickerHtml(programId, data);
+        const banner = await buildReferencedByBanner(programId);
 
         if (!res.ok || !data.curriculum_html) {
-            contentEl.innerHTML = picker + '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals. You can upload a custom reference from the "References" button at the top of the page.</div>';
+            contentEl.innerHTML = banner + picker +
+                '<div class="workflow-meta">No reference curriculum available. ' +
+                'Pick another program or upload a file via the picker above, ' +
+                'or via the "References" button at the top of the page.</div>';
             return;
         }
         const cleaned = cleanCurriculumHtml(data.curriculum_html);
-        const label = data.source === 'custom' ? 'Custom reference' : 'Reference version';
-        const displayDate = data.source === 'custom'
-            ? data.version_date
-            : formatReferenceVersionLabel(data.version_date);
+        let label;
+        if (data.source === 'custom')        label = 'Custom reference';
+        else if (data.source === 'program')  label = 'Reference program';
+        else                                  label = 'Reference version';
+        const displayDate = data.source === 'auto'
+            ? formatReferenceVersionLabel(data.version_date)
+            : data.version_date;
         const header = displayDate
             ? `<div class="reference-header">${label}: ${escapeHtml(displayDate)}</div>`
             : '';
-        contentEl.innerHTML = `${picker}${header}<div class="curriculum-content">${cleaned}</div>`;
+        contentEl.innerHTML = `${banner}${picker}${header}<div class="curriculum-content">${cleaned}</div>`;
     } catch (e) {
         contentEl.innerHTML = '<div class="workflow-meta">Failed to load reference curriculum.</div>';
+    }
+}
+
+// Changes tab: diff this program's current curriculum against its OWN
+// most-recent approved CIM history version. Separate from the Reference
+// tab (which can point at another program / uploaded file).
+async function loadChangesDetail(programId) {
+    const contentEl = document.getElementById(`detail-content-${programId}`);
+    if (!contentEl) return;
+    contentEl.innerHTML = '<div class="workflow-loading">Loading change history...</div>';
+
+    try {
+        const [currRes, histRes] = await Promise.all([
+            fetch(`/api/program/${programId}/curriculum`),
+            fetch(`/api/program/${programId}/changes`),
+        ]);
+        const currData = currRes.ok ? await currRes.json() : {};
+        const currHtml = currData.curriculum_html || '';
+
+        if (!histRes.ok) {
+            contentEl.innerHTML = '<div class="workflow-meta">' +
+                'No prior approved version on file for this program — ' +
+                'nothing to compare against yet. The Changes tab will become ' +
+                'available once this program has been through CIM at least once.</div>';
+            return;
+        }
+        const histData = await histRes.json();
+        const histHtml = histData.curriculum_html || '';
+
+        if (!currHtml || !histHtml) {
+            contentEl.innerHTML = '<div class="workflow-meta">Curriculum data not available for change comparison.</div>';
+            return;
+        }
+
+        const {identical, diff} = compareCurricula(currHtml, histHtml);
+        const dateLabel = formatReferenceVersionLabel(histData.version_date || '');
+        const header = `<div class="reference-header">Comparing current proposal against: ${escapeHtml(dateLabel || 'previous approved version')}</div>`;
+
+        if (identical) {
+            contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the previous approved version — no changes.</div>`;
+        } else {
+            const table = renderSideBySide(diff, 'Current proposal', 'Previous approved');
+            contentEl.innerHTML = `${header}
+                <div class="compare-legend">
+                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Added in this proposal</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Removed from previous version</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
+                </div>${table}`;
+        }
+    } catch (e) {
+        contentEl.innerHTML = '<div class="workflow-meta">Failed to load change history.</div>';
     }
 }
 
@@ -2083,11 +2216,13 @@ function switchDetailTab(programId, tab) {
     const detailRow = document.getElementById(`detail-${programId}`);
     if (!detailRow) return;
     detailRow.querySelectorAll('.detail-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.textContent.trim().toLowerCase() === tab);
+        const btnTab = btn.dataset.tab || btn.textContent.trim().toLowerCase();
+        btn.classList.toggle('active', btnTab === tab);
     });
     if (tab === 'workflow') loadWorkflowDetail(programId);
     else if (tab === 'reference') loadReferenceDetail(programId);
     else if (tab === 'compare') loadCompareDetail(programId);
+    else if (tab === 'changes') loadChangesDetail(programId);
     else if (tab === 'regulatory') loadRegulatoryDetail(programId);
     else loadCurriculumDetail(programId);
 }
@@ -2971,11 +3106,12 @@ async function loadCompareDetail(programId) {
             if (identical) {
                 contentEl.innerHTML = `${header}<div class="compare-identical">Proposed curriculum is identical to the custom reference.</div>`;
             } else {
-                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
+                const customLabel = `Custom reference: ${refData0.name || refData0.version_date || ''}`;
+                const table = renderSideBySide(diff, 'This proposal', customLabel);
                 contentEl.innerHTML = `${header}
                     <div class="compare-legend">
-                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>
-                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in this proposal</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in custom reference</span>
                         <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>${table}`;
             }
@@ -3025,11 +3161,13 @@ async function loadCompareDetail(programId) {
             if (identical) {
                 contentEl.innerHTML = `${header}<div class="compare-identical">${identicalMsg}</div>`;
             } else {
-                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
+                const thisLabel = progName || 'This deployment';
+                const refLabel = inWorkflow ? 'Boston (in workflow)' : 'Boston (last approved)';
+                const table = renderSideBySide(diff, thisLabel, refLabel);
                 contentEl.innerHTML = `${header}
                     <div class="compare-legend">
-                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>
-                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in ${escapeHtml(thisLabel)}</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ${escapeHtml(refLabel)}</span>
                         <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>${table}`;
             }
@@ -3050,11 +3188,12 @@ async function loadCompareDetail(programId) {
                     continue;
                 }
 
-                // Boston curriculum on the left (labeled "Proposed Curriculum"),
-                // deployment on the right (labeled "Reference Curriculum").
-                // compareCurricula(left, right) — first arg ends up on the
-                // left of the rendered side-by-side table.
-                const {identical, diff} = compareCurricula(currHtml, depHtml);
+                // Deployment on the LEFT, Boston (the reference) on the RIGHT.
+                // This way the diff color semantics line up with intuition:
+                //   red on LEFT  = course in the deployment but not in Boston
+                //   green on RIGHT = course in Boston but not in the deployment
+                // compareCurricula(left, right) — first arg = left side.
+                const {identical, diff} = compareCurricula(depHtml, currHtml);
                 if (!identical) allIdentical = false;
                 deploymentResults.push({name: depName, id: depId, identical, diff});
             }
@@ -3076,11 +3215,11 @@ async function loadCompareDetail(programId) {
                     html += '<div class="compare-identical-small">Identical</div>';
                 } else {
                     html += `<div class="compare-legend">
-                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>
-                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in ${escapeHtml(dep.name)}</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in Boston</span>
                         <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>`;
-                    html += renderSideBySide(dep.diff, 'Proposed Curriculum', 'Reference Curriculum');
+                    html += renderSideBySide(dep.diff, dep.name, 'Boston (reference)');
                 }
                 html += '</div>';
             }
@@ -3105,10 +3244,10 @@ async function loadCompareDetail(programId) {
             if (identical) {
                 contentEl.innerHTML = '<div class="compare-identical">Current curriculum is identical to the last approved version.</div>';
             } else {
-                const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
+                const table = renderSideBySide(diff, 'This proposal', 'Last approved version');
                 contentEl.innerHTML = `<div class="compare-legend">
-                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in proposal</span>
-                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in reference</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in this proposal</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in last approved</span>
                     <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                 </div>${table}`;
             }

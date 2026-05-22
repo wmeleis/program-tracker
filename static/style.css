@@ -1153,6 +1153,26 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     border: 1px solid var(--border);
     border-radius: 4px;
     font-size: 13px;
+    min-width: 280px;
+}
+
+/* "This program is the reference for: …" banner shown on the Reference tab
+ * when other programs (explicitly or via auto-Boston-counterpart) use this
+ * program as their reference. */
+.referenced-by-banner {
+    background: #eff6ff;
+    border-left: 3px solid var(--accent, #2563eb);
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #1e3a8a;
+}
+.referenced-by-banner ul {
+    margin: 6px 0 0 0;
+    padding-left: 18px;
+}
+.referenced-by-banner li {
+    margin: 2px 0;
 }
 
 /* Error banner (session check failures etc.) */

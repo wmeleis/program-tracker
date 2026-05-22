@@ -191,8 +191,29 @@ def export_data():
         'count': catalog_counts.get(role, 0),
     } for role in CATALOG_TRACKED_ROLES]
 
-    from database import get_all_portfolio_programs
+    from database import get_all_portfolio_programs, get_all_program_reference_overrides
     portfolio_programs = get_all_portfolio_programs()
+
+    # referenced_by — reverse lookup of {target_program_id: [{id, name}, ...]}
+    # combining explicit (reference_program_id) and implicit (Boston→deployments)
+    # references. Mirrors /api/program/<id>/referenced_by on the static site.
+    refd_by = {}
+    all_overrides = get_all_program_reference_overrides()
+    name_by_id = {p['id']: p['name'] for p in programs}
+    for src_id, ov in all_overrides.items():
+        target = ov.get('reference_program_id')
+        if target and target in name_by_id and src_id in name_by_id:
+            refd_by.setdefault(target, []).append({'id': src_id, 'name': name_by_id[src_id], 'kind': 'explicit'})
+    # Implicit Boston→deployments — only for deployments WITHOUT their own override
+    b2d, _d2b = build_campus_groups(programs)
+    for boston_id, deps in b2d.items():
+        for dep_id in deps:
+            dep_ov = all_overrides.get(dep_id)
+            if dep_ov and (dep_ov.get('custom_reference_id') or dep_ov.get('reference_program_id')):
+                continue
+            if dep_id in name_by_id and boston_id in name_by_id:
+                refd_by.setdefault(boston_id, []).append({'id': dep_id, 'name': name_by_id[dep_id], 'kind': 'implicit'})
+    referenced_by = {str(k): v for k, v in refd_by.items()}
 
     return {
         'exported_at': datetime.now().isoformat(),
@@ -211,6 +232,7 @@ def export_data():
         'catalog_pages': catalog_pages,
         'catalog_pipeline': catalog_pipeline,
         'portfolio_programs': portfolio_programs,
+        'referenced_by': referenced_by,
     }
 
 
@@ -266,36 +288,79 @@ def build_static_site():
     _write_json_encrypted(curriculum, os.path.join(EXPORT_DIR, 'curriculum.json'), key)
 
     reference = get_all_reference_curriculum()
-    # Bake custom-reference overrides into reference.json: if a program has an
-    # override, that overrides the auto-derived reference for the static site.
+    # Strip the legacy "self-reference" sentinels (version_id=-1) so the
+    # static site doesn't display a curriculum compared against itself.
+    for pid in list(reference.keys()):
+        entry = reference[pid]
+        if isinstance(entry, dict):
+            if entry.get('version_id') == -1:
+                del reference[pid]
+            else:
+                vd = (entry.get('version_date') or '').lower()
+                if 'no prior approved' in vd:
+                    del reference[pid]
+
+    # Bake reference overrides into reference.json. Two kinds:
+    #   custom_reference_id  → an uploaded file's curriculum_html
+    #   reference_program_id → another CIM program's curriculum_html (its
+    #                          own currently-stored proposal)
     overrides = get_all_program_reference_overrides()
-    for program_id, custom_ref_id in overrides.items():
-        custom = get_custom_reference(custom_ref_id)
-        if custom and custom.get('curriculum_html'):
-            reference[str(program_id)] = {
-                'version_date': f"Custom reference: {custom.get('name', '')}",
-                'html': custom.get('curriculum_html', ''),
-            }
+    # Index program curriculum by id for the "another program" path
+    prog_curr_by_id = {p['id']: p.get('curriculum_html', '') for p in data['programs']}
+    prog_name_by_id = {p['id']: p.get('name', '') for p in data['programs']}
+    for program_id, ov in overrides.items():
+        if ov.get('custom_reference_id'):
+            custom = get_custom_reference(ov['custom_reference_id'])
+            if custom and custom.get('curriculum_html'):
+                reference[str(program_id)] = {
+                    'version_date': f"Custom reference: {custom.get('name', '')}",
+                    'html': custom.get('curriculum_html', ''),
+                    'source': 'custom',
+                }
+        elif ov.get('reference_program_id'):
+            other_id   = ov['reference_program_id']
+            other_html = prog_curr_by_id.get(other_id, '')
+            other_name = prog_name_by_id.get(other_id, '')
+            if other_html:
+                reference[str(program_id)] = {
+                    'version_date': f"Reference program: {other_name}",
+                    'html': other_html,
+                    'source': 'program',
+                    'reference_program_id': other_id,
+                }
 
     # Campus relationship data
     boston_to_deployments, deployment_to_boston = build_campus_groups(data['programs'])
 
-    # Propagate Boston's custom override to non-Boston deployments so their
-    # Compare tab sees the same umbrella reference (matches app.py's runtime
-    # /api/program/<id>/reference logic). Deployments that already have their
-    # own override keep it.
+    # Propagate Boston's override (file OR another-program) to non-Boston
+    # deployments so their Alignment tab sees the same umbrella reference
+    # (matches app.py's /api/program/<id>/reference logic). Deployments that
+    # already have their own override keep it.
     for deployment_id, boston_id in deployment_to_boston.items():
         if deployment_id in overrides:
             continue
-        boston_custom_id = overrides.get(boston_id)
-        if not boston_custom_id:
+        boston_ov = overrides.get(boston_id)
+        if not boston_ov:
             continue
-        custom = get_custom_reference(boston_custom_id)
-        if custom and custom.get('curriculum_html'):
-            reference[str(deployment_id)] = {
-                'version_date': f"Custom reference (via Boston counterpart): {custom.get('name', '')}",
-                'html': custom.get('curriculum_html', ''),
-            }
+        if boston_ov.get('custom_reference_id'):
+            custom = get_custom_reference(boston_ov['custom_reference_id'])
+            if custom and custom.get('curriculum_html'):
+                reference[str(deployment_id)] = {
+                    'version_date': f"Custom reference (via Boston counterpart): {custom.get('name', '')}",
+                    'html': custom.get('curriculum_html', ''),
+                    'source': 'custom',
+                }
+        elif boston_ov.get('reference_program_id'):
+            other_id   = boston_ov['reference_program_id']
+            other_html = prog_curr_by_id.get(other_id, '')
+            other_name = prog_name_by_id.get(other_id, '')
+            if other_html:
+                reference[str(deployment_id)] = {
+                    'version_date': f"Reference program (via Boston counterpart): {other_name}",
+                    'html': other_html,
+                    'source': 'program',
+                    'reference_program_id': other_id,
+                }
 
     # Apply server-side HTML cleaner (strips plan-of-study sections etc.) so
     # the static site's Reference + Compare tabs get the same cleanup as Flask.
@@ -872,6 +937,15 @@ function __staticInit() {
 
     // Patch reference curriculum loading to use static data
     let _referenceCache = null;
+    function _staticBuildReferencedByBanner(programId, D) {
+        const list = (D.referenced_by || {})[String(programId)] || [];
+        if (!list.length) return '';
+        const items = list.map(r => `<li>${escapeHtml(r.name)}</li>`).join('');
+        return `<div class="referenced-by-banner">
+            <strong>This program is the reference for ${list.length} other program${list.length === 1 ? '' : 's'}:</strong>
+            <ul>${items}</ul>
+        </div>`;
+    }
     window.loadReferenceDetail = async function(programId) {
         const contentEl = document.getElementById(`detail-content-${programId}`);
         if (!contentEl) return;
@@ -884,18 +958,69 @@ function __staticInit() {
                 return;
             }
         }
+        const D = await _getData();
+        const banner = _staticBuildReferencedByBanner(programId, D);
         const ref = _referenceCache[String(programId)];
         if (ref && ref.html) {
             const cleaned = cleanCurriculumHtml(ref.html);
             const displayDate = typeof formatReferenceVersionLabel === 'function'
                 ? formatReferenceVersionLabel(ref.version_date)
                 : ref.version_date;
+            let label = 'Reference version';
+            if (ref.source === 'custom')       label = 'Custom reference';
+            else if (ref.source === 'program') label = 'Reference program';
             const header = displayDate
-                ? `<div class="reference-header">Reference version: ${displayDate}</div>`
+                ? `<div class="reference-header">${label}: ${displayDate}</div>`
                 : '';
-            contentEl.innerHTML = `${header}<div class="curriculum-content">${cleaned}</div>`;
+            contentEl.innerHTML = `${banner}${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {
-            contentEl.innerHTML = '<div class="workflow-meta">No reference curriculum available. This may be a new program with no prior approvals.</div>';
+            contentEl.innerHTML = banner + '<div class="workflow-meta">No reference curriculum available.</div>';
+        }
+    };
+
+    // Changes tab — diff this program's current curriculum against the
+    // reference if and only if the reference appears to be this program's
+    // OWN history (no Boston annotation, no override). For non-Boston
+    // deployments whose reference is the Boston counterpart, hide the
+    // tab's content with a notice.
+    window.loadChangesDetail = async function(programId) {
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
+        contentEl.innerHTML = '<div class="workflow-loading">Loading change history...</div>';
+        if (!_curriculumCache) {
+            try { _curriculumCache = window.__EMBEDDED_CURRICULUM__ || (await (await fetch('curriculum.json')).json()); } catch(e) {}
+        }
+        if (!_referenceCache) {
+            try { _referenceCache = window.__EMBEDDED_REFERENCE__ || (await (await fetch('reference.json')).json()); } catch(e) {}
+        }
+        const currHtml = (_curriculumCache || {})[String(programId)] || '';
+        const ref = (_referenceCache || {})[String(programId)];
+        const vd  = ref ? (ref.version_date || '') : '';
+        // Filter: only treat as "own history" when there's no Boston/override
+        // annotation. Otherwise hide the diff.
+        const isOwnHistory = ref && !ref.source && !/Boston/i.test(vd);
+        if (!isOwnHistory) {
+            contentEl.innerHTML = '<div class="workflow-meta">No own-history version available for this program. The Changes tab compares against this program\\'s own previous approved version, which isn\\'t on file (this is normal for non-Boston deployments and brand-new programs).</div>';
+            return;
+        }
+        if (!currHtml || !ref.html) {
+            contentEl.innerHTML = '<div class="workflow-meta">Curriculum data not available for change comparison.</div>';
+            return;
+        }
+        const {identical, diff} = compareCurricula(currHtml, ref.html);
+        const dateLabel = typeof formatReferenceVersionLabel === 'function'
+            ? formatReferenceVersionLabel(vd) : vd;
+        const header = `<div class="reference-header">Comparing current proposal against: ${escapeHtml(dateLabel || 'previous approved version')}</div>`;
+        if (identical) {
+            contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the previous approved version — no changes.</div>`;
+        } else {
+            const table = renderSideBySide(diff, 'Current proposal', 'Previous approved');
+            contentEl.innerHTML = `${header}
+                <div class="compare-legend">
+                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Added in this proposal</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Removed from previous version</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
+                </div>${table}`;
         }
     };
 

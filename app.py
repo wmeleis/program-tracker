@@ -20,7 +20,8 @@ from database import (
     record_scan,
     create_custom_reference, list_custom_references, get_custom_reference,
     delete_custom_reference, set_program_reference_override,
-    get_program_reference_override_id,
+    get_program_reference_override_id, get_program_reference_override,
+    get_referenced_by,
 )
 from docx_parser import parse_docx
 from html_cleaner import clean_curriculum_html
@@ -157,50 +158,209 @@ def api_program_regulatory(program_id):
 def api_program_reference(program_id):
     """Get reference curriculum for a program.
 
-    If the program has a custom_reference_id override, returns that custom
-    reference's curriculum (annotated with source='custom'). Otherwise returns
-    the auto-derived reference from CIM history (source='auto').
+    Resolution precedence (top wins):
+      1. Uploaded file (custom_reference_id) → source='custom'
+      2. Another CIM program (reference_program_id) → source='program'
+      3. Auto: Boston counterpart for non-Boston / own history otherwise
+         → source='auto'
+      4. No reference available → 404
+
+    No more self-reference fallback. If a program has no Boston counterpart
+    and no prior approved version in CIM, the API returns 404 and the
+    Alignment tab shows "no reference available" instead of synthesizing
+    a comparison against the program's own current curriculum.
     """
-    override_id = get_program_reference_override_id(program_id)
-    if override_id:
-        custom = get_custom_reference(override_id)
+    override = get_program_reference_override(program_id)
+
+    # 1. Custom uploaded file
+    if override['custom_reference_id']:
+        custom = get_custom_reference(override['custom_reference_id'])
         if custom:
             return jsonify({
                 'source': 'custom',
-                'custom_reference_id': override_id,
+                'custom_reference_id': override['custom_reference_id'],
                 'name': custom.get('name'),
                 'source_filename': custom.get('source_filename'),
                 'version_date': f"Custom reference: {custom.get('name', '')}",
                 'curriculum_html': clean_curriculum_html(custom.get('curriculum_html', '')),
             })
-        # Override points to a deleted ref — fall through to auto
+        # Override points to a deleted ref — fall through
 
-    # Non-Boston deployments: if Boston counterpart has a custom override,
-    # use that custom reference as the deployment's reference too. This way
-    # uploading one umbrella doc covers every deployment of the program.
+    # 2. Another CIM program (explicit override)
+    if override['reference_program_id']:
+        from database import get_db
+        other_id = override['reference_program_id']
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT name, curriculum_html FROM programs WHERE id = ?",
+                (other_id,)
+            ).fetchone()
+        if row and (row['curriculum_html'] or '').strip():
+            return jsonify({
+                'source': 'program',
+                'reference_program_id': other_id,
+                'name': row['name'],
+                'version_date': f"Reference program: {row['name']}",
+                'curriculum_html': clean_curriculum_html(row['curriculum_html']),
+            })
+        # Target missing or empty — fall through to auto
+
+    # 3. Inheritance: if this program is a non-Boston deployment whose Boston
+    # counterpart has a file or program override set, use that. Lets a single
+    # override on Boston cover every deployment.
     programs = get_all_programs()
     _boston_to_deployments, deployment_to_boston = build_campus_groups(programs)
     boston_id = deployment_to_boston.get(program_id)
     if boston_id:
-        boston_override_id = get_program_reference_override_id(boston_id)
-        if boston_override_id:
-            custom = get_custom_reference(boston_override_id)
+        boston_override = get_program_reference_override(boston_id)
+        if boston_override['custom_reference_id']:
+            custom = get_custom_reference(boston_override['custom_reference_id'])
             if custom:
                 return jsonify({
                     'source': 'custom',
-                    'custom_reference_id': boston_override_id,
+                    'custom_reference_id': boston_override['custom_reference_id'],
                     'name': custom.get('name'),
                     'source_filename': custom.get('source_filename'),
                     'version_date': f"Custom reference (via Boston counterpart): {custom.get('name', '')}",
                     'curriculum_html': clean_curriculum_html(custom.get('curriculum_html', '')),
                 })
+        if boston_override['reference_program_id']:
+            from database import get_db
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT name, curriculum_html FROM programs WHERE id = ?",
+                    (boston_override['reference_program_id'],)
+                ).fetchone()
+            if row and (row['curriculum_html'] or '').strip():
+                return jsonify({
+                    'source': 'program',
+                    'reference_program_id': boston_override['reference_program_id'],
+                    'name': row['name'],
+                    'version_date': f"Reference program (via Boston counterpart): {row['name']}",
+                    'curriculum_html': clean_curriculum_html(row['curriculum_html']),
+                })
 
+    # 4. Auto-derived from CIM history (scrape time)
     ref = get_reference_curriculum(program_id)
+    # Suppress the legacy "self-reference" sentinel — comparing a program
+    # against an older edit of itself isn't a Reference comparison; that's
+    # what the Changes tab is for.
     if ref:
-        ref['source'] = 'auto'
-        ref['curriculum_html'] = clean_curriculum_html(ref.get('curriculum_html', ''))
-        return jsonify(ref)
+        vd = (ref.get('version_date') or '').lower()
+        is_self_ref = (ref.get('version_id') == -1 or 'no prior approved' in vd)
+        if not is_self_ref:
+            ref['source'] = 'auto'
+            ref['curriculum_html'] = clean_curriculum_html(ref.get('curriculum_html', ''))
+            return jsonify(ref)
     return jsonify({'error': 'No reference curriculum found'}), 404
+
+
+@app.route('/api/program/<int:program_id>/changes')
+def api_program_changes(program_id):
+    """Get the program's OWN most-recent approved version for the Changes tab.
+
+    The Changes tab compares the program's current curriculum against its
+    last-approved CIM history version (intra-program diff). This is
+    distinct from the Reference tab, which compares against a different
+    program / uploaded file.
+
+    Returns 404 when this program has no own-history row — either it's a
+    brand-new program with no prior approved version, or the stored
+    reference is a Boston-counterpart record (used as the Reference, not
+    the Changes baseline).
+    """
+    ref = get_reference_curriculum(program_id)
+    if not ref:
+        return jsonify({'error': 'No prior version available'}), 404
+    vd = (ref.get('version_date') or '')
+    # Reject Boston-counterpart annotations: those aren't this program's
+    # own history. Class detection by annotation string is hokey but
+    # matches how fetch_reference_curricula tags non-Boston refs.
+    if 'Boston' in vd or ref.get('version_id') in (0, -1):
+        return jsonify({'error': 'No own-history version available'}), 404
+    ref['curriculum_html'] = clean_curriculum_html(ref.get('curriculum_html', ''))
+    return jsonify(ref)
+
+
+@app.route('/api/programs/comparable')
+def api_programs_comparable():
+    """Picker source: list programs eligible as a reference for a given
+    program (by subject + degree). Used by the "Another program" picker
+    on the Reference tab.
+
+    Query params:
+      - program_id (required): the program asking for candidates
+      - scope (optional): 'family' (default — same subject + base degree)
+        or 'all' (every program)
+    """
+    program_id = request.args.get('program_id', type=int)
+    scope = request.args.get('scope', 'family')
+    if not program_id:
+        return jsonify({'error': 'program_id required'}), 400
+    programs = get_all_programs()
+    target = next((p for p in programs if p['id'] == program_id), None)
+    if not target:
+        return jsonify({'error': 'program_not_found'}), 404
+
+    if scope == 'all':
+        out = [{'id': p['id'], 'name': p['name'], 'degree': p['degree'],
+                'campus': p.get('campus', '')}
+               for p in programs if p['id'] != program_id]
+    else:
+        # Same subject + base degree family. Strip variant suffixes
+        # ("—Bridge", "—Online") from the degree code so a Bridge variant
+        # can pick a regular variant of the same program as its reference.
+        import re as _re
+        def base_deg(d):
+            return (d or '').split('—')[0].strip().upper()
+        def base_subject(name):
+            n = _re.sub(r'\s*\([^)]*\)\s*$', '', name or '')
+            # Strip ", DEGREE" suffix if present
+            if ',' in n:
+                n = n.rsplit(',', 1)[0]
+            return n.strip().lower()
+        target_subject = base_subject(target['name'])
+        target_deg     = base_deg(target['degree'])
+        out = []
+        for p in programs:
+            if p['id'] == program_id: continue
+            if base_subject(p['name']) != target_subject: continue
+            if target_deg and base_deg(p['degree']) != target_deg: continue
+            out.append({'id': p['id'], 'name': p['name'],
+                        'degree': p['degree'], 'campus': p.get('campus', '')})
+    out.sort(key=lambda r: (r['name'] or '').lower())
+    return jsonify({'candidates': out, 'scope': scope})
+
+
+@app.route('/api/program/<int:program_id>/referenced_by')
+def api_program_referenced_by(program_id):
+    """Reverse lookup: which programs use THIS program as their reference?
+
+    Two sources combined:
+      - Explicit `reference_program_id` pointers (any program that picked
+        this one via the "Another program" override).
+      - Implicit Boston-counterpart references (deployments that resolve
+        to this program automatically because there's no override).
+        Only populated when this program IS a Boston deployment.
+
+    Returns {'explicit': [{id, name}], 'implicit': [{id, name}]}.
+    """
+    explicit = get_referenced_by(program_id)
+    implicit = []
+    programs = get_all_programs()
+    boston_to_deployments, _ = build_campus_groups(programs)
+    if program_id in boston_to_deployments:
+        prog_by_id = {p['id']: p for p in programs}
+        for dep_id in boston_to_deployments[program_id]:
+            # Exclude any deployment that has an override pointing somewhere
+            # else — those resolve to that target, not to this Boston program.
+            dep_override = get_program_reference_override(dep_id)
+            if dep_override['custom_reference_id'] or dep_override['reference_program_id']:
+                continue
+            p = prog_by_id.get(dep_id)
+            if p:
+                implicit.append({'id': dep_id, 'name': p['name']})
+    return jsonify({'explicit': explicit, 'implicit': implicit})
 
 
 @app.route('/api/custom_references', methods=['GET'])
@@ -301,19 +461,47 @@ def api_delete_custom_reference(ref_id):
 
 @app.route('/api/program/<int:program_id>/reference_override', methods=['POST'])
 def api_set_reference_override(program_id):
-    """Set (or clear with null) a program's custom reference override.
+    """Set (or clear) a program's reference override.
 
-    Body: {"custom_reference_id": N} or {"custom_reference_id": null}
+    Body shapes (one of):
+      {"custom_reference_id": N}     — pick an uploaded file as reference
+      {"reference_program_id": N}    — pick another CIM program as reference
+      {"custom_reference_id": null}  — clear to Auto (back-compat)
+      {}                             — clear to Auto
     """
     body = request.get_json(silent=True) or {}
-    ref_id = body.get('custom_reference_id')
-    if ref_id is not None:
-        # Validate it exists
-        if not get_custom_reference(int(ref_id)):
+    custom_id  = body.get('custom_reference_id')
+    program_id_arg = body.get('reference_program_id')
+
+    if custom_id is not None and program_id_arg is not None:
+        return jsonify({'error': 'cannot_set_both',
+                        'detail': 'Pass exactly one of custom_reference_id / reference_program_id, '
+                                  'or pass null/empty to clear both.'}), 400
+
+    if custom_id is not None:
+        if not get_custom_reference(int(custom_id)):
             return jsonify({'error': 'custom_reference_not_found'}), 404
-        ref_id = int(ref_id)
-    set_program_reference_override(program_id, ref_id)
-    return jsonify({'program_id': program_id, 'custom_reference_id': ref_id})
+        set_program_reference_override(program_id, custom_reference_id=int(custom_id))
+    elif program_id_arg is not None:
+        # Validate the target program exists and isn't this program
+        if int(program_id_arg) == program_id:
+            return jsonify({'error': 'self_reference_not_allowed'}), 400
+        from database import get_db
+        with get_db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM programs WHERE id = ?", (int(program_id_arg),)
+            ).fetchone()
+        if not exists:
+            return jsonify({'error': 'reference_program_not_found'}), 404
+        set_program_reference_override(program_id, reference_program_id=int(program_id_arg))
+    else:
+        # Both null — clear
+        set_program_reference_override(program_id)
+    return jsonify({
+        'program_id': program_id,
+        'custom_reference_id': custom_id if custom_id is not None else None,
+        'reference_program_id': int(program_id_arg) if program_id_arg is not None else None,
+    })
 
 
 @app.route('/api/campus_groups')
