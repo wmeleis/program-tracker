@@ -1480,33 +1480,46 @@ def run_full_scan(force_fetch_only=False):
             # and didn't, so the walk's result is what we should trust.
             # (Even fully-completed programs flow through the end-of-
             # scan verification block below.)
+            # Quick-scan step-overwrite policy: when force_fetch_only=True
+            # (no Approve Pages discovery), we have NO authoritative signal
+            # for current_step transitions. The workflow-div walk is
+            # unreliable in TWO directions:
+            #   - Walk lands EARLIER than DB (parallel-branch case): the
+            #     walk locked onto the linear branch (e.g. GRA Regulatory)
+            #     while Approve Pages had reported the parallel branch
+            #     (e.g. Program Graduate Provost Review). Walk would
+            #     wrongly regress the program.
+            #   - Walk lands LATER than DB (rollback-lag case): Approve
+            #     Pages saw a rollback to a college-level step, but the
+            #     workflow div's approval log still has an old "Approved
+            #     for X" event so the walk locks onto X. Walk would
+            #     wrongly advance the program.
+            # The two cases are indistinguishable from inside a quick
+            # scan. Per the project's reconciliation policy ("Approve
+            # Pages is authoritative; the workflow div + approval log
+            # are the fallback"), quick scans should NEVER overwrite a
+            # non-empty current_step that was set by a previous full
+            # scan. Step transitions are exclusively the responsibility
+            # of full scans (which iterate Approve Pages every ~50 min).
+            #
+            # We still let the walk produce a current_step when the DB
+            # row has none (brand-new program appearing between full
+            # scans) AND we let the workflow-div-says-complete signal
+            # through (the completion_date check below requires
+            # current_step to be empty, so we explicitly allow the walk
+            # to clear current_step iff the program is genuinely complete
+            # — every step approved, no current marker). That keeps
+            # completed-program detection working without re-introducing
+            # step churn.
             if force_fetch_only:
                 existing_step = (info.get('current_step') or '').strip()
-                if existing_step and existing_step != current_step:
-                    name_to_order = {(s.get('name') or '').strip(): s.get('order', -1)
-                                     for s in steps}
-                    existing_order = name_to_order.get(existing_step, None)
-                    walk_order     = name_to_order.get(current_step, None)
-                    # Case A: existing_step isn't in the workflow div at all
-                    # — it's a parallel-branch or obscure-role assignment. The
-                    # next full scan will re-verify via Approve Pages; quick
-                    # updates have no business overwriting it. Preserve.
-                    if existing_order is None:
-                        current_step = existing_step
-                        current_emails = ''
-                    # Case B: walk's result is *earlier* in the workflow than
-                    # existing_step. In parallel-branch programs, the walk
-                    # locks onto the linear branch (often a regulatory step)
-                    # while Approve Pages reports the parallel branch (e.g.,
-                    # Program Graduate Provost Review) which is further along
-                    # the linear ordering. Quick updates can't tell which is
-                    # real, so default to NOT regressing — preserve existing.
-                    # Genuine rollbacks will be picked up by the next full
-                    # discovery scan (≤50 min). Forward advancement (same or
-                    # later order) is allowed through unchanged.
-                    elif walk_order is not None and walk_order < existing_order:
-                        current_step = existing_step
-                        current_emails = ''
+                walk_is_complete = (verified_via_workflow_div and total > 0
+                                    and completed == total and not current_step)
+                if existing_step and not walk_is_complete:
+                    # Preserve the prior full-scan assignment in all other
+                    # cases — earlier-walk, later-walk, walk-not-in-div.
+                    current_step = existing_step
+                    current_emails = ''
         else:
             # Workflow div unverifiable (fetch failed/empty) AND Approve
             # Pages didn't see it. Best we can do is whatever Approve
