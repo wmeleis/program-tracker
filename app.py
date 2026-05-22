@@ -240,18 +240,30 @@ def api_program_reference(program_id):
                     'curriculum_html': clean_curriculum_html(row['curriculum_html']),
                 })
 
-    # 4. Auto-derived from CIM history (scrape time)
-    ref = get_reference_curriculum(program_id)
-    # Suppress the legacy "self-reference" sentinel — comparing a program
-    # against an older edit of itself isn't a Reference comparison; that's
-    # what the Changes tab is for.
-    if ref:
-        vd = (ref.get('version_date') or '').lower()
-        is_self_ref = (ref.get('version_id') == -1 or 'no prior approved' in vd)
-        if not is_self_ref:
-            ref['source'] = 'auto'
-            ref['curriculum_html'] = clean_curriculum_html(ref.get('curriculum_html', ''))
-            return jsonify(ref)
+    # 4. Auto-derived: ONLY for non-Boston deployments — fall through to
+    #    the Boston counterpart's own last-approved version. Reference is
+    #    a cross-program concept; a program comparing against an older
+    #    edit of itself is not a Reference comparison — that's the
+    #    Changes tab.
+    #
+    # Boston programs / standalone programs / non-Boston deployments
+    # without a Boston counterpart all return 404 here. The UI explains
+    # and offers the picker (Another program / Uploaded file).
+    if program_id in deployment_to_boston:
+        # Non-Boston deployment — load the Boston counterpart's stored
+        # reference_curriculum row (which is Boston's OWN last-approved
+        # version, populated by the scraper).
+        boston_id = deployment_to_boston[program_id]
+        boston_ref = get_reference_curriculum(boston_id)
+        if boston_ref:
+            vd = (boston_ref.get('version_date') or '').lower()
+            if 'no prior approved' not in vd and boston_ref.get('version_id') not in (0, -1):
+                boston_ref['source'] = 'auto'
+                # Annotate so the UI can show "Boston counterpart" clearly
+                if 'Boston' not in (boston_ref.get('version_date') or ''):
+                    boston_ref['version_date'] = (boston_ref.get('version_date') or '') + ' (Boston counterpart)'
+                boston_ref['curriculum_html'] = clean_curriculum_html(boston_ref.get('curriculum_html', ''))
+                return jsonify(boston_ref)
     return jsonify({'error': 'No reference curriculum found'}), 404
 
 

@@ -1917,8 +1917,20 @@ async function buildRefSourcePickerHtml(programId, data) {
     const refs       = await loadCustomRefs();
     const candidates = await loadComparableCandidates(programId, 'family');
 
+    // Context-aware "Auto" label. The Reference tab is for CROSS-program
+    // comparisons; it never falls back to a program's own history. So:
+    //   - Non-Boston deployment → Auto = Boston counterpart
+    //   - Boston / standalone   → no Auto reference; user must pick a
+    //                              peer program or upload a file
+    const progName  = getProgramName(programId) || '';
+    const campusM   = progName.match(/\(([^)]+)\)\s*$/);
+    const isNonBoston = campusM && campusM[1].toLowerCase() !== 'boston';
+    const autoLabel = isNonBoston
+        ? 'Auto (Boston counterpart)'
+        : 'None (pick a peer program or upload a file below)';
+
     const options = [
-        `<option value="auto"${!activeFile && !activeProg ? ' selected' : ''}>Auto (Boston counterpart or own history)</option>`,
+        `<option value="auto"${!activeFile && !activeProg ? ' selected' : ''}>${autoLabel}</option>`,
     ];
     if (candidates.length) {
         options.push('<optgroup label="Another program">');
@@ -1928,6 +1940,14 @@ async function buildRefSourcePickerHtml(programId, data) {
             options.push(`<option value="prog:${c.id}"${sel}>${escapeHtml(c.name)}${campusTag}</option>`);
         }
         options.push('</optgroup>');
+    } else {
+        // Group always present so the user can SEE the option exists; it's
+        // disabled when no peer programs share this subject+degree, but the
+        // visible placeholder makes the picker self-documenting instead of
+        // silently empty.
+        options.push('<optgroup label="Another program">' +
+            '<option value="" disabled>(no peer programs found for this subject/degree)</option>' +
+            '</optgroup>');
     }
     if (refs.length) {
         options.push('<optgroup label="Uploaded file">');
@@ -1936,6 +1956,10 @@ async function buildRefSourcePickerHtml(programId, data) {
             options.push(`<option value="file:${r.id}"${sel}>${escapeHtml(r.name)}</option>`);
         }
         options.push('</optgroup>');
+    } else {
+        options.push('<optgroup label="Uploaded file">' +
+            '<option value="" disabled>(none uploaded — use References button at top)</option>' +
+            '</optgroup>');
     }
 
     return `<div class="ref-source-picker">

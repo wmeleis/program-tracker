@@ -287,18 +287,47 @@ def build_static_site():
             curriculum[pid] = clean_curriculum_html(html)
     _write_json_encrypted(curriculum, os.path.join(EXPORT_DIR, 'curriculum.json'), key)
 
-    reference = get_all_reference_curriculum()
-    # Strip the legacy "self-reference" sentinels (version_id=-1) so the
-    # static site doesn't display a curriculum compared against itself.
-    for pid in list(reference.keys()):
-        entry = reference[pid]
-        if isinstance(entry, dict):
-            if entry.get('version_id') == -1:
-                del reference[pid]
-            else:
-                vd = (entry.get('version_date') or '').lower()
-                if 'no prior approved' in vd:
-                    del reference[pid]
+    # Two output structures from reference_curriculum:
+    #   - reference: data the Reference tab uses (cross-program comparisons
+    #     only; Boston/standalone programs without overrides are excluded).
+    #   - history: data the Changes tab uses (program's OWN last-approved
+    #     version; only available for programs whose stored row is their
+    #     own history, not a Boston-counterpart annotation).
+    raw_ref = get_all_reference_curriculum()
+    # Pre-split campus groups so we know which programs are non-Boston
+    # deployments without doing the lookup per entry.
+    _b2d_pre, _d2b_pre = build_campus_groups(data['programs'])
+
+    history = {}
+    for pid_str, entry in list(raw_ref.items()):
+        if not isinstance(entry, dict): continue
+        if entry.get('version_id') in (0, -1): continue
+        vd = (entry.get('version_date') or '')
+        if 'no prior approved' in vd.lower(): continue
+        # Own-history detection: row has a real version_id and the
+        # version_date isn't annotated with "Boston" (the marker the
+        # scraper applies when a non-Boston deployment's stored row is
+        # actually the Boston counterpart's history).
+        if 'Boston' not in vd:
+            history[pid_str] = entry
+
+    # Reference output starts empty; we populate ONLY the entries the
+    # Reference tab is supposed to show:
+    #   - Non-Boston deployments → Boston counterpart's history (as
+    #     stored against this deployment's program_id by the scraper).
+    #   - Any program with an explicit override (added below).
+    reference = {}
+    for pid_str, entry in raw_ref.items():
+        try:
+            pid_int = int(pid_str)
+        except (ValueError, TypeError):
+            continue
+        if pid_int not in _d2b_pre: continue
+        if not isinstance(entry, dict): continue
+        if entry.get('version_id') in (0, -1): continue
+        vd = (entry.get('version_date') or '').lower()
+        if 'no prior approved' in vd: continue
+        reference[pid_str] = entry
 
     # Bake reference overrides into reference.json. Two kinds:
     #   custom_reference_id  → an uploaded file's curriculum_html
@@ -329,8 +358,8 @@ def build_static_site():
                     'reference_program_id': other_id,
                 }
 
-    # Campus relationship data
-    boston_to_deployments, deployment_to_boston = build_campus_groups(data['programs'])
+    # Campus relationship data (reuse the maps computed above)
+    boston_to_deployments, deployment_to_boston = _b2d_pre, _d2b_pre
 
     # Propagate Boston's override (file OR another-program) to non-Boston
     # deployments so their Alignment tab sees the same umbrella reference
@@ -371,6 +400,18 @@ def build_static_site():
             entry['curriculum_html'] = clean_curriculum_html(entry['curriculum_html'])
 
     _write_json_encrypted(reference, os.path.join(EXPORT_DIR, 'reference.json'), key)
+
+    # history.json — per-program OWN last-approved version for the Changes
+    # tab. Cleaned HTML; only includes programs whose stored reference_curriculum
+    # row is their own history (Boston programs + standalones), not a Boston-
+    # counterpart annotation.
+    for pid, entry in history.items():
+        if isinstance(entry, dict) and entry.get('html'):
+            entry['html'] = clean_curriculum_html(entry['html'])
+        elif isinstance(entry, dict) and entry.get('curriculum_html'):
+            entry['curriculum_html'] = clean_curriculum_html(entry['curriculum_html'])
+    _write_json_encrypted(history, os.path.join(EXPORT_DIR, 'history.json'), key)
+
     campus_groups = {
         'boston_to_deployments': {str(k): v for k, v in boston_to_deployments.items()},
         'deployment_to_boston': {str(k): v for k, v in deployment_to_boston.items()},
@@ -518,7 +559,7 @@ def _gate_html(cache_bust: int) -> str:
   const textDecoder = new TextDecoder();
 
   const ENC_FILES = new Set([
-    'data.json', 'curriculum.json', 'reference.json', 'campus_groups.json',
+    'data.json', 'curriculum.json', 'reference.json', 'history.json', 'campus_groups.json',
     'regulatory.json',
   ]);
 
@@ -978,11 +1019,11 @@ function __staticInit() {
         }
     };
 
-    // Changes tab — diff this program's current curriculum against the
-    // reference if and only if the reference appears to be this program's
-    // OWN history (no Boston annotation, no override). For non-Boston
-    // deployments whose reference is the Boston counterpart, hide the
-    // tab's content with a notice.
+    // Changes tab — diff this program's current curriculum against its
+    // OWN last-approved version. Data comes from history.json (separate
+    // from reference.json, which is purely cross-program). For non-Boston
+    // deployments without own-history data, show a notice.
+    let _historyCache = null;
     window.loadChangesDetail = async function(programId) {
         const contentEl = document.getElementById(`detail-content-${programId}`);
         if (!contentEl) return;
@@ -990,24 +1031,21 @@ function __staticInit() {
         if (!_curriculumCache) {
             try { _curriculumCache = window.__EMBEDDED_CURRICULUM__ || (await (await fetch('curriculum.json')).json()); } catch(e) {}
         }
-        if (!_referenceCache) {
-            try { _referenceCache = window.__EMBEDDED_REFERENCE__ || (await (await fetch('reference.json')).json()); } catch(e) {}
+        if (!_historyCache) {
+            try { _historyCache = await (await fetch('history.json')).json(); } catch(e) { _historyCache = {}; }
         }
         const currHtml = (_curriculumCache || {})[String(programId)] || '';
-        const ref = (_referenceCache || {})[String(programId)];
-        const vd  = ref ? (ref.version_date || '') : '';
-        // Filter: only treat as "own history" when there's no Boston/override
-        // annotation. Otherwise hide the diff.
-        const isOwnHistory = ref && !ref.source && !/Boston/i.test(vd);
-        if (!isOwnHistory) {
-            contentEl.innerHTML = '<div class="workflow-meta">No own-history version available for this program. The Changes tab compares against this program\\'s own previous approved version, which isn\\'t on file (this is normal for non-Boston deployments and brand-new programs).</div>';
+        const hist = (_historyCache || {})[String(programId)];
+        if (!hist || !hist.html) {
+            contentEl.innerHTML = '<div class="workflow-meta">No prior approved version on file for this program. The Changes tab compares against the program\\'s own previous approved version; non-Boston deployments and brand-new programs commonly have no own-history record.</div>';
             return;
         }
-        if (!currHtml || !ref.html) {
+        if (!currHtml) {
             contentEl.innerHTML = '<div class="workflow-meta">Curriculum data not available for change comparison.</div>';
             return;
         }
-        const {identical, diff} = compareCurricula(currHtml, ref.html);
+        const {identical, diff} = compareCurricula(currHtml, hist.html);
+        const vd = hist.version_date || '';
         const dateLabel = typeof formatReferenceVersionLabel === 'function'
             ? formatReferenceVersionLabel(vd) : vd;
         const header = `<div class="reference-header">Comparing current proposal against: ${escapeHtml(dateLabel || 'previous approved version')}</div>`;
