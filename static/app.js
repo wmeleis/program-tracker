@@ -3674,33 +3674,10 @@ function renderConsoleContent(data) {
         html += '</tbody></table>';
     }
 
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#1e40af">Added to portfolio from IPD (${ipdAdded.length})</h4>`;
-    if (!ipdAdded.length) {
-        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
-    } else {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
-        html += '<thead><tr style="background:#eff6ff;text-align:left">'
-             + '<th style="padding:4px 8px">IPD Name</th>'
-             + '<th style="padding:4px 8px">IPD Campus</th>'
-             + '<th style="padding:4px 8px">CIM Format</th>'
-             + '<th style="padding:4px 8px">Proposal Type</th>'
-             + '</tr></thead><tbody>';
-        for (const p of ipdAdded) {
-            html += `<tr style="border-top:1px solid #e2e8f0">
-                <td style="padding:4px 8px">${escapeHtml(p.original_name || p.name || '')}</td>
-                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || 'Boston')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.cim_format || p.name || '')}</td>
-                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.proposal_type || '')}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-    }
+    // IPD sections removed — overlay disabled, source no longer consulted.
 
     html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">SVT entries with no CIM match (${svtMismatches.length})</h4>`;
     html += _mismatchTable(svtMismatches, '#fff1f2');
-
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">IPD entries with no CIM match (${ipdMismatches.length})</h4>`;
-    html += _mismatchTable(ipdMismatches, '#fff1f2');
 
     html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">OTP entries with no CIM match (${otpMismatches.length})</h4>`;
     html += _mismatchTable(otpMismatches, '#fff1f2');

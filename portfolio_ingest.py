@@ -781,6 +781,10 @@ _NON_PROGRAM_RE = re.compile(
     r'|\bpre[\s-]?college\b'                 # "Pre-College" / "Pre-CollEDGE"
     r'|\bsurvey\b'                           # "Doctor of Law & Policy Survey"
     r'|\bplacing\s+(phd|graduate)\s+students?\b'  # "Placing PhD students in the network..."
+    r'|\btreks?\b'                           # "Entrepreneurship Treks"
+    r'|^semester\s+in\s*:'                   # "Semester In: Rural Health Immersion"
+    r'|\brural\s+health\s+immersion\b'       # safety net for the same entry
+    r'|\bexecutive\s+credential\b'           # "Executive Credential in X"
     # NOTE: "Launch of the …" and "Suspension of …" are NOT filtered — they
     # represent real proposals (new deployment / inactivation). The "Launch
     # of " / "Suspension of " prefix is stripped before name parsing via
