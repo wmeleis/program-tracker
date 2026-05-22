@@ -250,18 +250,29 @@ def api_program_reference(program_id):
     # without a Boston counterpart all return 404 here. The UI explains
     # and offers the picker (Another program / Uploaded file).
     if program_id in deployment_to_boston:
-        # Non-Boston deployment — load the Boston counterpart's stored
-        # reference_curriculum row (which is Boston's OWN last-approved
-        # version, populated by the scraper).
+        # Non-Boston deployment — Reference is the Boston counterpart's
+        # curriculum, resolved at request time. Two flavors:
+        #   1. Boston is in workflow (current_step set, no completion_date):
+        #      use Boston's CURRENT curriculum_html (the in-flight proposal).
+        #   2. Otherwise: use Boston's last-approved history version from
+        #      reference_curriculum.
         boston_id = deployment_to_boston[program_id]
-        boston_ref = get_reference_curriculum(boston_id)
-        if boston_ref:
-            vd = (boston_ref.get('version_date') or '').lower()
-            if 'no prior approved' not in vd and boston_ref.get('version_id') not in (0, -1):
+        boston_row = next((p for p in programs if p['id'] == boston_id), None)
+        if boston_row:
+            boston_in_workflow = (bool((boston_row.get('current_step') or '').strip())
+                                  and not (boston_row.get('completion_date') or '').strip())
+            if boston_in_workflow and boston_row.get('curriculum_html'):
+                return jsonify({
+                    'source': 'auto',
+                    'version_id': 0,
+                    'version_date': 'current proposal (Boston counterpart, in workflow)',
+                    'curriculum_html': clean_curriculum_html(boston_row['curriculum_html']),
+                })
+            boston_ref = get_reference_curriculum(boston_id)
+            if boston_ref and boston_ref.get('version_id') not in (0, -1) \
+                    and 'no prior approved' not in (boston_ref.get('version_date') or '').lower():
                 boston_ref['source'] = 'auto'
-                # Annotate so the UI can show "Boston counterpart" clearly
-                if 'Boston' not in (boston_ref.get('version_date') or ''):
-                    boston_ref['version_date'] = (boston_ref.get('version_date') or '') + ' (Boston counterpart)'
+                boston_ref['version_date'] = (boston_ref.get('version_date') or '') + ' (Boston counterpart)'
                 boston_ref['curriculum_html'] = clean_curriculum_html(boston_ref.get('curriculum_html', ''))
                 return jsonify(boston_ref)
     return jsonify({'error': 'No reference curriculum found'}), 404
@@ -284,12 +295,10 @@ def api_program_changes(program_id):
     ref = get_reference_curriculum(program_id)
     if not ref:
         return jsonify({'error': 'No prior version available'}), 404
-    vd = (ref.get('version_date') or '')
-    # Reject Boston-counterpart annotations: those aren't this program's
-    # own history. Class detection by annotation string is hokey but
-    # matches how fetch_reference_curricula tags non-Boston refs.
-    if 'Boston' in vd or ref.get('version_id') in (0, -1):
-        return jsonify({'error': 'No own-history version available'}), 404
+    # reference_curriculum now always stores own-history; legacy sentinels
+    # (version_id 0/-1) are filtered out for safety.
+    if ref.get('version_id') in (0, -1):
+        return jsonify({'error': 'No prior version available'}), 404
     ref['curriculum_html'] = clean_curriculum_html(ref.get('curriculum_html', ''))
     return jsonify(ref)
 

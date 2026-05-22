@@ -2789,13 +2789,14 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
     Uses the CourseLeaf history API:
     /courseleaf/courseleaf.cgi?page=/programadmin/{id}/index.html&output=xml&step=showtcf&view=history&diffversion={versionId}
 
-    For Boston programs:
-    - Fetches the program's own CIM history (most recent approved version)
+    For EVERY program (Boston or non-Boston):
+    - Fetches the program's OWN CIM history (most recent approved version)
 
-    For non-Boston programs (Oakland, Charlotte, etc.):
-    - Finds the Boston counterpart by name (strips campus, matches Boston version)
-    - Uses the Boston program's most recently approved CIM history version as reference
-    - This is because non-Boston programs are typically based on the Boston curriculum
+    The cross-program Reference comparison (non-Boston compared against
+    Boston counterpart) is computed at API/export time via the campus
+    group map — it doesn't require storing Boston-counterpart data
+    against the non-Boston program ID anymore. That separation lets the
+    Changes tab show a non-Boston deployment's own-history diff.
     """
     from database import upsert_reference_curriculum, get_db
 
@@ -2807,64 +2808,18 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
         ).fetchall()
         existing_refs = {row['program_id']: row['version_id'] for row in rows}
 
-    # Build mapping of non-Boston programs to their Boston counterparts
-    counterpart_map, non_boston_ids = _build_boston_counterpart_map(program_ids)
-    if counterpart_map:
-        print(f"  Found {len(counterpart_map)} non-Boston programs with Boston counterparts")
-    if non_boston_ids - set(counterpart_map.keys()):
-        unmatched = non_boston_ids - set(counterpart_map.keys())
-        print(f"  {len(unmatched)} non-Boston programs will use own history as fallback")
-
-    # Special case: if the Boston counterpart is ITSELF in the current
-    # workflow (being revised), use its in-workflow curriculum as the
-    # reference rather than its last-approved history version. This lets
-    # non-Boston deployments compare against the up-to-date proposed
-    # Boston curriculum when one exists.
-    #
-    # "In workflow" means the Boston row has a non-empty `current_step`
-    # (the program is actively at some review/setup step) AND no
-    # `completion_date`. Using "is Boston present in the program_ids
-    # being scanned" — as the previous version did — incorrectly
-    # matches every non-Boston with a Boston counterpart in the DB,
-    # even when Boston has long since completed. That left ~390 stale
-    # `version_id=0` sentinels in `reference_curriculum`, freezing the
-    # deployments' references at whatever Boston curriculum was current
-    # when the sentinel was first set.
+    # One-time cleanup: legacy version_id=0 sentinels (Boston-in-workflow
+    # snapshots stored against non-Boston deployments) are no longer
+    # produced and must be cleared so they don't shadow the next
+    # own-history upsert.
     with get_db() as conn:
-        boston_active = {
-            row['id']
-            for row in conn.execute(
-                "SELECT id FROM programs "
-                "WHERE current_step IS NOT NULL AND current_step != '' "
-                "  AND (completion_date IS NULL OR completion_date = '')"
-            ).fetchall()
-        }
-    boston_in_workflow = {
-        non_boston_id: boston_id
-        for non_boston_id, boston_id in counterpart_map.items()
-        if boston_id in boston_active
-    }
-    if boston_in_workflow:
-        print(f"  {len(boston_in_workflow)} non-Boston programs will use the Boston workflow-revised curriculum as reference")
-        with get_db() as conn:
-            for non_boston_id, boston_id in boston_in_workflow.items():
-                row = conn.execute(
-                    "SELECT curriculum_html FROM programs WHERE id = ?",
-                    (boston_id,),
-                ).fetchone()
-                if row and row['curriculum_html']:
-                    # Sentinel version_id=0 marks this as an in-workflow
-                    # reference so later scans always replace it (the
-                    # curriculum may change while Boston is being edited).
-                    upsert_reference_curriculum(
-                        non_boston_id,
-                        0,
-                        "current proposal (Boston, in workflow)",
-                        row['curriculum_html'],
-                    )
+        cleared_sentinels = conn.execute(
+            "DELETE FROM reference_curriculum WHERE version_id = 0"
+        ).rowcount
+    if cleared_sentinels:
+        print(f"  Cleared {cleared_sentinels} legacy Boston-in-workflow sentinel row(s)")
 
-    # Remove those programs from the JS-history path — already handled above.
-    fetch_ids = [pid for pid in program_ids if pid not in boston_in_workflow]
+    fetch_ids = list(program_ids)
 
     # C3: if a targeted set was supplied, only fetch programs in it. This
     # avoids the ~16 min round-trip cost of checking version_ids for the
@@ -2886,8 +2841,6 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
 
     for batch_num, batch in enumerate(batches):
         ids_json = json.dumps(batch)
-        batch_counterparts = {pid: counterpart_map[pid] for pid in batch if pid in counterpart_map}
-        counterparts_json = json.dumps(batch_counterparts)
 
         # Fire off async parallel fetches; write results into a hidden div keyed by batch number.
         # The main thread returns immediately; Python polls the div for completion.
@@ -2903,7 +2856,6 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
     document.body.appendChild(holder);
 
     var ids = {ids_json};
-    var counterparts = {counterparts_json};
     var parser = new DOMParser();
 
     function extractCurriculum(fullHtml) {{
@@ -2922,7 +2874,10 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
     }}
 
     function processOne(id) {{
-        var fetchId = counterparts[id] || id;
+        // Always fetch the program's OWN history. Cross-program "Reference"
+        // resolution (non-Boston compared against Boston counterpart) lives
+        // in the API layer.
+        var fetchId = id;
         // Step 1: page fetch (parallelizable — network limited)
         return fetch("/programadmin/" + fetchId + "/", {{cache: 'no-store'}})
             .then(function(res) {{
@@ -3033,8 +2988,10 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
                 skipped += 1
                 continue
             if html:
-                display_date = f"{version_date} (Boston version)" if prog_id in counterpart_map else version_date
-                upsert_reference_curriculum(prog_id, version_id, display_date, html)
+                # Always stores OWN history — no Boston-version annotation
+                # anymore. Cross-program rendering is computed at API/export
+                # time via the campus group map.
+                upsert_reference_curriculum(prog_id, version_id, version_date, html)
                 fetched += 1
                 batch_fetched += 1
             else:

@@ -287,47 +287,54 @@ def build_static_site():
             curriculum[pid] = clean_curriculum_html(html)
     _write_json_encrypted(curriculum, os.path.join(EXPORT_DIR, 'curriculum.json'), key)
 
-    # Two output structures from reference_curriculum:
-    #   - reference: data the Reference tab uses (cross-program comparisons
-    #     only; Boston/standalone programs without overrides are excluded).
-    #   - history: data the Changes tab uses (program's OWN last-approved
-    #     version; only available for programs whose stored row is their
-    #     own history, not a Boston-counterpart annotation).
+    # reference_curriculum now stores OWN-history for every program. The
+    # Reference tab's "compare to Boston counterpart" mapping is computed
+    # here at export time via the campus group map (same logic as the
+    # Flask API at request time).
     raw_ref = get_all_reference_curriculum()
-    # Pre-split campus groups so we know which programs are non-Boston
-    # deployments without doing the lookup per entry.
-    _b2d_pre, _d2b_pre = build_campus_groups(data['programs'])
-
+    # Filter out legacy sentinels (version_id=0 Boston-in-workflow,
+    # version_id=-1 self-reference) so they don't leak into either output.
     history = {}
-    for pid_str, entry in list(raw_ref.items()):
-        if not isinstance(entry, dict): continue
-        if entry.get('version_id') in (0, -1): continue
-        vd = (entry.get('version_date') or '')
-        if 'no prior approved' in vd.lower(): continue
-        # Own-history detection: row has a real version_id and the
-        # version_date isn't annotated with "Boston" (the marker the
-        # scraper applies when a non-Boston deployment's stored row is
-        # actually the Boston counterpart's history).
-        if 'Boston' not in vd:
-            history[pid_str] = entry
-
-    # Reference output starts empty; we populate ONLY the entries the
-    # Reference tab is supposed to show:
-    #   - Non-Boston deployments → Boston counterpart's history (as
-    #     stored against this deployment's program_id by the scraper).
-    #   - Any program with an explicit override (added below).
-    reference = {}
     for pid_str, entry in raw_ref.items():
-        try:
-            pid_int = int(pid_str)
-        except (ValueError, TypeError):
-            continue
-        if pid_int not in _d2b_pre: continue
         if not isinstance(entry, dict): continue
         if entry.get('version_id') in (0, -1): continue
         vd = (entry.get('version_date') or '').lower()
         if 'no prior approved' in vd: continue
-        reference[pid_str] = entry
+        history[pid_str] = entry
+
+    # Pre-split campus groups so we know which programs are non-Boston
+    # deployments without doing the lookup per entry.
+    _b2d_pre, _d2b_pre = build_campus_groups(data['programs'])
+    # Index program rows by id for the Boston-in-workflow detection
+    _row_by_id = {p['id']: p for p in data['programs']}
+
+    # Reference output: each non-Boston deployment maps to its Boston
+    # counterpart's reference, with two flavors mirroring the API:
+    #   - Boston in workflow → Boston's current curriculum_html
+    #   - Otherwise           → Boston's own last-approved history
+    reference = {}
+    for dep_id, boston_id in _d2b_pre.items():
+        boston_row = _row_by_id.get(boston_id)
+        if not boston_row: continue
+        boston_in_workflow = (bool((boston_row.get('current_step') or '').strip())
+                              and not (boston_row.get('completion_date') or '').strip())
+        if boston_in_workflow and boston_row.get('curriculum_html'):
+            reference[str(dep_id)] = {
+                'version_id': 0,
+                'version_date': 'current proposal (Boston counterpart, in workflow)',
+                'html': boston_row['curriculum_html'],
+                'source': 'auto',
+            }
+            continue
+        # Boston has completed: use stored own-history row
+        boston_hist = history.get(str(boston_id))
+        if boston_hist and boston_hist.get('html'):
+            reference[str(dep_id)] = {
+                'version_id': boston_hist.get('version_id'),
+                'version_date': (boston_hist.get('version_date') or '') + ' (Boston counterpart)',
+                'html': boston_hist.get('html', ''),
+                'source': 'auto',
+            }
 
     # Bake reference overrides into reference.json. Two kinds:
     #   custom_reference_id  → an uploaded file's curriculum_html
