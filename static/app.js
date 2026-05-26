@@ -216,12 +216,12 @@ function switchView(view) {
     // Continuing only applies to courses
     const contBtn = document.getElementById('btn-type-continuing');
     if (contBtn) contBtn.style.display = view === 'courses' ? 'inline-block' : 'none';
-    // Update search placeholder
+    // Update search placeholder. Wildcards: * matches any characters, ? matches one.
     const searchEl = document.getElementById('filter-search');
     if (searchEl) {
-        searchEl.placeholder = view === 'courses'
-            ? 'Search courses by code or title...'
-            : 'Search programs by name or banner code...';
+        if (view === 'courses')        searchEl.placeholder = 'Search courses by code or title (* and ? wildcards)…';
+        else if (view === 'catalog')   searchEl.placeholder = 'Search catalog pages by path or title (* and ? wildcards)…';
+        else                            searchEl.placeholder = 'Search programs by name or banner code (* and ? wildcards)…';
     }
 
     // Reload appropriate data
@@ -362,16 +362,45 @@ async function loadCatalogDashboard() {
 // the named one. Used to compute cross-filter counts so each filter shows
 // "what would I have if I switched to this option" rather than its own
 // downstream-narrowed view.
+// Build a case-insensitive search matcher that supports `*` (zero or more
+// characters) and `?` (exactly one character) wildcards. Without wildcards,
+// falls back to substring match (so existing user queries keep working).
+// All other regex metacharacters in the query are escaped, so a search
+// like "(MS)" or "x.y" is treated literally.
+function buildSearchMatcher(query) {
+    const q = (query || '').trim();
+    if (!q) return () => true;
+    const ql = q.toLowerCase();
+    if (!ql.includes('*') && !ql.includes('?')) {
+        // No wildcards — simple substring check (same as before).
+        return (s) => (s || '').toLowerCase().includes(ql);
+    }
+    // Escape regex metacharacters EXCEPT * and ?, then translate those
+    // to their regex equivalents. Anchoring is unanchored on purpose so
+    // "*foo*" and "foo" behave the same way (substring-anywhere).
+    let pat = '';
+    for (const ch of ql) {
+        if (ch === '*') pat += '.*';
+        else if (ch === '?') pat += '.';
+        else if ('.+^$|()[]{}\\\\'.includes(ch)) pat += '\\' + ch;
+        else pat += ch;
+    }
+    let re;
+    try { re = new RegExp(pat, 'i'); }
+    catch (e) { return (s) => (s || '').toLowerCase().includes(ql); }
+    return (s) => re.test(s || '');
+}
+
 function getCatalogBaseFiltered(excludeFilter) {
     const collegeFilter = excludeFilter === 'college' ? '' : (document.getElementById('filter-college')?.value || '');
     const approverFilter = excludeFilter === 'approver' ? '' : (document.getElementById('filter-approver')?.value || '');
-    const search = excludeFilter === 'search' ? '' : (document.getElementById('filter-search')?.value || '').toLowerCase();
+    const searchRaw = excludeFilter === 'search' ? '' : (document.getElementById('filter-search')?.value || '');
+    const matchSearch = buildSearchMatcher(searchRaw);
     let pages = (allCatalogPages || []).slice();
     if (collegeFilter) pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
     if (approverFilter) pages = pages.filter(p => (p.user || '').trim() === approverFilter);
-    if (search) pages = pages.filter(p =>
-        (p.id || '').toLowerCase().includes(search) ||
-        (p.title || '').toLowerCase().includes(search));
+    if (searchRaw.trim()) pages = pages.filter(p =>
+        matchSearch(p.id) || matchSearch(p.title));
     return pages;
 }
 
@@ -426,7 +455,8 @@ function sortCatalogBy(key) {
 function renderCatalogTable() {
     const container = document.getElementById('programs-table-container');
     if (!container) return;
-    const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
+    const searchRaw = (document.getElementById('filter-search')?.value || '');
+    const matchSearch = buildSearchMatcher(searchRaw);
     const collegeFilter = document.getElementById('filter-college')?.value || '';
     const approverFilter = document.getElementById('filter-approver')?.value || '';
     let pages = (allCatalogPages || []).slice();
@@ -443,10 +473,9 @@ function renderCatalogTable() {
             pages = pages.filter(p => p.current_step === pipelineFilter);
         }
     }
-    if (search) {
+    if (searchRaw.trim()) {
         pages = pages.filter(p =>
-            (p.id || '').toLowerCase().includes(search) ||
-            (p.title || '').toLowerCase().includes(search)
+            matchSearch(p.id) || matchSearch(p.title)
         );
     }
     pages.sort((a, b) => {
@@ -1214,7 +1243,8 @@ function getBaseFiltered(approverProgramIds, exclude) {
     const stepFilter = document.getElementById('filter-step').value;
     const campusFilter = document.getElementById('filter-campus').value;
     const approverFilter = document.getElementById('filter-approver').value;
-    const search = document.getElementById('filter-search').value.toLowerCase();
+    const searchRaw = document.getElementById('filter-search').value;
+    const matchSearch = buildSearchMatcher(searchRaw);
     const now = new Date();
 
     const sourceData = currentView === 'courses' ? allCourses : allPrograms;
@@ -1269,12 +1299,12 @@ function getBaseFiltered(approverProgramIds, exclude) {
         if (currentView === 'programs' && campusFilter && extractCampus(item.name) !== campusFilter) return false;
         if (approverProgramIds && !approverProgramIds.has(item.id)) return false;
 
-        // Search in name/title and code/banner_code
-        if (search) {
+        // Search in name/title and code/banner_code. Supports `*` (any
+        // chars) and `?` (one char) wildcards via buildSearchMatcher.
+        if (searchRaw && searchRaw.trim()) {
             const searchField = currentView === 'courses' ? item.code : item.name;
             const searchSecond = currentView === 'courses' ? item.title : item.banner_code;
-            if (!searchField.toLowerCase().includes(search) &&
-                !(searchSecond && searchSecond.toLowerCase().includes(search))) return false;
+            if (!matchSearch(searchField) && !matchSearch(searchSecond)) return false;
         }
         // Hide completed (no current step) by default. Counts and table match.
         // Showing completed requires either the "Complete" proposal-row
