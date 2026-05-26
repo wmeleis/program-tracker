@@ -877,12 +877,44 @@ def check_courseleaf_session():
     # Step 1: Can we talk to the programadmin tab at all?
     url = run_js_in_tab('programadmin', 'location.href', match_by='url', timeout=10)
     if not url or url == 'missing value':
-        return {
-            'ok': False,
-            'error': 'browser_unreachable',
-            'detail': f'{BROWSER_APP} programadmin tab not found or not responding. '
-                      f'Open https://nextcatalog.northeastern.edu/programadmin/ in {BROWSER_APP} window 1.'
-        }
+        # The fast-path JS often times out on a background-throttled tab.
+        # Try once more after explicitly activating the programadmin tab in
+        # the foreground — Chrome 147+ throttles JS on backgrounded tabs.
+        # This is a brief focus steal but only fires on the preflight check,
+        # not on every per-program fetch during a scan.
+        wake_script = f'''
+        tell application "{BROWSER_APP}"
+            activate
+            set tabIdx to 0
+            set n to count of tabs of window 1
+            repeat with i from 1 to n
+                if (URL of tab i of window 1) contains "programadmin" then
+                    set tabIdx to i
+                    exit repeat
+                end if
+            end repeat
+            if tabIdx = 0 then return "TAB_NOT_FOUND"
+            set active tab index of window 1 to tabIdx
+            delay 0.5
+            tell tab tabIdx of window 1 to execute javascript "location.href"
+        end tell
+        '''
+        try:
+            wake_result = subprocess.run(
+                ['osascript', '-e', wake_script],
+                capture_output=True, text=True, timeout=15
+            )
+            wake_url = wake_result.stdout.strip()
+        except Exception:
+            wake_url = ''
+        if not wake_url or wake_url == 'TAB_NOT_FOUND':
+            return {
+                'ok': False,
+                'error': 'browser_unreachable',
+                'detail': f'{BROWSER_APP} programadmin tab not found or not responding. '
+                          f'Open https://nextcatalog.northeastern.edu/programadmin/ in {BROWSER_APP} window 1.'
+            }
+        url = wake_url
 
     # Step 2: Probe the XML API for a known program to verify session.
     # Uses async fetch + polling (Chrome 147+ blocks sync XHR silently).
