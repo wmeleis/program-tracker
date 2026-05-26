@@ -278,15 +278,27 @@ _SP_REGULATORY_FRAGMENT = "GlobalRegulatoryAffairs"
 _SP_REGULATORY_URL = "https://northeastern.sharepoint.com/sites/GlobalRegulatoryAffairs"
 
 def _check_sharepoint_tab(source, url, fragment):
-    """Open the tab if missing, then verify the session isn't a login redirect."""
-    open_tab_if_missing(url, fragment)
-    time.sleep(2)  # brief wait for tab to start loading
-    current_url = run_js(fragment, "location.href", timeout=15)
+    """Passive probe — DO NOT auto-open the tab.
+
+    Previous behavior auto-opened the SharePoint URL whenever the session
+    preflight found no matching tab. That fired every 5 minutes via the
+    launchd update cycle, which was disruptive when (a) the user has been
+    logged out of SharePoint or (b) the user doesn't currently have access
+    to that SharePoint site — Chrome would spontaneously pop a tab showing
+    the access-denied page.
+
+    Now the check just reports presence. If the tab is missing, the scan
+    that depends on it will skip silently and try again next cycle. The
+    fetch_* functions still call open_tab_if_missing themselves so an
+    explicit scan can recreate a closed tab when the user is around to
+    deal with any SharePoint login prompt.
+    """
+    current_url = run_js(fragment, "location.href", timeout=8)
     if current_url is None:
         return {
             'source': source,
             'ok': False,
-            'detail': f'{source} tab could not be opened — is Chrome running?',
+            'detail': f'{source} tab is not open. Open {url} in {BROWSER_APP} window 1 if you want this source refreshed.',
         }
     login_domains = ('login.microsoftonline.com', 'login.microsoft.com', 'login.live.com')
     if any(d in current_url for d in login_domains):
@@ -299,7 +311,30 @@ def _check_sharepoint_tab(source, url, fragment):
 
 
 def _check_smartsheet_tab(source, url):
-    """Open Smartsheet tab if missing, then verify it's not a login redirect."""
+    """Passive probe — see _check_sharepoint_tab for rationale."""
+    fragment = "b/publish?EQBCT=" + url.split("EQBCT=")[-1]
+    current_url = run_js(fragment, "location.href", timeout=8)
+    if current_url is None:
+        return {
+            'source': source,
+            'ok': False,
+            'detail': f'{source} tab is not open. Open {url} in {BROWSER_APP} window 1 if you want this source refreshed.',
+        }
+    if 'app.smartsheet.com' not in current_url:
+        return {
+            'source': source,
+            'ok': False,
+            'detail': f'{source} tab no longer on Smartsheet — please reopen.',
+        }
+    return {'source': source, 'ok': True, 'detail': ''}
+
+
+def _check_smartsheet_tab_legacy(source, url):
+    """OLD body kept for reference — auto-opened the tab; no longer used.
+
+    Only kept here because the override path for explicit fetch functions
+    (fetch_smartsheet etc.) still wants open_tab_if_missing on demand.
+    """
     fragment = "b/publish?EQBCT=" + url.split("EQBCT=")[-1]
     open_tab_if_missing(url, fragment)
     time.sleep(2)
