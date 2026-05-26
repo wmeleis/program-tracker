@@ -53,13 +53,19 @@ if ! pgrep -q "$BROWSER_APP"; then
     exit 0
 fi
 
+# Tab presence check only — DO NOT execute JS here. Chrome 147+
+# background-throttles JS on non-active tabs, so `execute javascript`
+# stalls and returns empty whenever Chrome isn't the frontmost app.
+# Previously this caused update.sh to silently skip every 5-min cycle
+# for hours at a time. Flask's session preflight does the actual
+# session-validity probe (with a tab-activate fallback) when the scan
+# is triggered; this preflight just verifies that the tab EXISTS.
 SESSION_CHECK=$(osascript -e "
 tell application \"$BROWSER_APP\"
     set tabList to every tab of window 1
     repeat with t in tabList
         if URL of t contains \"courseleaf/approve\" then
-            tell t to execute javascript \"document.body.innerText.substring(0, 100)\"
-            return result
+            return \"TAB_PRESENT\"
         end if
     end repeat
     return \"TAB_NOT_FOUND\"
@@ -70,7 +76,9 @@ if [[ "$SESSION_CHECK" == "TAB_NOT_FOUND" ]] || [[ -z "$SESSION_CHECK" ]]; then
     exit 0
 fi
 
-if [[ "$SESSION_CHECK" == *"Log in"* ]] || [[ "$SESSION_CHECK" == *"login"* ]]; then
+# Session-validity (logged-in vs login redirect) deferred to Flask's
+# /api/scan/trigger preflight, which can activate the tab safely.
+if false; then
     echo "$(date): Session expired, skipping" >> "$LOG"
     osascript -e 'display notification "CourseLeaf session expired. Please log in." with title "Program Tracker"' 2>/dev/null
     exit 0
