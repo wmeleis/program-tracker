@@ -221,6 +221,7 @@ function switchView(view) {
     if (searchEl) {
         if (view === 'courses')        searchEl.placeholder = 'Search courses by code or title (* and ? wildcards)…';
         else if (view === 'catalog')   searchEl.placeholder = 'Search catalog pages by path or title (* and ? wildcards)…';
+        else if (view === 'portfolio') searchEl.placeholder = 'Search portfolio by program, college, campus (* and ? wildcards)…';
         else                            searchEl.placeholder = 'Search programs by name or banner code (* and ? wildcards)…';
     }
 
@@ -4673,8 +4674,9 @@ function getPortfolioFiltered() {
     if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? 'Yes' : 'No'));
     if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
-    if (portfolioSearch) {
-        const q = portfolioSearch.toLowerCase();
+    if (portfolioSearch && portfolioSearch.trim()) {
+        // Supports `*` (any chars) and `?` (one char) wildcards.
+        const match = buildSearchMatcher(portfolioSearch);
         // Build a set of parent IDs whose curriculum-extracted concentrations
         // OR linked concentration sub-rows match the search. We need parents
         // in the filtered result so the renderer's nest logic (which only
@@ -4688,18 +4690,18 @@ function getPortfolioFiltered() {
         allPortfolioPrograms.forEach(p => {
             if (p.concentrations && p.concentrations.some(c => {
                 const n = (typeof c === 'string') ? c : (c && c.name) || '';
-                return n.toLowerCase().includes(q);
+                return match(n);
             })) {
                 parentIdsViaConc.add(p.id);
             }
-            if (p.concentration_of && (p.program_name || '').toLowerCase().includes(q)) {
+            if (p.concentration_of && match(p.program_name)) {
                 parentIdsViaConc.add(p.concentration_of);
             }
         });
         rows = rows.filter(p =>
-            (p.program_name || '').toLowerCase().includes(q) ||
-            (p.college      || '').toLowerCase().includes(q) ||
-            (p.campus       || '').toLowerCase().includes(q) ||
+            match(p.program_name) ||
+            match(p.college) ||
+            match(p.campus) ||
             parentIdsViaConc.has(p.id)
         );
     }
@@ -4811,16 +4813,16 @@ function renderPortfolioTable() {
     // Determine which programs should be auto-expanded (search matches a
     // curriculum concentration OR a linked concentration sub-row).
     const autoExpand = new Set();
-    if (portfolioSearch) {
-        const q = portfolioSearch.toLowerCase();
+    if (portfolioSearch && portfolioSearch.trim()) {
+        const match = buildSearchMatcher(portfolioSearch);
         allPortfolioPrograms.forEach(p => {
             if (p.concentrations && p.concentrations.some(c => {
                 const n = (typeof c === 'string') ? c : (c && c.name) || '';
-                return n.toLowerCase().includes(q);
+                return match(n);
             })) {
                 autoExpand.add(p.id);
             }
-            if (p.concentration_of && (p.program_name || '').toLowerCase().includes(q)) {
+            if (p.concentration_of && match(p.program_name)) {
                 autoExpand.add(p.concentration_of);
             }
         });
