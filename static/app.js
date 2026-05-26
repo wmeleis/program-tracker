@@ -2378,6 +2378,28 @@ function extractCourseLines(html) {
     const subjectTriggerRe = /(any of the following subject codes|any of the following subjects|from the following subject codes|courses from the following subjects)/i;
     const subjectPrefixRowRe = /^([A-Z]{2,6})\s*(?:\(([^)]+)\))?\s*$/;
 
+    // Inline wildcard patterns — single comment rows that ENUMERATE multiple
+    // subject prefixes inline without setting up a subject-wildcard section.
+    // Examples in the wild:
+    //   "or any EMGT, IE, or OR courses"
+    //   "any EMGT or IE courses"
+    //   "Any INFO course in range 5000–7999"
+    //   "Any IE or DADS course in range 5000–7999"
+    // These get parsed into a single wildcard entry per row whose key
+    // matches against any course with a listed subject prefix during the
+    // diff's subject-wildcard absorption pass.
+    //
+    // Pattern A: "[or] any SUBJECT[, SUBJECT]* [, or SUBJECT] courses"
+    // Separator between subjects: ", " OR ", or " OR ", and " OR " or " OR " and ".
+    const _sep = '(?:\\s*,\\s*(?:or\\s+|and\\s+)?|\\s+(?:or|and)\\s+)';
+    const inlineSubjectListRe = new RegExp(
+        '^(?:or\\s+)?any\\s+((?:[A-Z]{2,6}' + _sep + ')*[A-Z]{2,6})\\s+courses?\\b', 'i'
+    );
+    // Pattern B: "Any SUBJECT[ or SUBJECT] course[s] in range NNNN[–-]NNNN"
+    const inlineSubjectRangeRe = new RegExp(
+        '^any\\s+((?:[A-Z]{2,6}' + _sep + ')*[A-Z]{2,6})\\s+courses?\\s+in\\s+range\\s+(\\d{4})\\s*[–-]\\s*(\\d{4})', 'i'
+    );
+
     // Walk all elements in document order to catch both h2/h3 headings and table rows.
     // CIM HTML uses h2/h3 for section headers outside tables (e.g., "Core Requirements",
     // "Coursework Option") and areaheader class for headers inside tables.
@@ -2492,6 +2514,40 @@ function extractCourseLines(html) {
             const normCode = normalizedCode.toUpperCase();
             lines.push({key: normCode, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
         } else {
+            // Inline subject-list wildcards FIRST — recognize patterns like
+            // "or any EMGT, IE, or OR courses" or "Any INFO course in range
+            // 5000-7999" as wildcard entries that subsume individual courses
+            // with those subjects on the opposite side of the diff. Without
+            // this, the row falls through to standardizeHeader which emits
+            // it as an orphan header.
+            const joinedRaw = parts.join(' ').trim();
+            const splitSubjects = (s) => s.split(/\s*,\s*|\s+or\s+|\s+and\s+/i)
+                .map(x => x.toUpperCase().trim()).filter(Boolean);
+            const rangeM = joinedRaw.match(inlineSubjectRangeRe);
+            const listM  = !rangeM && joinedRaw.match(inlineSubjectListRe);
+            if (rangeM || listM) {
+                const subs = splitSubjects((rangeM || listM)[1]);
+                const rangeSuffix = rangeM
+                    ? ' in range ' + rangeM[2] + '-' + rangeM[3]
+                    : '';
+                subs.forEach(prefix => {
+                    lines.push({
+                        key: 'SUBJ:' + prefix,
+                        code: prefix + rangeSuffix,
+                        title: 'Any ' + prefix + ' course' + rangeSuffix,
+                        hours: '',
+                        isHeader: false,
+                        section: currentSection,
+                        subjectWildcard: {
+                            prefix: prefix,
+                            exclusions: [],
+                            range: rangeM ? [parseInt(rangeM[2], 10), parseInt(rangeM[3], 10)] : null,
+                        },
+                    });
+                });
+                inSubjectWildcardSection = false;
+                return;
+            }
             // Non-course context row — run through standardizeHeader to suppress
             // instructional preambles (returns '') and normalize meaningful headers
             const raw = parts.join(' ');
@@ -2800,6 +2856,14 @@ function diffLines(oldLines, newLines) {
     function _matchSubjectWildcard(code, wildcard) {
         if (!code || !wildcard) return false;
         if (code.prefix !== wildcard.prefix) return false;
+        // Range constraint: "Any X course in range 5000-7999" only absorbs
+        // courses whose 4-digit number falls inside the inclusive range.
+        if (wildcard.range && code.num) {
+            const n = parseInt(code.num, 10);
+            if (Number.isFinite(n)) {
+                if (n < wildcard.range[0] || n > wildcard.range[1]) return false;
+            }
+        }
         // Exclusions: the wildcard explicitly excludes specific codes.
         if (wildcard.exclusions && wildcard.exclusions.length) {
             const codeStr = code.prefix + ' ' + code.num;
