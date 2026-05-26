@@ -1044,7 +1044,7 @@ function __staticInit() {
         const currHtml = (_curriculumCache || {})[String(programId)] || '';
         const hist = (_historyCache || {})[String(programId)];
         if (!hist || !hist.html) {
-            contentEl.innerHTML = '<div class="workflow-meta">No prior approved version on file for this program. The Changes tab compares against the program\\'s own previous approved version; non-Boston deployments and brand-new programs commonly have no own-history record.</div>';
+            contentEl.innerHTML = '<div class="workflow-meta">No prior approved version on file for this program. The Changes tab compares against the program&#39;s own previous approved version; non-Boston deployments and brand-new programs commonly have no own-history record.</div>';
             return;
         }
         if (!currHtml) {
