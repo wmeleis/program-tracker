@@ -77,10 +77,21 @@ if [[ "$SESSION_CHECK" == *"Log in"* ]] || [[ "$SESSION_CHECK" == *"login"* ]]; 
 fi
 
 # Ensure Flask is running.
+# IMPORTANT: detach Flask from this script's process group so launchd's
+# end-of-tick cleanup doesn't SIGTERM Flask along with update.sh.
+# A bare `python3 app.py &` puts Flask in update.sh's process group; when
+# launchd reaps update.sh on tick completion, the whole group dies. The
+# subshell + nohup + </dev/null + disown combination promotes Flask to a
+# session leader, decoupling it from launchd's lifecycle.
 if ! curl -s http://localhost:5001/api/scan/status > /dev/null 2>&1; then
     echo "$(date): Starting Flask server..." >> "$LOG"
-    PYTHONUNBUFFERED=1 /usr/bin/python3 app.py &>/tmp/cim_server.log &
-    sleep 3
+    (
+        cd "$(dirname "$0")"
+        PYTHONUNBUFFERED=1 nohup /usr/bin/python3 app.py \
+            >/tmp/cim_server.log 2>&1 </dev/null &
+        disown
+    )
+    sleep 4
 fi
 
 # If a scan is already running, skip — the launchd cadence is much
