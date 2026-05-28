@@ -1631,40 +1631,76 @@ def run_full_scan(force_fetch_only=False):
               f"program(s) had curriculum_html change "
               f"({len(boston_workflow_refresh_ids)} refreshed)")
 
-    # ---- Exit verification: programs in DB at some step but not discovered
-    # at any Approve Pages role this scan. Don't clear unconditionally —
-    # verify against each program's workflow div first (positive-evidence
-    # policy, see CLAUDE.md "Reconciliation: which source wins").
+    # ---- Exit verification: programs in DB at a TRACKED role but NOT
+    # seen by Approve Pages discovery this scan. These are "ghost"
+    # assignments — the DB says they're at role X, but CIM's pending list
+    # for role X doesn't include them.
     #
-    # In force_fetch_only mode every DB-active program is already in
-    # all_discovered (synthesized from DB), so existing_in_pipeline is
-    # empty and this block is a no-op — workflow-div reconciliation
-    # already happened in Step 3.
+    # Previously this block used `pid not in all_discovered` as the
+    # gating condition, but all_discovered now includes every DB-active
+    # program (added by the force-fetch synthesis above to drive Step 3
+    # reconciliation). That made existing_in_pipeline always empty,
+    # turning the block into a permanent no-op. Ghosts like "Design MFA
+    # Boston pinned at PGPR while it's actually at AM Degree Audit"
+    # would persist forever — observed in production on 2026-05-27.
+    #
+    # Fix: gate on `from_approve_pages` instead. A program is a ghost
+    # if (a) its DB current_step is one of the 46 tracked roles
+    # iterated by A1, AND (b) A1 didn't return it from any of those
+    # role queries. For each ghost we read the workflow div's
+    # class="current" marker (more reliable than walking the approval
+    # log for this case) and update accordingly.
+    #
+    # Skipped in force_fetch_only mode because A1 didn't run.
     phase_start = time.time()
     from database import get_db
-    discovered_ids = set(all_discovered.keys())
-    existing_in_pipeline = [
-        pid for pid, p in existing_programs.items()
-        if p.get('current_step') and pid not in discovered_ids
-    ]
+    if force_fetch_only:
+        existing_in_pipeline = []
+    else:
+        approve_pages_discovered_ids = {
+            pid for pid, info in all_discovered.items()
+            if info.get('from_approve_pages')
+        }
+        tracked_roles_set = set(ALL_ROLES)
+        existing_in_pipeline = [
+            pid for pid, p in existing_programs.items()
+            if (p.get('current_step') or '') in tracked_roles_set
+               and pid not in approve_pages_discovered_ids
+        ]
     if existing_in_pipeline:
         print(f"  {len(existing_in_pipeline)} candidate(s) for current_step "
-              f"clear (in DB but not on Approve Pages). Verifying via "
-              f"workflow div...")
-        verify_details = batch_fetch_program_details(
-            existing_in_pipeline, batch_size=25)
+              f"reassignment (in DB at a tracked role but not on Approve "
+              f"Pages). Verifying via workflow div...")
+        # Workflow div data was already batch-fetched in Step 2 for these
+        # programs (because they're in all_active_db_ids ⊂ active_ids).
+        # Reuse `details` instead of re-fetching to save ~30-90s.
+        missing_from_details = [pid for pid in existing_in_pipeline
+                                if pid not in details]
+        if missing_from_details:
+            extra = batch_fetch_program_details(missing_from_details, batch_size=25)
+            details = {**details, **extra}
         confirmed_complete = []
         moved_to_step = {}  # pid -> step_name (workflow div had a current)
         unverifiable = 0
-        for pid, d in verify_details.items():
+        for pid in existing_in_pipeline:
+            d = details.get(pid) or {}
             steps = d.get('steps') or []
             html_err = d.get('html_error')
+            db_step = (existing_programs[pid].get('current_step') or '').strip()
             if html_err or not steps:
                 unverifiable += 1
                 continue
+            # Use the workflow div's class="current" marker as authoritative.
+            # This is more reliable than walking the approval log here —
+            # the walk can land on a tracked role (e.g. PGPR) that the
+            # program transited but never settled at, leaving the DB stuck.
             current = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
             if current is None:
                 confirmed_complete.append(pid)
+            elif current == db_step:
+                # Marker matches DB but Approve Pages didn't return it —
+                # could be a CIM-side display lag. Leave it as-is.
+                continue
             else:
                 moved_to_step[pid] = current
         if confirmed_complete:
