@@ -3468,15 +3468,16 @@ function _renderMisalignSection(heading, items) {
     return html;
 }
 
-// Render both directions of a single comparison with explicit, program-named
-// headings. `diff` must be oriented compareCurricula(leftHtml, rightHtml)
-// where leftName ↔ left operand and rightName ↔ right operand.
+// Render the red-flagged direction of a comparison: courses present in the
+// left operand (the program) but missing from the right (the reference),
+// under an explicit program-named heading. `diff` must be oriented
+// compareCurricula(leftHtml, rightHtml) so 'removed' == left-only.
+// (Only this direction is shown — the reverse, "in reference not in
+// program", is not a misalignment we flag.)
 function _renderMisalignPair(leftName, rightName, diff) {
     const L = escapeHtml(leftName), R = escapeHtml(rightName);
     return _renderMisalignSection(`Present in ${L} but missing from ${R}`,
-                                  _redCoursesFromDiff(diff))
-         + _renderMisalignSection(`Present in ${R} but missing from ${L}`,
-                                  _greenCoursesFromDiff(diff));
+                                  _redCoursesFromDiff(diff));
 }
 
 // Misaligned tab: per-comparison, both directions, each with a heading that
