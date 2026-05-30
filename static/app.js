@@ -1567,7 +1567,7 @@ function renderTable(items) {
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment Details</button>` +
                 (hasReg ? `
                 <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}" data-tab="regulatory"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory</button>` : '');
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory Details</button>` : '');
 
             html += `
                 <tr class="workflow-detail" id="detail-${id}">
