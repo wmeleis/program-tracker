@@ -2123,18 +2123,22 @@ async function loadChangesDetail(programId) {
             return;
         }
 
-        const {identical, diff} = compareCurricula(currHtml, histHtml);
+        // Old version on the LEFT, current proposal on the RIGHT, so the
+        // colors follow the standard diff convention:
+        //   red   ('removed') = in the previous version, removed from proposal
+        //   green ('added')   = added in this proposal
+        const {identical, diff} = compareCurricula(histHtml, currHtml);
         const dateLabel = formatReferenceVersionLabel(histData.version_date || '');
         const header = `<div class="reference-header">Comparing current proposal against: ${escapeHtml(dateLabel || 'previous approved version')}</div>`;
 
         if (identical) {
             contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the previous approved version — no changes.</div>`;
         } else {
-            const table = renderSideBySide(diff, 'Current proposal', 'Previous approved');
+            const table = renderSideBySide(diff, 'Previous approved', 'Current proposal');
             contentEl.innerHTML = `${header}
                 <div class="compare-legend">
-                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Added in this proposal</span>
-                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Removed from previous version</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Added in this proposal</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Removed from previous version</span>
                     <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                 </div>${table}`;
         }

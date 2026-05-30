@@ -1051,7 +1051,9 @@ function __staticInit() {
             contentEl.innerHTML = '<div class="workflow-meta">Curriculum data not available for change comparison.</div>';
             return;
         }
-        const {identical, diff} = compareCurricula(currHtml, hist.html);
+        // Old version LEFT, current proposal RIGHT → standard diff colors:
+        // red = removed from proposal, green = added in this proposal.
+        const {identical, diff} = compareCurricula(hist.html, currHtml);
         const vd = hist.version_date || '';
         const dateLabel = typeof formatReferenceVersionLabel === 'function'
             ? formatReferenceVersionLabel(vd) : vd;
@@ -1059,11 +1061,11 @@ function __staticInit() {
         if (identical) {
             contentEl.innerHTML = `${header}<div class="compare-identical">Current curriculum is identical to the previous approved version — no changes.</div>`;
         } else {
-            const table = renderSideBySide(diff, 'Current proposal', 'Previous approved');
+            const table = renderSideBySide(diff, 'Previous approved', 'Current proposal');
             contentEl.innerHTML = `${header}
                 <div class="compare-legend">
-                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Added in this proposal</span>
-                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Removed from previous version</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Added in this proposal</span>
+                    <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Removed from previous version</span>
                     <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                 </div>${table}`;
         }
