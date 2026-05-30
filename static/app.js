@@ -1562,9 +1562,9 @@ function renderTable(items) {
                 <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}" data-tab="reference"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Alignment Reference</button>
                 <button class="detail-tab ${activeTab === 'misaligned' ? 'active' : ''}" data-tab="misaligned"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'misaligned')">Alignment Report</button>
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'misaligned')">Alignment Summary</button>
                 <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}" data-tab="compare"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment Summary</button>` +
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment Report</button>` +
                 (hasReg ? `
                 <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}" data-tab="regulatory"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory</button>` : '');
