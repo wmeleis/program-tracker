@@ -2955,6 +2955,40 @@ function diffLines(oldLines, newLines) {
         if (absorbed > 0) courseDiff[wcIdx] = null;
     });
 
+    // Fifth post-LCS pass: duplicate-code reconciliation. A course code can
+    // appear multiple times across a curriculum — e.g. once as a required
+    // core course and again as an elective option, or repeated across
+    // concentration tracks. The LCS diff matches occurrences 1-to-1, so when
+    // one side lists a code N times and the other M times (N != M), the
+    // surplus |N-M| occurrences get flagged removed/added even though the
+    // course is plainly present on both sides. (Observed: INNO 6418 listed
+    // twice in MBA Online but once in the MBA umbrella reference → the
+    // second copy showed red "missing".)
+    //
+    // For curriculum comparison the right question is "is this course present
+    // on both sides?" (set semantics), not "the same number of times?"
+    // (multiset). So: drop any 'removed' whose code also appears anywhere on
+    // the right, and any 'added' whose code also appears anywhere on the
+    // left. A course that is genuinely on only one side keeps its code out of
+    // the other side's set and stays correctly flagged.
+    const leftCodeSet = new Set();
+    const rightCodeSet = new Set();
+    courseDiff.forEach(e => {
+        if (!e) return;
+        if (e.left && e.left.key)  leftCodeSet.add(normForCompare(e.left.key));
+        if (e.right && e.right.key) rightCodeSet.add(normForCompare(e.right.key));
+    });
+    courseDiff.forEach((e, i) => {
+        if (!e) return;
+        if (e.type === 'removed' && e.left && e.left.key) {
+            const k = normForCompare(e.left.key);
+            if (k && rightCodeSet.has(k)) courseDiff[i] = null;
+        } else if (e.type === 'added' && e.right && e.right.key) {
+            const k = normForCompare(e.right.key);
+            if (k && leftCodeSet.has(k)) courseDiff[i] = null;
+        }
+    });
+
     // Filter out the nulls
     for (let idx = courseDiff.length - 1; idx >= 0; idx--) {
         if (courseDiff[idx] === null) courseDiff.splice(idx, 1);
