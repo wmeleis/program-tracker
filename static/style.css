@@ -1542,6 +1542,25 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     margin-top: 8px;
 }
 
+/* Misaligned tab — plain list of red-flagged (in-program, not-in-reference) courses */
+.misaligned-table {
+    border-collapse: collapse;
+    margin: 6px 0 14px;
+    width: auto;
+}
+.misaligned-table td {
+    padding: 3px 14px 3px 0;
+    font-size: 13px;
+    vertical-align: top;
+}
+.misaligned-table .mis-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+    color: #991b1b;
+    white-space: nowrap;
+}
+.misaligned-table .mis-title { color: var(--text-secondary); }
+
 .compare-identical-small {
     padding: 8px 12px;
     background: #dcfce7;

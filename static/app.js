@@ -1561,6 +1561,8 @@ function renderTable(items) {
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Reference</button>
                 <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}" data-tab="compare"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment</button>
+                <button class="detail-tab ${activeTab === 'misaligned' ? 'active' : ''}" data-tab="misaligned"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'misaligned')">Misaligned</button>
                 <button class="detail-tab ${activeTab === 'changes' ? 'active' : ''}" data-tab="changes"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'changes')">Changes</button>` +
                 (hasReg ? `
@@ -1597,6 +1599,7 @@ function renderTable(items) {
         else if (!isCourseView) {
             if (tab === 'reference') loadReferenceDetail(id);
             else if (tab === 'compare') loadCompareDetail(id);
+            else if (tab === 'misaligned') loadMisalignedDetail(id);
             else if (tab === 'changes') loadChangesDetail(id);
             else if (tab === 'regulatory') loadRegulatoryDetail(id);
             else loadCurriculumDetail(id);
@@ -2285,6 +2288,7 @@ function switchDetailTab(programId, tab) {
     if (tab === 'workflow') loadWorkflowDetail(programId);
     else if (tab === 'reference') loadReferenceDetail(programId);
     else if (tab === 'compare') loadCompareDetail(programId);
+    else if (tab === 'misaligned') loadMisalignedDetail(programId);
     else if (tab === 'changes') loadChangesDetail(programId);
     else if (tab === 'regulatory') loadRegulatoryDetail(programId);
     else loadCurriculumDetail(programId);
@@ -3416,6 +3420,98 @@ async function loadCompareDetail(programId) {
     } catch (e) {
         contentEl.innerHTML = '<div class="workflow-meta">Failed to load comparison.</div>';
         updateCompareButton(programId, null);
+    }
+}
+
+// ---- Misaligned tab helpers ----
+// "Misaligned" courses = courses present on the LEFT (old) side of a diff
+// but not on the right — i.e. type 'removed'. Callers orient
+// compareCurricula() so the program-of-interest is the LEFT operand, so
+// 'removed' means "in this program, not in the reference."
+function _redCoursesFromDiff(diff) {
+    const out = [];
+    for (const d of (diff || [])) {
+        if (d && d.type === 'removed' && d.left && !d.left.isHeader) {
+            const code = (d.left.code || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+            const title = (d.left.title || '').trim();
+            if (code) out.push({code, title});
+        }
+    }
+    return out;
+}
+
+function _renderMisalignedList(items) {
+    if (!items.length) return '<div class="compare-identical">No misaligned courses.</div>';
+    let html = '<table class="misaligned-table"><tbody>';
+    for (const it of items) {
+        html += `<tr><td class="mis-code">${escapeHtml(it.code)}</td>`
+              + `<td class="mis-title">${escapeHtml(it.title || '')}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    return html;
+}
+
+// Misaligned tab: lists just the red-flagged courses (in this program's
+// curriculum but not in its reference), or "No misaligned courses".
+// Mirrors loadCompareDetail's reference-resolution branches but emits a
+// plain list instead of the side-by-side diff.
+async function loadMisalignedDetail(programId) {
+    const contentEl = document.getElementById(`detail-content-${programId}`);
+    if (!contentEl) return;
+    contentEl.innerHTML = '<div class="workflow-loading">Loading misaligned courses...</div>';
+    const note = c => `<div class="workflow-meta">${c}</div>`;
+    try {
+        const [currRes, groups] = await Promise.all([
+            fetch(`/api/program/${programId}/curriculum`),
+            getCampusGroups()
+        ]);
+        const currData = currRes.ok ? await currRes.json() : {};
+        const currHtml = currData.curriculum_html || '';
+        const bostonId = groups.deployment_to_boston[String(programId)];
+        const deploymentIds = groups.boston_to_deployments[String(programId)];
+        const progName = getProgramName(programId);
+        const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
+        const campus = campusMatch ? campusMatch[1] : null;
+        const isNonBoston = campus && campus.toLowerCase() !== 'boston';
+        const refRes0 = await fetch(`/api/program/${programId}/reference`);
+        const refData0 = refRes0.ok ? await refRes0.json() : {};
+        const hasCustomOverride = refData0.source === 'custom';
+
+        // Single-reference branches (custom override / non-Boston deployment / standalone)
+        if (hasCustomOverride || bostonId || isNonBoston || !(deploymentIds && deploymentIds.length)) {
+            const refHtml = refData0.curriculum_html || '';
+            const isSelfRef = refData0.version_id === -1 ||
+                (refData0.version_date || '').toLowerCase().includes('no prior approved');
+            if (!currHtml || !refHtml || isSelfRef) {
+                contentEl.innerHTML = note('No reference curriculum available to compare against.');
+                return;
+            }
+            const {diff} = compareCurricula(currHtml, refHtml);
+            const refLabel = hasCustomOverride
+                ? (refData0.name || 'custom reference')
+                : 'the reference curriculum';
+            contentEl.innerHTML =
+                note(`Courses in this program that are not in ${escapeHtml(refLabel)}:`)
+                + _renderMisalignedList(_redCoursesFromDiff(diff));
+            return;
+        }
+
+        // Boston program with deployments: per-deployment lists of courses
+        // the deployment has that this Boston curriculum lacks.
+        let html = note('Courses in each deployment that are not in this Boston curriculum:');
+        for (const depId of deploymentIds) {
+            const depRes = await fetch(`/api/program/${depId}/curriculum`);
+            const depData = depRes.ok ? await depRes.json() : {};
+            const depHtml = depData.curriculum_html || '';
+            const depName = getProgramName(depId);
+            html += `<h3 class="compare-deployment-name">${escapeHtml(depName)}</h3>`;
+            if (!currHtml || !depHtml) { html += note('Curriculum data not available.'); continue; }
+            const {diff} = compareCurricula(depHtml, currHtml);
+            html += _renderMisalignedList(_redCoursesFromDiff(diff));
+        }
+        contentEl.innerHTML = html;
+    } catch (e) {
+        contentEl.innerHTML = note('Failed to load misaligned courses.');
     }
 }
 

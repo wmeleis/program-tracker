@@ -1292,6 +1292,61 @@ function __staticInit() {
         }
     };
 
+    // Misaligned tab (static) — lists red-flagged courses (in this program,
+    // not in its reference). Mirrors the static loadCompareDetail data access
+    // but emits a plain list via the shared _redCoursesFromDiff /
+    // _renderMisalignedList helpers (defined in the base app.js).
+    window.loadMisalignedDetail = async function(programId) {
+        const contentEl = document.getElementById(`detail-content-${programId}`);
+        if (!contentEl) return;
+        contentEl.innerHTML = '<div class="workflow-loading">Loading misaligned courses...</div>';
+        const note = c => '<div class="workflow-meta">' + c + '</div>';
+        if (!_curriculumCache) {
+            try { _curriculumCache = window.__EMBEDDED_CURRICULUM__ || (await (await fetch('curriculum.json')).json()); } catch(e) {}
+        }
+        if (!_referenceCache) {
+            try { _referenceCache = window.__EMBEDDED_REFERENCE__ || (await (await fetch('reference.json')).json()); } catch(e) {}
+        }
+        const groups = await getCampusGroups();
+        const currHtml = (_curriculumCache || {})[String(programId)] || '';
+        const bostonId = groups.deployment_to_boston[String(programId)];
+        const deploymentIds = groups.boston_to_deployments[String(programId)];
+        const progName = getProgramName(programId);
+        const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
+        const campus = campusMatch ? campusMatch[1] : null;
+        const isNonBoston = campus && campus.toLowerCase() !== 'boston';
+        const ref = (_referenceCache || {})[String(programId)];
+
+        // Single-reference branches
+        if ((ref) || bostonId || isNonBoston || !(deploymentIds && deploymentIds.length)) {
+            const refHtml = ref ? ref.html : '';
+            const isSelfRef = ref && ref.version_date &&
+                ref.version_date.toLowerCase().includes('no prior approved');
+            if (!currHtml || !refHtml || isSelfRef) {
+                contentEl.innerHTML = note('No reference curriculum available to compare against.');
+                return;
+            }
+            const {diff} = compareCurricula(currHtml, refHtml);
+            const isCustom = ref.version_date && ref.version_date.indexOf('Custom reference') === 0;
+            const refLabel = isCustom ? ref.version_date.replace('Custom reference: ', '') : 'the reference curriculum';
+            contentEl.innerHTML = note('Courses in this program that are not in ' + escapeHtml(refLabel) + ':')
+                + _renderMisalignedList(_redCoursesFromDiff(diff));
+            return;
+        }
+
+        // Boston program with deployments
+        let html = note('Courses in each deployment that are not in this Boston curriculum:');
+        for (const depId of deploymentIds) {
+            const depHtml = (_curriculumCache || {})[String(depId)] || '';
+            const depName = getProgramName(depId);
+            html += '<h3 class="compare-deployment-name">' + escapeHtml(depName) + '</h3>';
+            if (!currHtml || !depHtml) { html += note('Curriculum data not available.'); continue; }
+            const {diff} = compareCurricula(depHtml, currHtml);
+            html += _renderMisalignedList(_redCoursesFromDiff(diff));
+        }
+        contentEl.innerHTML = html;
+    };
+
     // Update button: reach local Flask to trigger the fast scan
     // (Options C+F: hybrid discovery, incremental fetch — ~22 min).
     // The deep heal path is reserved for the weekly Sunday-morning
