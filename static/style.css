@@ -936,6 +936,17 @@ tr.program-row.expanded td {
 
 mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 
+/* The content area that opens when a detail tab is selected. Give it a
+ * white card background distinct from the (pale blue-grey) detail panel
+ * and the (near-white) page, so it's easy to see where the opened
+ * tab's information begins. */
+.detail-content {
+    background: #fff;
+    border: 1px solid #d3dce8;
+    border-radius: 6px;
+    padding: 14px 16px;
+}
+
 .detail-tab {
     padding: 6px 18px;
     border: none;
