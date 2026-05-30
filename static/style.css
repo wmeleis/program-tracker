@@ -1542,7 +1542,19 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     margin-top: 8px;
 }
 
-/* Misaligned tab — plain list of red-flagged (in-program, not-in-reference) courses */
+/* Misaligned tab — headed, bidirectional course lists */
+.mis-heading {
+    margin: 14px 0 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #1f2937);
+}
+.mis-none {
+    font-size: 13px;
+    color: var(--text-secondary, #6b7280);
+    margin: 2px 0 6px;
+    font-style: italic;
+}
 .misaligned-table {
     border-collapse: collapse;
     margin: 6px 0 14px;

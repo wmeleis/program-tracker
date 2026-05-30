@@ -3440,9 +3440,26 @@ function _redCoursesFromDiff(diff) {
     return out;
 }
 
-function _renderMisalignedList(items) {
-    if (!items.length) return '<div class="compare-identical">No misaligned courses.</div>';
-    let html = '<table class="misaligned-table"><tbody>';
+// Green: courses present on the RIGHT (new) side of a diff but not the
+// left — type 'added'.
+function _greenCoursesFromDiff(diff) {
+    const out = [];
+    for (const d of (diff || [])) {
+        if (d && d.type === 'added' && d.right && !d.right.isHeader) {
+            const code = (d.right.code || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+            const title = (d.right.title || '').trim();
+            if (code) out.push({code, title});
+        }
+    }
+    return out;
+}
+
+// Render one headed section: "<heading>" then a course list (or "None").
+// `heading` is already-escaped HTML.
+function _renderMisalignSection(heading, items) {
+    let html = `<h4 class="mis-heading">${heading}</h4>`;
+    if (!items.length) { html += '<div class="mis-none">None</div>'; return html; }
+    html += '<table class="misaligned-table"><tbody>';
     for (const it of items) {
         html += `<tr><td class="mis-code">${escapeHtml(it.code)}</td>`
               + `<td class="mis-title">${escapeHtml(it.title || '')}</td></tr>`;
@@ -3451,10 +3468,20 @@ function _renderMisalignedList(items) {
     return html;
 }
 
-// Misaligned tab: lists just the red-flagged courses (in this program's
-// curriculum but not in its reference), or "No misaligned courses".
-// Mirrors loadCompareDetail's reference-resolution branches but emits a
-// plain list instead of the side-by-side diff.
+// Render both directions of a single comparison with explicit, program-named
+// headings. `diff` must be oriented compareCurricula(leftHtml, rightHtml)
+// where leftName ↔ left operand and rightName ↔ right operand.
+function _renderMisalignPair(leftName, rightName, diff) {
+    const L = escapeHtml(leftName), R = escapeHtml(rightName);
+    return _renderMisalignSection(`Present in ${L} but missing from ${R}`,
+                                  _redCoursesFromDiff(diff))
+         + _renderMisalignSection(`Present in ${R} but missing from ${L}`,
+                                  _greenCoursesFromDiff(diff));
+}
+
+// Misaligned tab: per-comparison, both directions, each with a heading that
+// names the two programs ("Present in X but missing from Y"). Mirrors
+// loadCompareDetail's reference-resolution branches.
 async function loadMisalignedDetail(programId) {
     const contentEl = document.getElementById(`detail-content-${programId}`);
     if (!contentEl) return;
@@ -3469,7 +3496,7 @@ async function loadMisalignedDetail(programId) {
         const currHtml = currData.curriculum_html || '';
         const bostonId = groups.deployment_to_boston[String(programId)];
         const deploymentIds = groups.boston_to_deployments[String(programId)];
-        const progName = getProgramName(programId);
+        const progName = getProgramName(programId) || 'this program';
         const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
         const campus = campusMatch ? campusMatch[1] : null;
         const isNonBoston = campus && campus.toLowerCase() !== 'boston';
@@ -3486,28 +3513,32 @@ async function loadMisalignedDetail(programId) {
                 contentEl.innerHTML = note('No reference curriculum available to compare against.');
                 return;
             }
+            let refName;
+            if (hasCustomOverride)      refName = refData0.name || 'the custom reference';
+            else if (bostonId)          refName = getProgramName(bostonId) || 'the Boston reference';
+            else if (isNonBoston)       refName = 'the Boston reference';
+            else                        refName = 'the last approved version';
             const {diff} = compareCurricula(currHtml, refHtml);
-            const refLabel = hasCustomOverride
-                ? (refData0.name || 'custom reference')
-                : 'the reference curriculum';
-            contentEl.innerHTML =
-                note(`Courses in this program that are not in ${escapeHtml(refLabel)}:`)
-                + _renderMisalignedList(_redCoursesFromDiff(diff));
+            contentEl.innerHTML = _renderMisalignPair(progName, refName, diff);
             return;
         }
 
-        // Boston program with deployments: per-deployment lists of courses
-        // the deployment has that this Boston curriculum lacks.
-        let html = note('Courses in each deployment that are not in this Boston curriculum:');
+        // Boston program with deployments: one labeled pair per deployment.
+        let html = note(`Comparing ${escapeHtml(progName)} against ${deploymentIds.length} deployment${deploymentIds.length > 1 ? 's' : ''}:`);
         for (const depId of deploymentIds) {
             const depRes = await fetch(`/api/program/${depId}/curriculum`);
             const depData = depRes.ok ? await depRes.json() : {};
             const depHtml = depData.curriculum_html || '';
             const depName = getProgramName(depId);
-            html += `<h3 class="compare-deployment-name">${escapeHtml(depName)}</h3>`;
-            if (!currHtml || !depHtml) { html += note('Curriculum data not available.'); continue; }
+            if (!currHtml || !depHtml) {
+                html += `<h4 class="mis-heading">${escapeHtml(depName)}</h4>` + note('Curriculum data not available.');
+                continue;
+            }
+            // compareCurricula(depHtml, currHtml) → left=deployment, right=Boston.
             const {diff} = compareCurricula(depHtml, currHtml);
-            html += _renderMisalignedList(_redCoursesFromDiff(diff));
+            html += `<div class="compare-deployment-section">`
+                  + _renderMisalignPair(depName, progName, diff)
+                  + `</div>`;
         }
         contentEl.innerHTML = html;
     } catch (e) {

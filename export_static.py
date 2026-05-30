@@ -1311,7 +1311,7 @@ function __staticInit() {
         const currHtml = (_curriculumCache || {})[String(programId)] || '';
         const bostonId = groups.deployment_to_boston[String(programId)];
         const deploymentIds = groups.boston_to_deployments[String(programId)];
-        const progName = getProgramName(programId);
+        const progName = getProgramName(programId) || 'this program';
         const campusMatch = progName.match(/\(([^)]+)\)\s*$/);
         const campus = campusMatch ? campusMatch[1] : null;
         const isNonBoston = campus && campus.toLowerCase() !== 'boston';
@@ -1326,23 +1326,28 @@ function __staticInit() {
                 contentEl.innerHTML = note('No reference curriculum available to compare against.');
                 return;
             }
-            const {diff} = compareCurricula(currHtml, refHtml);
             const isCustom = ref.version_date && ref.version_date.indexOf('Custom reference') === 0;
-            const refLabel = isCustom ? ref.version_date.replace('Custom reference: ', '') : 'the reference curriculum';
-            contentEl.innerHTML = note('Courses in this program that are not in ' + escapeHtml(refLabel) + ':')
-                + _renderMisalignedList(_redCoursesFromDiff(diff));
+            let refName;
+            if (isCustom)         refName = ref.version_date.replace('Custom reference: ', '');
+            else if (bostonId)    refName = getProgramName(bostonId) || 'the Boston reference';
+            else if (isNonBoston) refName = 'the Boston reference';
+            else                  refName = 'the last approved version';
+            const {diff} = compareCurricula(currHtml, refHtml);
+            contentEl.innerHTML = _renderMisalignPair(progName, refName, diff);
             return;
         }
 
-        // Boston program with deployments
-        let html = note('Courses in each deployment that are not in this Boston curriculum:');
+        // Boston program with deployments — one labeled pair per deployment.
+        let html = note('Comparing ' + escapeHtml(progName) + ' against ' + deploymentIds.length + ' deployment' + (deploymentIds.length > 1 ? 's' : '') + ':');
         for (const depId of deploymentIds) {
             const depHtml = (_curriculumCache || {})[String(depId)] || '';
             const depName = getProgramName(depId);
-            html += '<h3 class="compare-deployment-name">' + escapeHtml(depName) + '</h3>';
-            if (!currHtml || !depHtml) { html += note('Curriculum data not available.'); continue; }
+            if (!currHtml || !depHtml) {
+                html += '<h4 class="mis-heading">' + escapeHtml(depName) + '</h4>' + note('Curriculum data not available.');
+                continue;
+            }
             const {diff} = compareCurricula(depHtml, currHtml);
-            html += _renderMisalignedList(_redCoursesFromDiff(diff));
+            html += '<div class="compare-deployment-section">' + _renderMisalignPair(depName, progName, diff) + '</div>';
         }
         contentEl.innerHTML = html;
     };
