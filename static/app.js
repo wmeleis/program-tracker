@@ -1557,14 +1557,14 @@ function renderTable(items) {
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'workflow')">Workflow</button>
                 <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}" data-tab="curriculum"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'curriculum')">Curriculum</button>
-                <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}" data-tab="reference"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Reference</button>
-                <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}" data-tab="compare"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment</button>
-                <button class="detail-tab ${activeTab === 'misaligned' ? 'active' : ''}" data-tab="misaligned"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'misaligned')">Misaligned</button>
                 <button class="detail-tab ${activeTab === 'changes' ? 'active' : ''}" data-tab="changes"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'changes')">Changes</button>` +
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'changes')">Program Changes</button>
+                <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}" data-tab="reference"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Alignment Reference</button>
+                <button class="detail-tab ${activeTab === 'misaligned' ? 'active' : ''}" data-tab="misaligned"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'misaligned')">Alignment Report</button>
+                <button class="detail-tab ${activeTab === 'compare' ? 'active' : ''}" data-tab="compare"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment Summary</button>` +
                 (hasReg ? `
                 <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}" data-tab="regulatory"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory</button>` : '');
@@ -3553,7 +3553,7 @@ function updateCompareButton(programId, identical) {
     if (!detailRow) return;
     const tabs = detailRow.querySelectorAll('.detail-tab');
     for (const tab of tabs) {
-        if (tab.textContent.trim() === 'Compare') {
+        if (tab.dataset.tab === 'compare') {  // the "Alignment Summary" tab
             tab.classList.remove('compare-identical-btn', 'compare-different-btn');
             if (identical === true) tab.classList.add('compare-identical-btn');
             else if (identical === false) tab.classList.add('compare-different-btn');
