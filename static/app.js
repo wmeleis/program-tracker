@@ -2406,6 +2406,17 @@ function extractCourseLines(html) {
     const courseCodePattern = /^[A-Z]{2,5}\s+\d{4}/i;
 
     let currentSection = '';
+    // Heading hierarchy stack so each course's required/elective category can
+    // be derived from its governing parent heading, not just the nearest
+    // sub-header. Levels: h2=0, h3=1, h4=2, table areaheader/comment=3.
+    let sectionStack = [];
+    let currentCategory = 'required';
+    function setSection(level, text) {
+        sectionStack = sectionStack.filter(e => e.level < level);
+        sectionStack.push({level, text});
+        currentSection = text;
+        currentCategory = classifySectionStack(sectionStack.map(e => e.text));
+    }
     // Subject-wildcard mode: triggered by a course-list "comment" row whose
     // text matches "any of the following subject codes" (or similar). While
     // active, rows whose cell content is just a subject prefix
@@ -2450,7 +2461,7 @@ function extractCourseLines(html) {
         if (tag === 'h2' || tag === 'h3' || tag === 'h4') {
             const text = standardizeHeader(normText(el.textContent));
             if (text && text.length > 1) {
-                currentSection = text;
+                setSection(tag === 'h2' ? 0 : tag === 'h3' ? 1 : 2, text);
                 lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
             }
             inSubjectWildcardSection = false; // new section ends any wildcard run
@@ -2501,6 +2512,7 @@ function extractCourseLines(html) {
                     hours: '',
                     isHeader: false,
                     section: currentSection,
+                    category: currentCategory,
                     subjectWildcard: {prefix: prefix, exclusions: exclusions},
                 });
                 return;
@@ -2513,7 +2525,7 @@ function extractCourseLines(html) {
         if (isAreaHeader) {
             const text = standardizeHeader(parts.join(' '));
             if (text) {
-                currentSection = text;
+                setSection(3, text);
                 lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
             }
             inSubjectWildcardSection = false; // new sub-section ends wildcard run
@@ -2542,6 +2554,7 @@ function extractCourseLines(html) {
                         hours: idx === 0 ? hourscol : '',
                         isHeader: false,
                         section: currentSection,
+                        category: currentCategory,
                     });
                 });
                 return;
@@ -2551,7 +2564,7 @@ function extractCourseLines(html) {
             // minor edits, different campus wording) without representing a real
             // curriculum change. If the code matches, the course matches.
             const normCode = normalizedCode.toUpperCase();
-            lines.push({key: normCode, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection});
+            lines.push({key: normCode, code: codecol, title: titlecol, hours: hourscol, isHeader: false, section: currentSection, category: currentCategory});
         } else {
             // Inline subject-list wildcards FIRST — recognize patterns like
             // "or any EMGT, IE, or OR courses" or "Any INFO course in range
@@ -2577,6 +2590,7 @@ function extractCourseLines(html) {
                         hours: '',
                         isHeader: false,
                         section: currentSection,
+                        category: currentCategory,
                         subjectWildcard: {
                             prefix: prefix,
                             exclusions: [],
@@ -2593,7 +2607,7 @@ function extractCourseLines(html) {
             if (raw.length > 2) {
                 const text = standardizeHeader(raw);
                 if (text) {
-                    currentSection = text;
+                    setSection(3, text);
                     lines.push({key: '', code: '', title: text, hours: '', isHeader: true, section: text});
                 }
             }
@@ -2629,6 +2643,39 @@ function classifySection(sectionText) {
     if (/\bfrom the following\b/.test(s)) return 'elective';
     if (/\bany\s+\d+/.test(s)) return 'elective';
     // Default to required for strict/unknown markers.
+    return 'required';
+}
+
+// Return 'required' | 'elective' | null for a single heading label, where
+// null means "neutral" (no explicit category marker — e.g. "Practicum or
+// Capstone", "Optional Co-op Experience"). Used to classify by heading
+// HIERARCHY: a course under "Core Requirements › Practicum or Capstone" is
+// required, while the same course under "Electives › Practicum or Capstone"
+// is an elective. The category lives in the parent heading, not the
+// neutral sub-header nearest the course.
+function _explicitCategory(label) {
+    const s = (label || '').toLowerCase();
+    if (/\belective/.test(s) || /\b(choose|select)\b/.test(s) || /\bbreadth\b/.test(s)
+        || /\bfrom the following\b/.test(s) || /\bcomplete\s+\w+\s+of\s+the\s+following/.test(s)
+        || /\bin consultation\s+with/.test(s) || /\bany\s+\d+/.test(s)
+        || /\bcomplete\s+\d+\s+(?:semester\s+)?(?:sh|s\.h\.|hours?|credits?)\s+(?:from|based|in|with)/.test(s)) {
+        return 'elective';
+    }
+    if (/\brequired\s+core\b/.test(s) || /^required\b/.test(s) || /^core\b/.test(s)
+        || /\bcore\s+requirement/.test(s) || /\brequired\s+courses?\b/.test(s)
+        || /\bcomplete\s+all\b/.test(s)) {
+        return 'required';
+    }
+    return null;
+}
+
+// Classify a heading stack (shallow→deep). The nearest explicit marker
+// wins; neutral sub-headers are skipped so the governing parent decides.
+function classifySectionStack(labels) {
+    for (let i = labels.length - 1; i >= 0; i--) {
+        const c = _explicitCategory(labels[i]);
+        if (c) return c;
+    }
     return 'required';
 }
 
@@ -3046,13 +3093,19 @@ function diffLines(oldLines, newLines) {
                 }
             }
         }
-        // Mark courses that match but moved between section categories
-        // (e.g. required → elective). Different wording for the same category
-        // (e.g. "Required Courses" vs "Complete all courses...") is not flagged.
+        // Mark courses that match but moved between section CATEGORIES
+        // (required ↔ elective). Category is derived from the heading
+        // hierarchy (the governing parent heading wins over a neutral
+        // nearest sub-header like "Practicum or Capstone"), so e.g. a
+        // course under "Core Requirements › Practicum or Capstone" in one
+        // program and "Electives › Practicum or Capstone" in the other is
+        // correctly flagged as moved. Falls back to classifySection(section)
+        // for entries without a category (e.g. wildcard rows).
         let type = d.type;
-        if (type === 'same' && d.left && d.right && !d.left.isHeader && d.left.section && d.right.section &&
-            classifySection(d.left.section) !== classifySection(d.right.section)) {
-            type = 'moved';
+        if (type === 'same' && d.left && d.right && !d.left.isHeader) {
+            const lc = d.left.category || (d.left.section ? classifySection(d.left.section) : null);
+            const rc = d.right.category || (d.right.section ? classifySection(d.right.section) : null);
+            if (lc && rc && lc !== rc) type = 'moved';
         }
         result.push({type, left: d.left, right: d.right});
     }
