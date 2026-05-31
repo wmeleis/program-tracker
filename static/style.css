@@ -88,7 +88,9 @@ header h1 {
     font-weight: 500;
 }
 
-#scan-btn, #console-btn {
+/* Update is the one primary (blue) action; all other header buttons
+   (Console, Authenticate, References) use the white secondary style. */
+#scan-btn {
     background: var(--accent);
     color: white;
     border: none;
@@ -101,8 +103,8 @@ header h1 {
     margin-left: 8px;
 }
 
-#scan-btn:hover, #console-btn:hover { background: var(--accent-hover); }
-#scan-btn:disabled, #console-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+#scan-btn:hover { background: var(--accent-hover); }
+#scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Progress Container */
 .progress-container {
