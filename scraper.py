@@ -1137,24 +1137,34 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True):
                     emails = s.get('emails', '') or ''
                     break
         else:
-            # gone candidate: confirm complete via page (positive evidence)
+            # Not in the Approve Pages dump. Two cases:
+            #  (a) completed — no workflow div, or all steps approved with no
+            #      current marker → set completion_date, clear current_step.
+            #  (b) still active at a NON-mustsignoff terminal step (Editor,
+            #      Banner Setup, Catalog Setup) — these are processing steps,
+            #      not reviewer sign-offs, so they never appear in the dump.
+            #      The page's class="current" marker is authoritative here
+            #      (no parallel-branch risk at terminal steps), so use it.
+            #  Page fetch failed → preserve existing (positive-evidence).
+            if page is None:
+                return None
             found_wf = (page or {}).get('found_workflow')
             total = len(steps)
             approved = sum(1 for s in steps if s.get('status') == 'approved')
-            has_current = any(s.get('status') == 'current' for s in steps)
-            if page is None:
-                # fetch failed — do NOT change anything
-                return None
-            if (not found_wf) or (total > 0 and approved == total and not has_current):
+            marker = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if (not found_wf) or (total > 0 and approved == total and marker is None):
                 current_step = ''
                 completion_date = (page or {}).get('last_approval_date', '') \
                     or (('Catalog ' + meta.get('eff_cat')) if meta.get('eff_cat') else 'Approved')
                 emails = ''
                 completed_now.append(pid)
+            elif marker:
+                current_step = marker
+                completion_date = ''
+                emails = next((s.get('emails', '') for s in steps
+                               if (s.get('name') or '').strip() == marker), '') or ''
             else:
-                # still shows an active workflow but not pending — unverifiable
-                # edge; preserve existing.
-                return None
+                return None  # unverifiable — preserve
         # metadata
         college_code = meta.get('college', '')
         college = COLLEGE_NAMES.get(college_code, college_code)
