@@ -4068,7 +4068,42 @@ function renderConsoleContent(data) {
     const otpMismatches = mm.otp_mismatches || [];
     const glsMismatches = mm.gls_mismatches || [];
 
-    let html = '<h3 style="margin:0 0 10px">Scan History</h3>';
+    // ---- Action audit (approve / rollback / comment) ----
+    const audit = data.action_audit || [];
+    let html = '<h3 style="margin:0 0 10px">My Actions (approve / rollback / comment)</h3>';
+    if (!audit.length) {
+        html += '<p class="empty-state">No actions taken yet.</p>';
+    } else {
+        const actLabel = {approve: 'Approve', sendback: 'Rollback', comment: 'Comment'};
+        const fmtTs = s => { try { return new Date(s).toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) + ' ET'; } catch(_) { return s || '—'; } };
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+        html += '<thead><tr style="background:#f1f5f9;text-align:left">'
+             + '<th style="padding:5px 8px">When</th>'
+             + '<th style="padding:5px 8px">Program</th>'
+             + '<th style="padding:5px 8px">Action</th>'
+             + '<th style="padding:5px 8px">Step / target</th>'
+             + '<th style="padding:5px 8px">Comment</th>'
+             + '<th style="padding:5px 8px">Result</th>'
+             + '</tr></thead><tbody>';
+        for (const a of audit) {
+            const label = actLabel[a.action] || a.action || '—';
+            const target = a.action === 'sendback'
+                ? `${escapeHtml(a.role || '')} → ${escapeHtml(a.rejectto || '')}`
+                : escapeHtml(a.role || '');
+            const rowColor = a.ok ? '' : '#fff5f5';
+            html += `<tr style="border-top:1px solid #e2e8f0;background:${rowColor}">
+                <td style="padding:5px 8px;white-space:nowrap">${fmtTs(a.ts)}</td>
+                <td style="padding:5px 8px">${escapeHtml(a.name || ('#' + a.program_id))}</td>
+                <td style="padding:5px 8px">${escapeHtml(label)}</td>
+                <td style="padding:5px 8px">${target || '—'}</td>
+                <td style="padding:5px 8px">${escapeHtml(a.comment || '')}</td>
+                <td style="padding:5px 8px;color:${a.ok ? '#15803d' : '#b91c1c'}">${a.ok ? '✓ ' : '✗ '}${escapeHtml(a.detail || '')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
+    html += '<h3 style="margin:20px 0 10px">Scan History</h3>';
     if (!scanLog.length) {
         html += '<p class="empty-state">No scans recorded yet.</p>';
     } else {

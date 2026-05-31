@@ -1459,7 +1459,26 @@ def api_console():
             mismatch_report = _json.load(f)
     except Exception:
         pass
-    return jsonify({'scan_log': scan_log, 'mismatches': mismatches, 'mismatch_report': mismatch_report})
+    # Action audit: most-recent-first, capped. Each line is one approve/
+    # rollback/comment attempt logged by /api/program/<id>/action.
+    action_audit = []
+    audit_path = os.path.join(_DATA_DIR, 'action_audit.jsonl')
+    try:
+        with open(audit_path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        action_audit.append(_json.loads(line))
+                    except Exception:
+                        pass
+        action_audit = action_audit[::-1][:200]
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    return jsonify({'scan_log': scan_log, 'mismatches': mismatches,
+                    'mismatch_report': mismatch_report, 'action_audit': action_audit})
 
 
 @app.route('/api/colleges')
