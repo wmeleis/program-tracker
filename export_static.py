@@ -468,12 +468,14 @@ def build_static_site():
     html = html.replace('href="/static/style.css"', f'href="style.css?v={cache_bust}"')
     # Remove the static app.js <script> tag; the gate injects it after unlock
     html = re.sub(r'\s*<script[^>]*src="/static/app\.js"[^>]*></script>', '', html)
-    html = html.replace(
-        '<button id="scan-btn" onclick="triggerScan()">Update Now</button>',
-        ''
-    )
-    # Remove the References management UI — static site has no backend for uploads.
-    # Overrides are baked into reference.json, so the current reference display still works.
+    # Remove the Update button — the static site is read-only; scans run on
+    # the owner's machine (continuously + via the local dashboard). Other
+    # viewers have no local server to trigger, so the button would only error.
+    html = re.sub(r'<button id="scan-btn"[^>]*>.*?</button>', '', html, count=1, flags=re.DOTALL)
+    # Remove the References management UI + button — static site has no backend
+    # for uploads. Overrides are baked into reference.json, so the current
+    # reference display still works.
+    html = re.sub(r'<button id="refs-btn"[^>]*>.*?</button>', '', html, count=1, flags=re.DOTALL)
     html = re.sub(
         r'<div class="subtle-links">.*?</div>',
         '', html, count=1, flags=re.DOTALL
