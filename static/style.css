@@ -972,6 +972,7 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     position: relative;
     margin-left: 16px;
     flex: 1;
+    min-width: 220px;   /* don't let the search collapse when the header is crowded */
     max-width: 360px;
 }
 .header-search input[type=text] {
