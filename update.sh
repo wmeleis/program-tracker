@@ -3,16 +3,16 @@
 # launchd fires this every 5 minutes, 24/7.
 #
 # Cadence:
-#   Mon-Fri: continuous (back-to-back scans). Each scan ~50 min
-#            so roughly one finished scan every hour.
+#   Mon-Fri: continuous (back-to-back scans). Each HTTP scan is ~2-3 min
+#            (programs + courses + catalog + references + portfolio), so
+#            scans effectively run every ~5 min (the launchd interval).
 #   Sat-Sun: every 3 hours (3h gap between scan starts).
 #
-# Both apply only inside the 6am-9pm PT window. Outside the
-# window, or when Chrome/session is unavailable, the script
-# exits silently (a millisecond no-op).
+# Both apply only inside the 6am-9pm PT window. Outside the window the
+# script exits silently (a millisecond no-op).
 #
-# Each scan force-fetches the workflow div for every active program
-# and course (100% accuracy per scan).
+# The scan reads CourseLeaf over direct HTTP (one Approve Pages dump +
+# parallel page/XML fetches) — no AppleScript, no Chrome tab driving.
 
 cd /Users/wmeleis/committees/nu-docs/Curriculum/CIM
 LOG="data/update.log"
@@ -46,43 +46,15 @@ if [ "$DOW_PT" -ge 6 ] && [ -f "$LAST_SCAN_FILE" ]; then
     fi
 fi
 
-# Browser must be running with a valid CourseLeaf session.
-BROWSER_APP="${BROWSER_APP:-Google Chrome}"
-if ! pgrep -q "$BROWSER_APP"; then
-    echo "$(date): $BROWSER_APP not running, skipping" >> "$LOG"
-    exit 0
-fi
-
-# Tab presence check only — DO NOT execute JS here. Chrome 147+
-# background-throttles JS on non-active tabs, so `execute javascript`
-# stalls and returns empty whenever Chrome isn't the frontmost app.
-# Previously this caused update.sh to silently skip every 5-min cycle
-# for hours at a time. Flask's session preflight does the actual
-# session-validity probe (with a tab-activate fallback) when the scan
-# is triggered; this preflight just verifies that the tab EXISTS.
-SESSION_CHECK=$(osascript -e "
-tell application \"$BROWSER_APP\"
-    set tabList to every tab of window 1
-    repeat with t in tabList
-        if URL of t contains \"courseleaf/approve\" then
-            return \"TAB_PRESENT\"
-        end if
-    end repeat
-    return \"TAB_NOT_FOUND\"
-end tell" 2>/dev/null)
-
-if [[ "$SESSION_CHECK" == "TAB_NOT_FOUND" ]] || [[ -z "$SESSION_CHECK" ]]; then
-    echo "$(date): Approve Pages tab not found, skipping" >> "$LOG"
-    exit 0
-fi
-
-# Session-validity (logged-in vs login redirect) deferred to Flask's
-# /api/scan/trigger preflight, which can activate the tab safely.
-if false; then
-    echo "$(date): Session expired, skipping" >> "$LOG"
-    osascript -e 'display notification "CourseLeaf session expired. Please log in." with title "Program Tracker"' 2>/dev/null
-    exit 0
-fi
+# NO Chrome / tab preflight. The scan now reads CourseLeaf over direct HTTP
+# (cim_http.py), reusing the CIM session cookie from Chrome's on-disk cookie
+# store — Chrome does NOT need to be running, foregrounded, or have any tab
+# open for the CIM scan to work. Flask's /api/scan/trigger does the actual
+# HTTP session-validity check (sess.check()) and posts a macOS notification
+# if the SSO session has expired, so there's nothing to gate on here.
+# (Portfolio feed download still uses Chrome/Smartsheet; if Chrome is closed
+# that one step degrades gracefully — the CIM scan + references are
+# unaffected.)
 
 # Ensure Flask is running.
 # IMPORTANT: detach Flask from this script's process group so launchd's
