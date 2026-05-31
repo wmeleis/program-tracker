@@ -1045,6 +1045,7 @@ def api_scan_trigger():
             # included in get_all_programs() for the downstream fetches.
             # Otherwise they'd linger without references until the next scan.
             sweep_program_completions = []  # C3: programs newly completed via sweep
+            weekly_ref_refresh = False  # set when the weekly sweep runs → full ref re-fetch
             scan_status['phase'] = 'Checking historical sweep...'
             scan_status['progress'] = 72
             try:
@@ -1061,6 +1062,7 @@ def api_scan_trigger():
                     scan_status['phase'] = 'Weekly program sweep (HTTP)...'
                     sweep_result = sweep_program_ids_http(start_id=1, end_id=2100, sess=sess, log=True)
                     sweep_program_completions = sweep_result.get('new_completion_ids', []) if sweep_result else []
+                    weekly_ref_refresh = True
 
                 with get_db() as conn:
                     last_c = conn.execute(
@@ -1122,6 +1124,15 @@ def api_scan_trigger():
                         for nb_id, b_id in counterpart_map.items():
                             if b_id in completed_in_scan:
                                 targeted_ids.add(nb_id)
+                    # Weekly safety net: when the weekly sweep ran this scan,
+                    # re-fetch EVERY program's reference. Catches the
+                    # theoretical case of an approved-history change that never
+                    # tripped a completion signal. Cheap — the version_id check
+                    # in fetch_reference_curricula_http only writes the ones
+                    # that actually advanced. Runs at most once a week.
+                    if weekly_ref_refresh:
+                        targeted_ids = set(prog_ids)
+                        print("Reference fetch: weekly full refresh (all programs)")
                     print(f"Reference fetch (C3, HTTP): targeting "
                           f"{len(targeted_ids)} of {len(prog_ids)} programs "
                           f"(missing-ref + completed-in-scan + boston-just-completed deps)")
