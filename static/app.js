@@ -1699,8 +1699,9 @@ function buildProgramActionPanel(programId, steps) {
     const opts = approved.map(s => `<option value="${escapeHtml(s.step_name)}">${escapeHtml(s.step_name)}</option>`).join('');
     const sendback = approved.length
         ? `<div class="pa-row">
+               <span class="pa-label">Roll back to:</span>
                <select id="pa-rejectto-${programId}" class="pa-select">${opts}</select>
-               <button class="pa-btn pa-sendback" onclick="submitProgramAction(${programId}, 'sendback')">Send back</button>
+               <button class="pa-btn pa-sendback" onclick="submitProgramAction(${programId}, 'sendback')">Rollback</button>
            </div>`
         : '';
     return `
@@ -1742,7 +1743,7 @@ async function submitProgramAction(programId, action) {
     const name = prog ? prog.name : `program #${programId}`;
     let msg;
     if (action === 'approve') msg = `Approve “${name}” at step “${role}” in CIM?\n\nThis advances the program in the official workflow.`;
-    else if (action === 'sendback') msg = `Send “${name}” back to “${rejectto}” in CIM?\n\nThis rolls the program back in the official workflow.`;
+    else if (action === 'sendback') msg = `Roll “${name}” back to “${rejectto}” in CIM?\n\nThis returns the program to an earlier step in the official workflow.`;
     else msg = `Add a comment to “${name}” in CIM? (does not change its step)`;
     if (comment) msg += `\n\nComment: ${comment}`;
     if (!window.confirm(msg)) return;

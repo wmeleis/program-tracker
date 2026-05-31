@@ -2183,6 +2183,7 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     font: inherit; font-size: 13px; margin-bottom: 8px;
 }
 .pa-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.pa-label { font-size: 13px; color: #475569; }
 .pa-select {
     border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px;
     font: inherit; font-size: 13px; max-width: 320px;

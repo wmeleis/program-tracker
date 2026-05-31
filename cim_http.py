@@ -470,7 +470,7 @@ class CIMSession:
         if warnings:
             # Other warnings are surfaced but not necessarily failures.
             return True, "Applied (with warnings: " + "; ".join(warnings)[:300] + ")"
-        verb = {'Approved': 'Approved', 'Rejected': 'Sent back'}.get(action, action)
+        verb = {'Approved': 'Approved', 'Rejected': 'Rolled back'}.get(action, action)
         return True, f"{verb} successfully" + (f" (comment logged)" if why else "")
 
     def fetch_program_xml(self, pid, timeout=30):
