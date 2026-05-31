@@ -2201,6 +2201,11 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 .pa-result.pa-ok { color: #15803d; }
 .pa-result.pa-err { color: #b91c1c; }
 
+/* CIM session indicator (local site only) */
+.auth-status { font-size: 12px; font-weight: 600; margin: 0 4px; white-space: nowrap; }
+.auth-status.auth-ok { color: #15803d; }
+.auth-status.auth-bad { color: #b91c1c; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .pipeline-bar { flex-wrap: wrap; }

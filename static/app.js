@@ -1689,6 +1689,9 @@ async function ensureLocalServer() {
 // Build the (initially hidden) approve/send-back/comment panel for a program
 // row. Returns '' for courses or programs with no current step.
 function buildProgramActionPanel(programId, steps) {
+    // Approvals are local-only: the panel renders only on the Flask-served
+    // dashboard (localhost), never on the public GitHub Pages static site.
+    if (window._staticMode) return '';
     const current = (steps || []).find(s => (s.step_status || '') === 'current');
     if (!current) return '';
     const role = current.step_name || '';
@@ -1770,6 +1773,48 @@ async function submitProgramAction(programId, action) {
         resultEl.className = 'pa-result pa-err';
         resultEl.textContent = 'Could not reach the tracker server on this machine.';
         panel.querySelectorAll('.pa-btn').forEach(b => b.disabled = false);
+    }
+}
+
+// CIM session indicator + one-click re-authenticate (local Flask site only).
+async function refreshCimAuthStatus() {
+    const el = document.getElementById('auth-status');
+    if (!el || window._staticMode) return;  // header controls are local-only
+    try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        if (data.ok) {
+            el.textContent = '● CIM session OK';
+            el.className = 'auth-status auth-ok';
+            el.title = data.detail || 'CIM session is valid';
+        } else {
+            el.textContent = '● CIM login needed';
+            el.className = 'auth-status auth-bad';
+            el.title = data.detail || 'CIM session invalid';
+        }
+    } catch (_) {
+        el.className = 'auth-status';
+        el.textContent = '';
+    }
+}
+
+async function cimAuthenticate() {
+    const btn = document.getElementById('auth-btn');
+    if (btn) btn.disabled = true;
+    try {
+        await fetch('/api/auth/login', {method: 'POST'});
+        // Give the user a moment to complete SSO in Chrome, then re-check.
+        const el = document.getElementById('auth-status');
+        if (el) { el.textContent = '● log in to CIM in Chrome…'; el.className = 'auth-status'; }
+        let tries = 0;
+        const iv = setInterval(async () => {
+            tries++;
+            await refreshCimAuthStatus();
+            const ok = document.getElementById('auth-status')?.classList.contains('auth-ok');
+            if (ok || tries > 40) { clearInterval(iv); if (btn) btn.disabled = false; }
+        }, 3000);
+    } catch (_) {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -4285,6 +4330,7 @@ function _initDashboard() {
     // Only do this when the server is the Flask local server (not the static site).
     if (typeof window._staticMode === 'undefined') {
         checkSessionHealth();
+        refreshCimAuthStatus();
     }
 }
 

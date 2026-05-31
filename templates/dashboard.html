@@ -34,6 +34,8 @@
                 <span id="progress-phase" class="progress-phase"></span>
             </div>
             <button id="scan-btn" onclick="triggerScan()">Update</button>
+            <span id="auth-status" class="auth-status" title="CIM session status"></span>
+            <button id="auth-btn" class="header-secondary-btn" onclick="cimAuthenticate()" title="Open CIM login in Chrome">Authenticate</button>
             <button id="console-btn" onclick="openConsoleModal()">Console</button>
             <button id="refs-btn" class="header-secondary-btn" onclick="openReferencesModal()" title="Manage custom reference curricula">References</button>
         </div>

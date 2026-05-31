@@ -876,6 +876,33 @@ def api_program_action(pid):
                     'new_step': new_step, 'ts': audit['ts']}), (200 if ok_act else 502)
 
 
+@app.route('/api/auth/status', methods=['GET'])
+def api_auth_status():
+    """Report whether the CIM session (read from Chrome's cookie store) is
+    currently valid. Drives the dashboard's session indicator."""
+    from cim_http import CIMSession
+    try:
+        ok, detail = CIMSession().check()
+    except Exception as e:
+        ok, detail = False, f'Could not read CIM session: {e}'
+    return jsonify({'ok': ok, 'detail': detail})
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """Open Chrome to the CIM Approve Pages, which triggers Northeastern SSO
+    if the session has expired. After the user logs in there, the tracker's
+    next cookie read picks up the refreshed session automatically. Local-only
+    (opens Chrome on the machine running the server)."""
+    from cim_http import CIM_BASE
+    url = f"{CIM_BASE}/courseleaf/approve/"
+    try:
+        subprocess.run(['open', '-a', 'Google Chrome', url], timeout=10)
+        return jsonify({'ok': True, 'url': url})
+    except Exception as e:
+        return jsonify({'ok': False, 'detail': str(e)}), 500
+
+
 def _select_scan_mode():
     """Pick scan mode based on what's been run recently.
 

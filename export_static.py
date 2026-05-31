@@ -482,6 +482,10 @@ def build_static_site():
         r'<div id="refs-modal"[^>]*>.*?</div>\s*</div>\s*</div>',
         '', html, count=1, flags=re.DOTALL
     )
+    # Remove the CIM Authenticate button + session indicator — local-only
+    # (opens Chrome on the server machine; meaningless on the static site).
+    html = re.sub(r'<span id="auth-status"[^>]*></span>', '', html, count=1)
+    html = re.sub(r'<button id="auth-btn"[^>]*>.*?</button>', '', html, count=1, flags=re.DOTALL)
     # Remove the Console button and modal — local-only, no backend on static site.
     html = re.sub(
         r'<button id="console-btn"[^>]*>.*?</button>',
