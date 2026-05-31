@@ -1012,10 +1012,10 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
    the custom-reference-curriculum manager modal on the Programs view). */
 .header-secondary-btn {
     padding: 8px 14px;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--border);   /* one neutral outline for all secondary buttons */
     border-radius: 6px;
     background: #fff;
-    color: #475569;
+    color: var(--text);
     cursor: pointer;
     font-size: 13px;
     font-weight: 500;
@@ -2209,12 +2209,13 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 .pa-result.pa-ok { color: #15803d; }
 .pa-result.pa-err { color: #b91c1c; }
 
-/* CIM session indicator — folded into the Authenticate button (local only). */
+/* CIM session indicator — a neutral button (like Console/References) whose
+   only color is a small status dot. Keeps the header palette to blue (primary)
+   + neutral + a tiny green/red status cue. */
 #auth-btn { white-space: nowrap; }
-#auth-btn.auth-ok { color: #15803d; border-color: #86efac; background: #f0fdf4; }
-#auth-btn.auth-ok:hover { background: #dcfce7; }
-#auth-btn.auth-bad { color: #b91c1c; border-color: #fca5a5; background: #fef2f2; }
-#auth-btn.auth-bad:hover { background: #fee2e2; }
+.auth-dot { font-size: 10px; vertical-align: middle; }
+.auth-dot.ok { color: var(--success); }
+.auth-dot.bad { color: var(--danger); }
 
 /* Responsive */
 @media (max-width: 768px) {

@@ -1784,13 +1784,12 @@ async function refreshCimAuthStatus() {
     try {
         const res = await fetch('/api/auth/status');
         const data = await res.json();
+        btn.className = 'header-secondary-btn';
         if (data.ok) {
-            btn.textContent = '● CIM connected';
-            btn.className = 'header-secondary-btn auth-ok';
+            btn.innerHTML = '<span class="auth-dot ok">●</span> CIM connected';
             btn.title = (data.detail || 'CIM session is valid') + ' — click to reopen CIM in Chrome';
         } else {
-            btn.textContent = '● Log in to CIM';
-            btn.className = 'header-secondary-btn auth-bad';
+            btn.innerHTML = '<span class="auth-dot bad">●</span> Log in to CIM';
             btn.title = data.detail || 'CIM session invalid — click to log in';
         }
     } catch (_) {
@@ -1807,20 +1806,20 @@ async function cimAuthenticate() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
             if (btn) {
-                btn.textContent = '● could not open Chrome';
-                btn.className = 'header-secondary-btn auth-bad';
+                btn.innerHTML = '<span class="auth-dot bad">●</span> could not open Chrome';
+                btn.className = 'header-secondary-btn';
                 btn.title = data.detail || '';
                 btn.disabled = false;
             }
             return;
         }
         // Give the user a moment to complete SSO in Chrome, then re-check.
-        if (btn) { btn.textContent = '● log in to CIM in Chrome…'; btn.className = 'header-secondary-btn'; }
+        if (btn) { btn.innerHTML = '<span class="auth-dot">●</span> log in to CIM in Chrome…'; btn.className = 'header-secondary-btn'; }
         let tries = 0;
         const iv = setInterval(async () => {
             tries++;
             await refreshCimAuthStatus();
-            const ok = document.getElementById('auth-btn')?.classList.contains('auth-ok');
+            const ok = !!document.querySelector('#auth-btn .auth-dot.ok');
             if (ok || tries > 40) { clearInterval(iv); if (btn) btn.disabled = false; }
         }, 3000);
     } catch (_) {
