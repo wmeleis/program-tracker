@@ -1025,7 +1025,8 @@ def check_courseleaf_session():
     return {'ok': True, 'detail': 'CourseLeaf session is valid.'}
 
 
-def run_http_program_scan(dry_run=False, max_workers=12, log=True):
+def run_http_program_scan(dry_run=False, max_workers=12, log=True,
+                          sess=None, pending=None):
     """Program scan over direct authenticated HTTP — no AppleScript, no Chrome.
 
     The authoritative current_step for every in-workflow program comes from a
@@ -1058,25 +1059,27 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True):
               'programs_with_workflow': 0, 'changes': 0, 'completed_in_scan': [],
               'boston_curriculum_changed': []}
 
-    try:
-        sess = CIMSession()
-    except Exception as e:
-        result['error'] = f'cookie/session init failed: {e}'
-        return result
-    ok, detail = sess.check()
-    if not ok:
-        result['error'] = detail
-        return result
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception as e:
+            result['error'] = f'cookie/session init failed: {e}'
+            return result
+        ok, detail = sess.check()
+        if not ok:
+            result['error'] = detail
+            return result
 
-    if log:
-        print("\nHTTP program scan: fetching Approve Pages pending dump...")
-    t0 = _time.time()
-    pending = sess.fetch_approve_pending()
     if pending is None:
-        result['error'] = 'Approve Pages dump fetch failed (session?).'
-        return result
-    if log:
-        print(f"  Dump: {len(pending)} in-workflow programs in {_time.time()-t0:.1f}s")
+        if log:
+            print("\nHTTP program scan: fetching Approve Pages pending dump...")
+        t0 = _time.time()
+        pending = sess.fetch_approve_pending()
+        if pending is None:
+            result['error'] = 'Approve Pages dump fetch failed (session?).'
+            return result
+        if log:
+            print(f"  Dump: {len(pending)} in-workflow programs in {_time.time()-t0:.1f}s")
 
     with get_db() as conn:
         existing = {r['id']: dict(r) for r in conn.execute(
@@ -1230,6 +1233,644 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True):
         print(f"  Wrote {len(to_write)} programs ({len(planned)} changes, "
               f"{len(completed_now)} completions)")
     return result
+
+
+_COURSE_CODE_TITLE_RE = re.compile(r'^([A-Z]{2,6}\s*\d{3,4}[A-Z]?):\s*(.+)$')
+
+
+def run_http_course_scan(dry_run=False, max_workers=12, log=True,
+                         sess=None, pending=None):
+    """Course scan over direct authenticated HTTP — the course twin of
+    run_http_program_scan. Same single rule: the Approve Pages dump owns
+    current_step (first non-fyi mustsignoff); each course's page+XML owns
+    metadata; a course in the DB at a step but absent from the dump is
+    verified complete via its page before clearing.
+
+    Pass sess + pending (the dump's 'courses' slice) to share one dump
+    across program/course/catalog scans. Returns a result dict shaped like
+    process_course_scans (courses_scanned/changes/completed_in_scan)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from cim_http import CIMSession
+    from database import (get_db, upsert_course, upsert_course_workflow_steps,
+                          record_course_change)
+    import time as _time
+
+    result = {'scan_time': datetime.now().isoformat(), 'courses_scanned': 0,
+              'courses_with_workflow': 0, 'changes': 0, 'completed_in_scan': []}
+
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception as e:
+            result['error'] = f'cookie/session init failed: {e}'
+            return result
+        ok, detail = sess.check()
+        if not ok:
+            result['error'] = detail
+            return result
+
+    if pending is None:
+        if log:
+            print("\nHTTP course scan: fetching Approve Pages pending dump...")
+        allp = sess.fetch_all_pending()
+        if allp is None:
+            result['error'] = 'Approve Pages dump fetch failed (session?).'
+            return result
+        pending = allp['courses']
+        if log:
+            print(f"  Dump: {len(pending)} in-workflow courses")
+
+    # courses.id is TEXT; the dump keys courses by int. Normalize to str so
+    # set ops + DB lookups line up.
+    pending = {str(k): v for k, v in pending.items()}
+
+    with get_db() as conn:
+        existing = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, code, title, current_step, completion_date, "
+            "step_entered_date FROM courses").fetchall()}
+
+    in_wf = set(pending)
+    db_active = {cid for cid, r in existing.items() if (r.get('current_step') or '')}
+    new_ids = in_wf - set(existing)
+    moved_ids = {cid for cid in (in_wf & set(existing))
+                 if (existing[cid].get('current_step') or '') != pending[cid]['current_step']}
+    gone_ids = db_active - in_wf
+    fetch_ids = sorted(in_wf | gone_ids)
+    if log:
+        print(f"  new={len(new_ids)} moved={len(moved_ids)} gone={len(gone_ids)} "
+              f"| fetching page+XML for {len(fetch_ids)} courses ({max_workers} workers)...")
+
+    def fetch_both(cid):
+        return cid, sess.fetch_course(cid), sess.fetch_course_xml(cid)
+
+    fetched = {}
+    t0 = _time.time()
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for cid, page, meta in ex.map(fetch_both, fetch_ids):
+            fetched[cid] = (page, meta)
+    if log:
+        print(f"  Fetched {len(fetched)} in {_time.time()-t0:.1f}s")
+    if sess.logged_out:
+        result['error'] = 'CIM session expired mid-scan.'
+        return result
+
+    planned = []
+    completed_now = []
+
+    def resolve_code(cid, meta, dump_title, prev):
+        m = _COURSE_CODE_TITLE_RE.match(dump_title or '')
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        title = meta.get('course_title') or (dump_title or '') or prev.get('title') or ''
+        code = (meta.get('course_code') or '').strip()
+        if not code or code.isdigit():
+            subj = (meta.get('subject') or '').strip()
+            num = (meta.get('course_number') or '').strip()
+            code = (subj + ' ' + num).strip() if (subj and num) else ''
+        if not code:
+            ex = prev.get('code') or ''
+            code = ex if (ex and not str(ex).isdigit()) else ''
+        if not code:
+            code = str(cid)
+        return code, title
+
+    def build(cid):
+        page, meta = fetched.get(cid, (None, {}))
+        steps = (page or {}).get('steps') or []
+        in_dump = cid in pending
+        prev = existing.get(cid, {})
+        dump_title = pending.get(cid, {}).get('title', '')
+        if in_dump:
+            current_step = pending[cid]['current_step']
+            completion_date = ''
+            emails = next((s.get('emails', '') for s in steps
+                           if (s.get('name') or '').strip() == current_step), '') or ''
+        else:
+            if page is None:
+                return None
+            found_wf = (page or {}).get('found_workflow')
+            total = len(steps)
+            approved = sum(1 for s in steps if s.get('status') == 'approved')
+            marker = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+            if (not found_wf) or (total > 0 and approved == total and marker is None):
+                current_step = ''
+                completion_date = (page or {}).get('last_approval_date', '') \
+                    or (('Term ' + meta.get('eff_term')) if meta.get('eff_term') else 'Approved')
+                emails = ''
+                completed_now.append(cid)
+            elif marker:
+                current_step = marker
+                completion_date = ''
+                emails = next((s.get('emails', '') for s in steps
+                               if (s.get('name') or '').strip() == marker), '') or ''
+            else:
+                return None
+
+        code, title = resolve_code(cid, meta, dump_title, prev)
+        ptype = meta.get('proposal_type') or ''
+        if 'New Course' in ptype:
+            status = 'Added'
+        elif 'Inactivation' in ptype:
+            status = 'Deactivated'
+        else:
+            status = 'Edited'
+        college_code = meta.get('college', '')
+        college = COLLEGE_NAMES.get(college_code, college_code) if college_code else ''
+        sed = (page or {}).get('last_approval_date') or (page or {}).get('date_submitted') or ''
+        cdata = {
+            'id': cid, 'code': code, 'title': title or f'Course #{cid}',
+            'status': status, 'current_step': current_step,
+            'total_steps': len(steps),
+            'completed_steps': sum(1 for s in steps if s.get('status') == 'approved'),
+            'current_approver_emails': emails, 'college': college,
+            'date_submitted': (page or {}).get('date_submitted', ''),
+            'step_entered_date': sed,
+            'credits': meta.get('credits', ''),
+            'description': meta.get('description', ''),
+            'academic_level': meta.get('acad_level', ''),
+            'completion_date': completion_date,
+        }
+        old_step = prev.get('current_step') or ''
+        if old_step != current_step:
+            kind = 'new' if cid in new_ids else ('complete' if not current_step else 'moved')
+            planned.append((cid, code, old_step, current_step, kind))
+        return cdata, steps
+
+    to_write = []
+    for cid in fetch_ids:
+        r = build(cid)
+        if r is not None:
+            to_write.append((cid, r[0], r[1]))
+
+    result['courses_scanned'] = len(to_write)
+    result['courses_with_workflow'] = len(in_wf)
+    result['changes'] = len(planned)
+    result['completed_in_scan'] = completed_now
+
+    if dry_run:
+        result['planned'] = planned
+        if log:
+            print(f"  DRY RUN — {len(planned)} step changes, "
+                  f"{len(completed_now)} completions (nothing written)")
+        return result
+
+    now = datetime.now().isoformat()
+    for cid, cdata, steps in to_write:
+        if upsert_course(cdata):
+            old_step = existing.get(cid, {}).get('current_step', '')
+            new_step = cdata['current_step']
+            if old_step and old_step != new_step:
+                record_course_change(now, cid, old_step, new_step, 'step_transition')
+        if steps:
+            upsert_course_workflow_steps(cid, [
+                {'order': s.get('order', i), 'name': s.get('name', ''),
+                 'status': s.get('status', 'pending'), 'emails': s.get('emails', '')}
+                for i, s in enumerate(steps)])
+    if log:
+        for cid, code, old, new, kind in planned:
+            print(f"  {kind.upper()}: {code}: {old or '(none)'} -> {new or '(complete)'}")
+        print(f"  Wrote {len(to_write)} courses ({len(planned)} changes, "
+              f"{len(completed_now)} completions)")
+    return result
+
+
+def run_http_catalog_scan(dry_run=False, log=True, sess=None, pending=None):
+    """Catalog-page scan over HTTP. Catalog pages have no per-page admin URL,
+    so the Approve Pages dump IS the entire workflow state we track: path,
+    title, current role, and the approver/last-modifier name. We keep only
+    pages whose current role is in CATALOG_TRACKED_ROLES (the curated UCAT/
+    GCAT + post-provost set the catalog view is built around), upsert those,
+    and clear current_step for catalog rows no longer pending.
+
+    Pass sess + pending (the dump's 'catalog' slice) to share one dump."""
+    from cim_http import CIMSession
+    from database import get_db, upsert_catalog_page
+
+    result = {'scan_time': datetime.now().isoformat(), 'pages_scanned': 0,
+              'changes': 0}
+
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception as e:
+            result['error'] = f'cookie/session init failed: {e}'
+            return result
+        ok, detail = sess.check()
+        if not ok:
+            result['error'] = detail
+            return result
+
+    if pending is None:
+        if log:
+            print("\nHTTP catalog scan: fetching Approve Pages pending dump...")
+        allp = sess.fetch_all_pending()
+        if allp is None:
+            result['error'] = 'Approve Pages dump fetch failed (session?).'
+            return result
+        pending = allp['catalog']
+
+    tracked = set(CATALOG_TRACKED_ROLES)
+    live = {path: e for path, e in pending.items()
+            if e.get('current_step') in tracked}
+
+    with get_db() as conn:
+        existing = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, title, current_step, user FROM catalog_pages").fetchall()}
+
+    planned = []
+    to_write = []
+    for path, e in live.items():
+        prev = existing.get(path, {})
+        old_step = prev.get('current_step') or ''
+        new_step = e['current_step']
+        pdata = {'id': path, 'title': e.get('title', ''),
+                 'current_step': new_step, 'current_approver_emails': '',
+                 'user': e.get('user', '')}
+        if old_step != new_step:
+            planned.append((path, old_step, new_step))
+        to_write.append(pdata)
+
+    # Pages in DB at a step but no longer pending in any tracked role → clear.
+    gone = [pid for pid, r in existing.items()
+            if (r.get('current_step') or '') and pid not in live]
+
+    result['pages_scanned'] = len(to_write)
+    result['changes'] = len(planned) + len(gone)
+
+    if dry_run:
+        result['planned'] = planned
+        result['gone'] = gone
+        if log:
+            print(f"  DRY RUN — {len(live)} pending, {len(planned)} step changes, "
+                  f"{len(gone)} to clear (nothing written)")
+        return result
+
+    for pdata in to_write:
+        upsert_catalog_page(pdata)
+    if gone:
+        with get_db() as conn:
+            for pid in gone:
+                conn.execute(
+                    "UPDATE catalog_pages SET current_step = '', last_updated = ? "
+                    "WHERE id = ?", (datetime.now().isoformat(), pid))
+    if log:
+        print(f"  Wrote {len(to_write)} catalog pages "
+              f"({len(planned)} step changes, {len(gone)} cleared)")
+    return result
+
+
+def fetch_reference_curricula_http(program_ids, targeted_ids=None,
+                                   max_workers=12, log=True, sess=None):
+    """Fetch reference curricula (last-approved historical version) over HTTP.
+
+    Drop-in replacement for fetch_reference_curricula's per-program history
+    round-trip, using cim_http.CIMSession.fetch_reference_version (which hits
+    the same CourseLeaf history API the old in-page JS used). Same C3
+    targeted-fetch semantics: when targeted_ids is given, only those programs
+    are round-tripped; the rest are assumed fresh.
+
+    Stores each program's OWN history (cross-program Boston-counterpart
+    resolution happens at API/export time via the campus group map), matching
+    the current fetch_reference_curricula contract. Returns the fetched count.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from cim_http import CIMSession
+    from database import upsert_reference_curriculum, get_db
+
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception as e:
+            print(f"Reference (HTTP): session init failed: {e}")
+            return 0
+
+    with get_db() as conn:
+        existing_refs = {row['program_id']: row['version_id'] for row in conn.execute(
+            "SELECT program_id, version_id FROM reference_curriculum").fetchall()}
+        cleared = conn.execute(
+            "DELETE FROM reference_curriculum WHERE version_id = 0").rowcount
+    if cleared and log:
+        print(f"  Cleared {cleared} legacy Boston-in-workflow sentinel row(s)")
+
+    fetch_ids = list(program_ids)
+    if targeted_ids is not None:
+        tset = set(targeted_ids)
+        before = len(fetch_ids)
+        fetch_ids = [pid for pid in fetch_ids if pid in tset]
+        if log:
+            print(f"  C3 targeting: fetching {len(fetch_ids)} of {before} "
+                  f"(skipping {before - len(fetch_ids)} assumed-fresh)")
+
+    if log:
+        print(f"\nFetching reference curricula for {len(fetch_ids)} programs "
+              f"(HTTP history, {max_workers} workers)...")
+    fetched = skipped = 0
+    import time as _time
+    t0 = _time.time()
+
+    def one(pid):
+        return pid, sess.fetch_reference_version(pid)
+
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for pid, info in ex.map(one, fetch_ids):
+            results.append((pid, info))
+
+    for pid, info in results:
+        if 'error' in info:
+            skipped += 1
+            continue
+        vid = info.get('version_id')
+        if existing_refs.get(pid) == vid:
+            skipped += 1
+            continue
+        html = info.get('html', '')
+        if html:
+            upsert_reference_curriculum(pid, vid, info.get('version_date', ''), html)
+            fetched += 1
+        else:
+            skipped += 1
+
+    # Clean up legacy self-reference sentinels (version_id = -1).
+    with get_db() as conn:
+        c2 = conn.execute(
+            "DELETE FROM reference_curriculum WHERE version_id = -1").rowcount
+    if c2 and log:
+        print(f"  Cleared {c2} legacy self-reference sentinel row(s)")
+    if log:
+        print(f"Reference curricula (HTTP): {fetched} fetched, {skipped} skipped "
+              f"in {_time.time()-t0:.1f}s")
+    return fetched
+
+
+def run_http_scan(scope='all', dry_run=False, log=True, sess=None):
+    """Unified HTTP scan: one Approve Pages dump → program, course, AND
+    catalog workflow state, in a single pass. This is the simple/reliable/
+    fast replacement for the AppleScript run_full_scan + run_course_scan +
+    heal_stale_catalog_pages chain.
+
+    scope: 'all' | 'programs' | 'courses' | 'catalog'.
+
+    Returns {'programs': <program result>, 'courses': <course result>,
+    'catalog': <catalog result>} (only the requested scopes), plus a
+    top-level 'error' if the session/dump failed. Reference/regulatory/
+    portfolio stay separate concerns owned by the caller (app.do_scan)."""
+    from cim_http import CIMSession
+    import time as _time
+
+    out = {}
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception as e:
+            return {'error': f'cookie/session init failed: {e}'}
+        ok, detail = sess.check()
+        if not ok:
+            return {'error': detail}
+
+    if log:
+        print("\nHTTP scan: fetching Approve Pages pending dump (one request)...")
+    t0 = _time.time()
+    allp = sess.fetch_all_pending()
+    if allp is None:
+        return {'error': 'Approve Pages dump fetch failed (session?).'}
+    if log:
+        print(f"  Dump: {len(allp['programs'])} programs, {len(allp['courses'])} "
+              f"courses, {len(allp['catalog'])} catalog pages in {_time.time()-t0:.1f}s")
+
+    if scope in ('all', 'programs'):
+        out['programs'] = run_http_program_scan(
+            dry_run=dry_run, log=log, sess=sess, pending=allp['programs'])
+    if scope in ('all', 'courses'):
+        out['courses'] = run_http_course_scan(
+            dry_run=dry_run, log=log, sess=sess, pending=allp['courses'])
+    if scope in ('all', 'catalog'):
+        out['catalog'] = run_http_catalog_scan(
+            dry_run=dry_run, log=log, sess=sess, pending=allp['catalog'])
+    if sess.logged_out:
+        out['error'] = 'CIM session expired mid-scan.'
+    return out
+
+
+def sweep_program_ids_http(start_id=1, end_id=2100, max_workers=16, log=True,
+                           sess=None):
+    """HTTP port of sweep_all_program_ids: walk every CIM program ID in range,
+    ingest active + completed/historical items. CourseLeaf renders a workflow
+    div only while a proposal is in flight, so any present program with no
+    workflow is treated as completed (surrogate date = catalog year).
+
+    Same return contract as sweep_all_program_ids (new_completion_ids drives
+    C3 reference fetch). No AppleScript — parallel HTTP page+XML fetches."""
+    from concurrent.futures import ThreadPoolExecutor
+    from cim_http import CIMSession, parse_program_page
+    from database import upsert_program, upsert_workflow_steps, get_db
+    import time as _time
+
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception as e:
+            print(f"Program sweep (HTTP): session init failed: {e}")
+            return {'scanned': 0, 'completed': 0, 'in_progress': 0,
+                    'skipped': 0, 'new_completions': 0, 'new_completion_ids': []}
+
+    ids = list(range(start_id, end_id + 1))
+    if log:
+        print(f"\nHistorical program sweep (HTTP): {len(ids)} IDs "
+              f"({start_id}..{end_id}), {max_workers} workers...")
+    t0 = _time.time()
+
+    def fetch_one(pid):
+        body = sess.get(f"/programadmin/{pid}/")
+        page = parse_program_page(body) if body is not None else None
+        meta = sess.fetch_program_xml(pid)
+        return pid, page, meta
+
+    with get_db() as conn:
+        existing = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, current_step, completion_date, status FROM programs"
+        ).fetchall()}
+
+    scanned = completed = in_progress = skipped = new_completions = 0
+    new_completion_ids = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        results = list(ex.map(fetch_one, ids))
+
+    for pid, page, meta in results:
+        steps = (page or {}).get('steps') or []
+        if not steps and not meta.get('program_title') and not meta.get('banner_code'):
+            skipped += 1
+            continue
+        total = len(steps)
+        approved = sum(1 for s in steps if s.get('status') == 'approved')
+        html_current = next((s for s in steps if s.get('status') == 'current'), None)
+        no_wf = (total == 0)
+        all_approved = (total > 0 and approved == total and html_current is None)
+        is_complete = no_wf or all_approved
+        if is_complete:
+            if all_approved:
+                completion_date = (page or {}).get('last_approval_date', '')
+            else:
+                eff = meta.get('eff_cat') or meta.get('eff_term') or ''
+                completion_date = ('Catalog ' + eff) if eff else 'Approved'
+            current_step = ''
+        else:
+            completion_date = ''
+            current_step = existing.get(pid, {}).get('current_step') or ''
+        name = meta.get('program_title') or f'Program #{pid}'
+        college_code = meta.get('college', '')
+        ptype = meta.get('proposal_type') or (page or {}).get('proposal_type', '')
+        if 'New Program' in ptype:
+            status = 'Added'
+        elif 'Inactivation' in ptype:
+            status = 'Deactivated'
+        else:
+            status = 'Edited'
+        upsert_program({
+            'id': pid, 'banner_code': meta.get('banner_code', ''), 'name': name,
+            'status': status, 'current_step': current_step, 'total_steps': total,
+            'completed_steps': approved, 'current_approver_emails': '',
+            'program_type': classify_program_type(name, steps, meta.get('degree', '')),
+            'college': COLLEGE_NAMES.get(college_code, college_code),
+            'department': meta.get('department', ''), 'degree': meta.get('degree', ''),
+            'date_submitted': (page or {}).get('date_submitted', ''),
+            'step_entered_date': (page or {}).get('last_approval_date', ''),
+            'curriculum_html': (meta.get('curriculum_html', '') or '')
+                               .replace('<![CDATA[', '').replace(']]>', '').strip(),
+            'completion_date': completion_date, 'campus': meta.get('campus', ''),
+            'eff_cat': meta.get('eff_cat', ''),
+        })
+        if steps:
+            upsert_workflow_steps(pid, steps)
+        scanned += 1
+        if is_complete:
+            completed += 1
+            prev = existing.get(pid)
+            if not prev or not (prev.get('completion_date') or ''):
+                new_completions += 1
+                new_completion_ids.append(pid)
+        else:
+            in_progress += 1
+
+    if log:
+        print(f"  Sweep complete in {_time.time()-t0:.0f}s: scanned={scanned}, "
+              f"completed={completed} ({new_completions} new), "
+              f"in_progress={in_progress}, skipped={skipped}")
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO scans (scan_time, programs_scanned, programs_with_workflow, "
+            "changes_detected) VALUES (?, -1, ?, ?)",
+            (datetime.now().isoformat(), scanned, new_completions))
+    return {'scanned': scanned, 'completed': completed, 'in_progress': in_progress,
+            'skipped': skipped, 'new_completions': new_completions,
+            'new_completion_ids': new_completion_ids}
+
+
+def sweep_course_ids_http(start_id=1, end_id=25000, max_workers=16, log=True,
+                          sess=None):
+    """HTTP port of sweep_all_course_ids. Same completion semantics (no
+    workflow div → completed/historical, surrogate date = effective term)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from cim_http import CIMSession
+    from database import upsert_course, upsert_course_workflow_steps, get_db
+    import time as _time
+
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception as e:
+            print(f"Course sweep (HTTP): session init failed: {e}")
+            return {'scanned': 0, 'completed': 0, 'in_progress': 0,
+                    'skipped': 0, 'new_completions': 0}
+
+    ids = [str(i) for i in range(start_id, end_id + 1)]
+    if log:
+        print(f"\nHistorical course sweep (HTTP): {len(ids)} IDs "
+              f"({start_id}..{end_id}), {max_workers} workers...")
+    t0 = _time.time()
+
+    def fetch_one(cid):
+        return cid, sess.fetch_course(cid), sess.fetch_course_xml(cid)
+
+    with get_db() as conn:
+        existing = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, code, current_step, completion_date FROM courses"
+        ).fetchall()}
+
+    scanned = completed = in_progress = skipped = new_completions = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        results = list(ex.map(fetch_one, ids))
+
+    for cid, page, meta in results:
+        steps = (page or {}).get('steps') or []
+        title = meta.get('course_title') or ''
+        code = (meta.get('course_code') or '').strip()
+        if not steps and not title and not code:
+            skipped += 1
+            continue
+        total = len(steps)
+        approved = sum(1 for s in steps if s.get('status') == 'approved')
+        html_current = next((s for s in steps if s.get('status') == 'current'), None)
+        no_wf = (total == 0)
+        all_approved = (total > 0 and approved == total and html_current is None)
+        is_complete = no_wf or all_approved
+        if is_complete:
+            if all_approved:
+                completion_date = (page or {}).get('last_approval_date', '')
+            else:
+                eff = meta.get('eff_term') or meta.get('eff_cat') or ''
+                completion_date = ('Term ' + eff) if eff else 'Approved'
+            current_step = ''
+        else:
+            completion_date = ''
+            current_step = existing.get(cid, {}).get('current_step') or ''
+        if not code or code.isdigit():
+            subj = (meta.get('subject') or '').strip()
+            num = (meta.get('course_number') or '').strip()
+            code = (subj + ' ' + num).strip() if (subj and num) else \
+                (existing.get(cid, {}).get('code') or cid)
+        ptype = meta.get('proposal_type') or ''
+        status = ('Added' if 'New Course' in ptype else
+                  'Deactivated' if 'Inactivation' in ptype else 'Edited')
+        college_code = meta.get('college', '')
+        upsert_course({
+            'id': cid, 'code': code, 'title': title or f'Course #{cid}',
+            'status': status, 'current_step': current_step, 'total_steps': total,
+            'completed_steps': approved, 'current_approver_emails': '',
+            'college': COLLEGE_NAMES.get(college_code, college_code) if college_code else '',
+            'date_submitted': (page or {}).get('date_submitted', ''),
+            'step_entered_date': (page or {}).get('last_approval_date', ''),
+            'credits': meta.get('credits', ''), 'description': meta.get('description', ''),
+            'academic_level': meta.get('acad_level', ''),
+            'completion_date': completion_date,
+        })
+        if steps:
+            upsert_course_workflow_steps(cid, [
+                {'order': s.get('order', i), 'name': s.get('name', ''),
+                 'status': s.get('status', 'pending'), 'emails': s.get('emails', '')}
+                for i, s in enumerate(steps)])
+        scanned += 1
+        if is_complete:
+            completed += 1
+            prev = existing.get(cid)
+            if not prev or not (prev.get('completion_date') or ''):
+                new_completions += 1
+        else:
+            in_progress += 1
+
+    if log:
+        print(f"  Course sweep complete in {_time.time()-t0:.0f}s: scanned={scanned}, "
+              f"completed={completed} ({new_completions} new), "
+              f"in_progress={in_progress}, skipped={skipped}")
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO course_scans (scan_time, courses_scanned, "
+            "courses_with_workflow, changes_detected) VALUES (?, ?, ?, -1)",
+            (datetime.now().isoformat(), scanned, completed))
+    return {'scanned': scanned, 'completed': completed, 'in_progress': in_progress,
+            'skipped': skipped, 'new_completions': new_completions}
 
 
 def run_full_scan(force_fetch_only=False):

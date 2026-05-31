@@ -314,37 +314,66 @@ class CIMSession:
             return None
         return body
 
-    def fetch_approve_pending(self, timeout=120):
-        """Fetch the entire Approve Pages pending state in one request and
-        return {program_id: {'current_step', 'all_pending', 'title'}}.
+    _DUMP_URL = ("/courseleaf/courseleaf.cgi?page=/courseleaf/approve/index.html"
+                 "&step=load&output=xml&role=any")
 
-        current_step = first non-'fyiall' <mustsignoff> role (the current
-        actionable step the reviewer sees; for parallel branches this is the
-        academic step, matching Approve Pages exactly). all_pending = every
-        non-fyiall mustsignoff role (the parallel set). Returns None if the
-        request fails / session invalid.
-        """
-        url = ("/courseleaf/courseleaf.cgi?page=/courseleaf/approve/index.html"
-               "&step=load&output=xml&role=any")
-        body = self.get(url, timeout=timeout)
+    def fetch_dump(self, timeout=120):
+        """Fetch the raw Approve Pages pending dump (~5MB XML) once. The dump
+        is the single source of workflow state for EVERY entity — programs,
+        courses, and catalog pages — so all three scans share one request.
+        Returns the body text or None (failed / session invalid)."""
+        return self.get(self._DUMP_URL, timeout=timeout)
+
+    @staticmethod
+    def _mustsignoff_roles(block):
+        """Non-'fyi'/'fyiall' mustsignoff roles in a <pending> block, in order.
+        The first is the actionable step the reviewer sees (for parallel
+        branches this is the academic step, matching Approve Pages exactly)."""
+        return [r for r in re.findall(r'<mustsignoff id="([^"]+)">', block)
+                if not r.endswith('fyiall') and not r.endswith(' fyi')]
+
+    def fetch_all_pending(self, timeout=120, _body=None):
+        """Parse the whole dump into the three entity types in one pass.
+
+        Returns {'programs': {pid: {...}}, 'courses': {cid: {...}},
+        'catalog': {path: {...}}} or None on failure. Each program/course
+        entry has current_step / all_pending / title; catalog entries also
+        carry 'user' (the last modifier shown in Approve Pages). Pass _body
+        to reuse an already-fetched dump."""
+        body = _body if _body is not None else self.fetch_dump(timeout=timeout)
         if body is None:
             return None
-        out = {}
-        for m in re.finditer(
-                r'<pending path="/programadmin/(\d+)[^"]*">(.*?)</pending>',
-                body, re.S):
-            pid = int(m.group(1))
-            block = m.group(2)
+        programs, courses, catalog = {}, {}, {}
+        for m in re.finditer(r'<pending path="([^"]+)">(.*?)</pending>', body, re.S):
+            path, block = m.group(1), m.group(2)
             tm = re.search(r'<title>(.*?)</title>', block, re.S)
             title = ' '.join((tm.group(1) if tm else '').split()).strip()
-            roles = [r for r in re.findall(r'<mustsignoff id="([^"]+)">', block)
-                     if not r.endswith('fyiall')]
-            out[pid] = {
-                'current_step': roles[0] if roles else '',
-                'all_pending': roles,
-                'title': title,
-            }
-        return out
+            roles = self._mustsignoff_roles(block)
+            entry = {'current_step': roles[0] if roles else '',
+                     'all_pending': roles, 'title': title}
+            mp = re.match(r'/programadmin/(\d+)', path)
+            mc = re.match(r'/courseadmin/(\d+)', path)
+            if mp:
+                programs[int(mp.group(1))] = entry
+            elif mc:
+                courses[int(mc.group(1))] = entry
+            elif roles and not path.startswith('/miscadmin/') \
+                    and not path.startswith('/admin/'):
+                # Catalog page: real path, has an actionable role. modby is
+                # the approver/last-modifier name Approve Pages shows. The dump
+                # appends "/index.html"; the catalog_pages convention (from the
+                # old pending-list scrape) stores the bare path, so strip it.
+                cat_path = re.sub(r'/index\.html$', '', path)
+                um = re.search(r'<modby>(.*?)</modby>', block, re.S)
+                entry['user'] = ' '.join((um.group(1) if um else '').split()).strip()
+                catalog[cat_path] = entry
+        return {'programs': programs, 'courses': courses, 'catalog': catalog}
+
+    def fetch_approve_pending(self, timeout=120, _body=None):
+        """Programs slice of the dump (back-compat with run_http_program_scan).
+        Returns {program_id: {'current_step', 'all_pending', 'title'}}."""
+        allp = self.fetch_all_pending(timeout=timeout, _body=_body)
+        return None if allp is None else allp['programs']
 
     def fetch_program_xml(self, pid, timeout=30):
         """Fetch + parse a program's XML API. Returns a metadata dict, or {}."""
@@ -361,6 +390,49 @@ class CIMSession:
             return None
         steps, found = parse_workflow(body)
         return {'steps': steps, 'found_workflow': found, 'html': body}
+
+    def fetch_course_xml(self, cid, timeout=30):
+        """Fetch + parse a course's XML API. Returns a metadata dict, or {}."""
+        body = self.get(f"/courseadmin/{cid}/index.xml", timeout=timeout)
+        if body is None:
+            return {}
+        return parse_course_xml(body)
+
+    def fetch_course(self, cid, timeout=30):
+        """Fetch a course's workflow page. Returns parse_program_page output
+        (workflow steps + proposal type + approval log) or None."""
+        body = self.get(f"/courseadmin/{cid}/", timeout=timeout)
+        if body is None:
+            return None
+        return parse_program_page(body)
+
+    def fetch_reference_version(self, pid, timeout=30):
+        """Fetch the most-recent approved historical version of a program's
+        curriculum via the CIM history API. Returns
+        {version_id, version_date, html} or {'error': ...}.
+
+        Mirrors the old in-page JS: GET the program page, read the last link
+        in <div id="history"> (its onclick carries showHistory(<versionId>)
+        and its text is the version date), then GET the history XML for that
+        version and extract the curriculum body from the CDATA-wrapped HTML."""
+        page = self.get(f"/programadmin/{pid}/", timeout=timeout)
+        if page is None:
+            return {'error': 'fetch_failed'}
+        ver = _last_history_version(page)
+        if not ver:
+            return {'error': 'no_history'}
+        version_id, version_date = ver
+        api = (f"/courseleaf/courseleaf.cgi?page=/programadmin/{pid}"
+               f"/index.html&output=xml&step=showtcf&view=history"
+               f"&diffversion={version_id}")
+        xml = self.get(api, timeout=timeout)
+        if xml is None:
+            return {'error': 'history_fetch_failed'}
+        cstart = xml.find('<![CDATA[')
+        cend = xml.find(']]>', cstart + 9) if cstart != -1 else -1
+        full_html = xml[cstart + 9:cend] if (cstart != -1 and cend != -1) else ''
+        return {'version_id': version_id, 'version_date': version_date,
+                'html': _extract_curriculum(full_html)}
 
     def check(self):
         """Probe a known program to verify the session is valid.
@@ -413,6 +485,100 @@ def parse_program_xml(xml):
         'proposal_type': proposal_type,
         'delete_justification': _xml_tag(xml, 'deletejustification'),
     }
+
+
+def _xml_first(xml, *tags):
+    """First non-empty value among several candidate tag names."""
+    for t in tags:
+        v = _xml_tag(xml, t)
+        if v:
+            return v
+    return ''
+
+
+def parse_course_xml(xml):
+    """Extract course metadata from the CIM course XML API (mirrors the JS
+    getXml block in batch_fetch_course_details)."""
+    statustype = _xml_tag(xml, 'statustype')
+    if re.search(r'new', statustype, re.I):
+        proposal_type = 'New Course Proposal'
+    elif re.search(r'inactivat', statustype, re.I):
+        proposal_type = 'Inactivation Proposal'
+    else:
+        proposal_type = 'Course Revision Proposal'
+    return {
+        'college': _xml_tag(xml, 'college'),
+        'department': _xml_tag(xml, 'department'),
+        'subject': _xml_first(xml, 'subject', 'subjectcode', 'prefix'),
+        'course_number': _xml_first(xml, 'course_number', 'number',
+                                    'courseNumber', 'coursenumber'),
+        'course_code': _xml_tag(xml, 'code'),
+        'course_title': _xml_first(xml, 'long_title', 'short_title', 'title',
+                                   'courseTitle'),
+        'credits': _xml_first(xml, 'credits', 'credithoursmin', 'credit_hours',
+                              'credithours'),
+        'description': _xml_first(xml, 'description', 'coursedescription',
+                                  'catalogdescription'),
+        'acad_level': _xml_first(xml, 'acad_level', 'level', 'courselevel'),
+        'eff_term': _xml_first(xml, 'eff_term', 'effterm'),
+        'eff_cat': _xml_first(xml, 'eff_cat', 'effcat'),
+        'proposal_type': proposal_type,
+    }
+
+
+def _extract_div_inner(html, div_id):
+    """Return the inner HTML of <div id="div_id"> ... </div>, balancing nested
+    <div> tags. Returns '' if not found. Pure-Python equivalent of
+    doc.getElementById(div_id).innerHTML for a div element."""
+    m = re.search(r'<div\b[^>]*\bid="' + re.escape(div_id) + r'"[^>]*>', html)
+    if not m:
+        return ''
+    start = m.end()
+    depth = 1
+    pos = start
+    tag_re = re.compile(r'<(/?)div\b[^>]*>', re.I)
+    for tm in tag_re.finditer(html, start):
+        depth += -1 if tm.group(1) else 1
+        if depth == 0:
+            return html[start:tm.start()]
+        pos = tm.end()
+    return html[start:]  # unbalanced; return rest
+
+
+def _extract_curriculum(full_html):
+    """Build the reference curriculum HTML from a historical program page:
+    the curriculum body, the concentrations block, and the overview — same
+    three pieces the old in-page extractCurriculum() concatenated."""
+    if not full_html:
+        return ''
+    parts = []
+    body = _extract_div_inner(full_html, 'bodycontentframediv3')
+    if body:
+        parts.append(body)
+    conc = _extract_div_inner(full_html, 'concentrations')
+    if conc:
+        parts.append(conc)
+    overview = _extract_div_inner(full_html, 'overviewcontentframediv4')
+    if overview:
+        parts.append('<h2>Program Overview</h2>' + overview)
+    return '\n'.join(parts)
+
+
+def _last_history_version(page_html):
+    """Find the most-recent approved version in a program page's history div.
+    Returns (version_id:int, version_date:str) or None. The history div holds
+    <a onclick="...showHistory(N)...">DATE</a> links in chronological order;
+    the last one is the most recently approved version."""
+    hist = _extract_div_inner(page_html, 'history')
+    if not hist:
+        return None
+    links = re.findall(
+        r'<a\b[^>]*onclick="[^"]*showHistory\((\d+)\)[^"]*"[^>]*>(.*?)</a>',
+        hist, re.S | re.I)
+    if not links:
+        return None
+    vid, text = links[-1]
+    return int(vid), ' '.join(re.sub(r'<[^>]+>', ' ', text).split()).strip()
 
 
 _DATE_RE = r'[A-Z][a-z]{2}, \d+ [A-Z][a-z]+ \d{4} [\d:]+ GMT'

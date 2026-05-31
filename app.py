@@ -645,79 +645,87 @@ def api_session_check():
 
 @app.route('/api/heal', methods=['POST'])
 def api_heal():
-    """Deep-refresh endpoint: iterate the live ~215-role Approve Pages
-    dropdown, then cross-check every observed program/course/catalog
-    entry against its workflow div. Use when scan-trigger's lighter-
-    weight discovery seems to be missing things, or after a CIM
-    schema change.
+    """Refresh endpoint (the dashboard's "Update Now" button).
 
-    NOTE: As of Options C+F, `/api/scan/trigger` is the faster path
-    for everyday updates (~22 min, with Phase A+B incremental fetch
-    and targeted reference/regulatory). `/api/heal` is now the
-    *deeper* (and slower) reconciliation — it cross-fetches every
-    live program's workflow div, costing ~70+ min on a busy
-    pipeline. Prefer scan-trigger; reach for heal when you suspect
-    the incremental path missed something.
+    Runs the same unified HTTP scan as `/api/scan/trigger`: one Approve
+    Pages dump → program + course + catalog workflow state, then reference
+    curricula, then export + push. No AppleScript, no ~215-role dropdown
+    walk — the dump already IS the whole pending state, so "heal" and
+    "scan" are now the same fast (~90s) operation. Kept as a separate
+    endpoint for backward compatibility with the static site's button.
 
     Request body (JSON, optional):
-      {"scope": "programs"}    — programs only (~30-40 min)
-      {"scope": "courses"}     — courses only (~30-40 min)
-      {"scope": "both"}        — default; both (~70+ min)
-      {"active_only": false}   — include completed/historical too (slower still)
-      {"deploy": true}         — default; run export + git push to GitHub Pages when done
-      {"deploy": false}        — skip deploy; DB-only update (for debugging)
+      {"scope": "programs"|"courses"|"catalog"|"all"|"both"}  (default "all")
+      {"deploy": true}   — default; export + git push when done
+      {"deploy": false}  — DB-only update (debugging)
+    (`active_only` is accepted but ignored — the dump is always active-scoped.)
     """
-    from scraper import (
-        heal_stale_program_steps, heal_stale_course_steps, heal_stale_catalog_pages,
-    )
+    from scraper import run_http_scan, fetch_reference_curricula_http
+    from cim_http import CIMSession
 
     if scan_status['running']:
         return jsonify({'error': 'Scan already in progress'}), 409
 
-    session = check_courseleaf_session()
-    if not session.get('ok'):
-        return jsonify({
-            'error': session.get('error', 'session_invalid'),
-            'detail': session.get('detail', 'CourseLeaf session invalid'),
-        }), 503
+    # HTTP session check (replaces the old AppleScript tab probe).
+    try:
+        _probe = CIMSession()
+        ok, detail = _probe.check()
+    except Exception as e:
+        ok, detail = False, f'CIM session init failed: {e}'
+    if not ok:
+        return jsonify({'error': 'session_invalid', 'detail': detail}), 503
 
     body = request.get_json(silent=True) or {}
     scope = body.get('scope', 'all')
-    # Backwards-compat: 'both' used to mean programs+courses; 'all' now also covers catalog.
-    if scope == 'both':
+    if scope == 'both':  # legacy alias
         scope = 'all'
-    active_only = body.get('active_only', True)
+    if scope not in ('programs', 'courses', 'catalog', 'all'):
+        scope = 'all'
     deploy = body.get('deploy', True)
 
     def do_heal():
         try:
             scan_status['running'] = True
             scan_status['error'] = None
-            scan_status['phase'] = 'Syncing active pipeline…'
+            scan_status['phase'] = 'Scanning CIM (HTTP)…'
             scan_status['progress'] = 5
 
-            result = {'scope': scope, 'active_only': active_only}
+            sess = CIMSession()
+            scan_out = run_http_scan(scope=scope, log=True, sess=sess)
+            if scan_out.get('error'):
+                scan_status['error'] = scan_out['error']
+                return
+            result = {'scope': scope, 'http': True}
+            for k in ('programs', 'courses', 'catalog'):
+                if k in scan_out:
+                    result[k] = {'changes': scan_out[k].get('changes', 0)}
+            scan_status['progress'] = 60
 
+            # Reference curricula (targeted) when programs were in scope.
             if scope in ('programs', 'all'):
-                scan_status['phase'] = 'Refreshing program workflow states…'
-                scan_status['progress'] = 10
-                pw, pf = heal_stale_program_steps(log=True, active_only=active_only)
-                result['programs'] = {'warnings': pw, 'fixed': pf}
-                scan_status['progress'] = 40
-
-            if scope in ('courses', 'all'):
-                scan_status['phase'] = 'Refreshing course workflow states…'
-                scan_status['progress'] = 50
-                cw, cf = heal_stale_course_steps(log=True, active_only=active_only)
-                result['courses'] = {'warnings': cw, 'fixed': cf}
-                scan_status['progress'] = 75
-
-            if scope in ('catalog', 'all'):
-                scan_status['phase'] = 'Refreshing catalog page states…'
-                scan_status['progress'] = 80
-                kw, kf = heal_stale_catalog_pages(log=True)
-                result['catalog'] = {'warnings': kw, 'fixed': kf}
-                scan_status['progress'] = 88
+                try:
+                    scan_status['phase'] = 'Fetching reference data…'
+                    programs = get_all_programs()
+                    prog_ids = [p['id'] for p in programs]
+                    if prog_ids:
+                        from database import get_db
+                        from scraper import _build_boston_counterpart_map
+                        prog_scan = scan_out.get('programs', {}) or {}
+                        completed_in_scan = set(prog_scan.get('completed_in_scan', []))
+                        with get_db() as conn:
+                            existing_ref_ids = {r['program_id'] for r in conn.execute(
+                                "SELECT program_id FROM reference_curriculum").fetchall()}
+                        targeted_ids = (set(prog_ids) - existing_ref_ids) | completed_in_scan
+                        if completed_in_scan:
+                            cmap, _ = _build_boston_counterpart_map(prog_ids)
+                            for nb_id, b_id in cmap.items():
+                                if b_id in completed_in_scan:
+                                    targeted_ids.add(nb_id)
+                        fetch_reference_curricula_http(
+                            prog_ids, targeted_ids=targeted_ids, sess=sess)
+                except Exception as e:
+                    print(f"Reference fetch error (heal): {e}")
+            scan_status['progress'] = 85
 
             if deploy:
                 scan_status['phase'] = 'Exporting & deploying…'
@@ -734,15 +742,14 @@ def api_heal():
             scan_status['last_result'] = result
         except Exception as e:
             scan_status['error'] = str(e)
-            print(f"Quick-update error: {e}")
+            print(f"Update-now error: {e}")
         finally:
             scan_status['running'] = False
             scan_status['phase'] = ''
 
     import threading
     threading.Thread(target=do_heal, daemon=True).start()
-    return jsonify({'ok': True, 'started': True, 'scope': scope,
-                    'active_only': active_only, 'deploy': deploy})
+    return jsonify({'ok': True, 'started': True, 'scope': scope, 'deploy': deploy})
 
 
 def _select_scan_mode():
@@ -981,57 +988,57 @@ def api_scan_trigger():
         try:
             scan_status['running'] = True
             scan_status['error'] = None
-            scan_status['phase'] = 'Discovering programs (discovering roles)...'
+            scan_status['phase'] = 'Scanning CIM (HTTP)...'
             scan_status['progress'] = 5
             started_at = datetime.now().isoformat()
 
-            # Scan programs (full path: A1 discovery + force-fetch + reconcile)
-            print("\n>>> STARTING RUN_FULL_SCAN", flush=True)
-            result = run_full_scan()
-            print(f">>> RUN_FULL_SCAN COMPLETE, result: {result}", flush=True)
+            # ONE session (Chrome cookie → direct HTTP), reused across the
+            # whole scan: dump scan + weekly sweeps + reference fetch. No
+            # AppleScript, no Chrome tab driving, no background-tab throttling.
+            from scraper import (run_http_scan, fetch_reference_curricula_http,
+                                 sweep_program_ids_http, sweep_course_ids_http)
+            from cim_http import CIMSession
+            try:
+                sess = CIMSession()
+            except Exception as e:
+                scan_status['error'] = f'CIM session init failed: {e}'
+                print(f">>> {scan_status['error']}", flush=True)
+                return
+            ok, detail = sess.check()
+            if not ok:
+                scan_status['error'] = detail
+                print(f">>> {detail}", flush=True)
+                try:
+                    subprocess.run([
+                        'osascript', '-e',
+                        f'display notification "{detail}" with title "Program Tracker"'],
+                        timeout=10)
+                except Exception:
+                    pass
+                return
+
+            # 1. Unified HTTP scan: programs + courses + catalog from ONE
+            #    Approve Pages dump. Single rule — dump owns current_step;
+            #    each item's own page/XML owns metadata; an item absent from
+            #    the dump is verified complete via its page before clearing.
+            print("\n>>> STARTING HTTP SCAN (programs + courses + catalog)", flush=True)
+            scan_out = run_http_scan(scope='all', log=True, sess=sess)
+            if scan_out.get('error'):
+                scan_status['error'] = scan_out['error']
+                print(f">>> HTTP scan error: {scan_out['error']}", flush=True)
+                return
+            result = scan_out.get('programs', {})
+            course_result = scan_out.get('courses', {})
+            print(f">>> HTTP SCAN COMPLETE — programs: {result.get('changes')} changes, "
+                  f"courses: {course_result.get('changes')} changes, "
+                  f"catalog: {scan_out.get('catalog', {}).get('changes')} changes", flush=True)
             scan_status['last_result'] = result
-            scan_status['progress'] = 40
+            scan_status['progress'] = 45
 
-            # Quick update after program-side discovery (catches anything
-            # the A1 discovery + force-fetch turned up).
-            do_quick_role_update(label='post-programs quick update')
-
-            # Scan courses with interleaved quick updates every 15 roles
-            # (so within the ~22-min courses scrape, role updates publish
-            # every ~5-7 min).
-            print("\n>>> About to start course scanning...", flush=True)
-            scan_status['phase'] = 'Discovering courses...'
-            scan_status['progress'] = 50
-            try:
-                print(">>> Calling run_course_scan() with interleaved callback...", flush=True)
-                course_result = run_course_scan(
-                    progress_callback=lambda done, total: do_quick_role_update(
-                        label=f'mid-courses quick update ({done}/{total} roles)'))
-                print(f">>> Course scan result: {course_result}", flush=True)
-                scan_status['phase'] = 'Processing courses...'
-                scan_status['progress'] = 65
-            except Exception as e:
-                print(f">>> Course scan error: {e}", flush=True)
-                import traceback
-                traceback.print_exc()
-
-            # Quick update after courses phase
-            do_quick_role_update(label='post-courses quick update')
-
-            # Catalog page sync with interleaved quick updates
-            scan_status['phase'] = 'Syncing catalog pages...'
-            scan_status['progress'] = 68
-            try:
-                from scraper import heal_stale_catalog_pages
-                heal_stale_catalog_pages(
-                    log=True,
-                    progress_callback=lambda done, total: do_quick_role_update(
-                        label=f'mid-catalog quick update ({done}/{total} roles)'))
-            except Exception as e:
-                print(f">>> Catalog sync error: {e}", flush=True)
-
-            # Quick update after catalog sync
-            do_quick_role_update(label='post-catalog quick update')
+            # Publish the workflow-state update now so role transitions show on
+            # the dashboard before the slower reference/regulatory/portfolio
+            # phases finish.
+            _publish_if_changed('post-scan workflow update')
 
             # Weekly historical sweeps run FIRST (before reference/regulatory
             # fetches) so any newly-ingested completed programs/courses are
@@ -1042,7 +1049,6 @@ def api_scan_trigger():
             scan_status['progress'] = 72
             try:
                 from database import get_db
-                from scraper import sweep_all_program_ids, sweep_all_course_ids
                 with get_db() as conn:
                     last_p = conn.execute(
                         "SELECT scan_time FROM scans WHERE programs_scanned = -1 "
@@ -1052,8 +1058,8 @@ def api_scan_trigger():
                 if last_p and last_p['scan_time']:
                     p_due = (datetime.now() - datetime.fromisoformat(last_p['scan_time'])).days >= 7
                 if p_due:
-                    scan_status['phase'] = 'Weekly program sweep...'
-                    sweep_result = sweep_all_program_ids(start_id=1, end_id=2100, log=True)
+                    scan_status['phase'] = 'Weekly program sweep (HTTP)...'
+                    sweep_result = sweep_program_ids_http(start_id=1, end_id=2100, sess=sess, log=True)
                     sweep_program_completions = sweep_result.get('new_completion_ids', []) if sweep_result else []
 
                 with get_db() as conn:
@@ -1065,8 +1071,8 @@ def api_scan_trigger():
                 if last_c and last_c['scan_time']:
                     c_due = (datetime.now() - datetime.fromisoformat(last_c['scan_time'])).days >= 7
                 if c_due:
-                    scan_status['phase'] = 'Weekly course sweep...'
-                    sweep_all_course_ids(start_id=1, end_id=3000, log=True)
+                    scan_status['phase'] = 'Weekly course sweep (HTTP)...'
+                    sweep_course_ids_http(start_id=1, end_id=3000, sess=sess, log=True)
             except Exception as e:
                 # Sweep is a background refresh — failures shouldn't break the
                 # main scan or the static export that follows.
@@ -1116,10 +1122,10 @@ def api_scan_trigger():
                         for nb_id, b_id in counterpart_map.items():
                             if b_id in completed_in_scan:
                                 targeted_ids.add(nb_id)
-                    print(f"Reference fetch (C3): targeting "
+                    print(f"Reference fetch (C3, HTTP): targeting "
                           f"{len(targeted_ids)} of {len(prog_ids)} programs "
                           f"(missing-ref + completed-in-scan + boston-just-completed deps)")
-                    fetch_reference_curricula(prog_ids, targeted_ids=targeted_ids)
+                    fetch_reference_curricula_http(prog_ids, targeted_ids=targeted_ids, sess=sess)
                     scan_status['progress'] = 84
             except Exception as e:
                 print(f"Reference fetch error: {e}")
@@ -1261,20 +1267,15 @@ def api_scan_trigger():
             scan_status['phase'] = ''
             scan_status['progress'] = 0
 
-    # Mode selection — explicit body override wins, else auto-pick.
+    # One scan path. The HTTP scan is fast + reliable enough (~90s for the
+    # full programs+courses+catalog+reference pipeline) that the old
+    # quick/full mode split is unnecessary — every trigger runs the same
+    # complete scan. `mode` is still accepted for backward compatibility but
+    # ignored. (do_quick_scan / _select_scan_mode are retained but unused.)
     body = request.get_json(silent=True) or {}
-    mode = body.get('mode') or _select_scan_mode()
-    if mode == 'full':
-        target = do_scan
-    elif mode == 'quick_p':
-        target = lambda: do_quick_scan(include_courses=False)
-    elif mode == 'quick_pc':
-        target = lambda: do_quick_scan(include_courses=True)
-    else:
-        return jsonify({'error': 'invalid_mode',
-                        'detail': f"Mode must be one of: full, quick_p, quick_pc (got {mode!r})"}), 400
-    print(f"\n>>> Scan triggered, mode={mode}", flush=True)
-    thread = threading.Thread(target=target, daemon=True)
+    mode = body.get('mode') or 'full'
+    print(f"\n>>> Scan triggered (mode={mode!r}, ignored — running full HTTP scan)", flush=True)
+    thread = threading.Thread(target=do_scan, daemon=True)
     thread.start()
     return jsonify({'status': 'scan_started', 'mode': mode})
 
