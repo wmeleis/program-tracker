@@ -1025,6 +1025,203 @@ def check_courseleaf_session():
     return {'ok': True, 'detail': 'CourseLeaf session is valid.'}
 
 
+def run_http_program_scan(dry_run=False, max_workers=12, log=True):
+    """Program scan over direct authenticated HTTP — no AppleScript, no Chrome.
+
+    The authoritative current_step for every in-workflow program comes from a
+    single Approve Pages dump (the first non-'fyiall' <mustsignoff> role,
+    which matches what reviewers see and resolves parallel branches). Per-
+    program page + XML fetches (parallel) supply workflow steps, approver
+    emails, step-entered date, proposal type, college/campus/degree/banner,
+    and curriculum_html.
+
+    Reconciliation collapses to: the dump owns current_step; the program's
+    own page/XML owns everything else; a program in the DB at a step but
+    absent from the dump is verified complete via its page (positive
+    evidence) before clearing.
+
+    dry_run=True computes the planned changes and returns them WITHOUT
+    writing — used to validate against the existing scan before switching.
+
+    Returns a dict shaped like run_full_scan's result (programs_scanned,
+    programs_with_workflow, changes, completed_in_scan,
+    boston_curriculum_changed, plus 'error' on failure and, for dry runs,
+    'planned').
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from cim_http import CIMSession, parse_program_page
+    from database import (get_db, upsert_program, upsert_workflow_steps,
+                          upsert_program_approvals)
+    import time as _time
+
+    result = {'scan_time': datetime.now().isoformat(), 'programs_scanned': 0,
+              'programs_with_workflow': 0, 'changes': 0, 'completed_in_scan': [],
+              'boston_curriculum_changed': []}
+
+    try:
+        sess = CIMSession()
+    except Exception as e:
+        result['error'] = f'cookie/session init failed: {e}'
+        return result
+    ok, detail = sess.check()
+    if not ok:
+        result['error'] = detail
+        return result
+
+    if log:
+        print("\nHTTP program scan: fetching Approve Pages pending dump...")
+    t0 = _time.time()
+    pending = sess.fetch_approve_pending()
+    if pending is None:
+        result['error'] = 'Approve Pages dump fetch failed (session?).'
+        return result
+    if log:
+        print(f"  Dump: {len(pending)} in-workflow programs in {_time.time()-t0:.1f}s")
+
+    with get_db() as conn:
+        existing = {r['id']: dict(r) for r in conn.execute(
+            "SELECT id, name, current_step, completion_date, campus, "
+            "step_entered_date FROM programs").fetchall()}
+
+    in_wf = set(pending)
+    db_active = {pid for pid, r in existing.items() if (r.get('current_step') or '')}
+    new_ids = in_wf - set(existing)
+    moved_ids = {pid for pid in (in_wf & set(existing))
+                 if (existing[pid].get('current_step') or '') != pending[pid]['current_step']}
+    gone_ids = db_active - in_wf  # in DB at a step but no longer pending → completed?
+
+    # Fetch full detail (page + XML) for every in-workflow program (simple +
+    # correct: no incremental-gating bugs) plus the gone candidates we must
+    # verify. ~2 requests each, parallel.
+    fetch_ids = sorted(in_wf | gone_ids)
+    if log:
+        print(f"  new={len(new_ids)} moved={len(moved_ids)} gone={len(gone_ids)} "
+              f"| fetching page+XML for {len(fetch_ids)} programs ({max_workers} workers)...")
+
+    def fetch_both(pid):
+        page = None
+        body = sess.get(f"/programadmin/{pid}/")
+        if body is not None:
+            page = parse_program_page(body)
+        meta = sess.fetch_program_xml(pid)
+        return pid, page, meta
+
+    fetched = {}
+    t0 = _time.time()
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for pid, page, meta in ex.map(fetch_both, fetch_ids):
+            fetched[pid] = (page, meta)
+    if log:
+        print(f"  Fetched {len(fetched)} in {_time.time()-t0:.1f}s")
+    if sess.logged_out:
+        result['error'] = 'CIM session expired mid-scan.'
+        return result
+
+    planned = []      # (pid, name, old_step, new_step, kind)
+    completed_now = []
+    boston_changed = []
+
+    def build(pid):
+        page, meta = fetched.get(pid, (None, {}))
+        steps = (page or {}).get('steps') or []
+        in_dump = pid in pending
+        prev = existing.get(pid, {})
+        # current_step
+        if in_dump:
+            current_step = pending[pid]['current_step']
+            completion_date = ''
+            # approver emails for the current step from the page workflow div
+            emails = ''
+            for s in steps:
+                if (s.get('name') or '').strip() == current_step:
+                    emails = s.get('emails', '') or ''
+                    break
+        else:
+            # gone candidate: confirm complete via page (positive evidence)
+            found_wf = (page or {}).get('found_workflow')
+            total = len(steps)
+            approved = sum(1 for s in steps if s.get('status') == 'approved')
+            has_current = any(s.get('status') == 'current' for s in steps)
+            if page is None:
+                # fetch failed — do NOT change anything
+                return None
+            if (not found_wf) or (total > 0 and approved == total and not has_current):
+                current_step = ''
+                completion_date = (page or {}).get('last_approval_date', '') \
+                    or (('Catalog ' + meta.get('eff_cat')) if meta.get('eff_cat') else 'Approved')
+                emails = ''
+                completed_now.append(pid)
+            else:
+                # still shows an active workflow but not pending — unverifiable
+                # edge; preserve existing.
+                return None
+        # metadata
+        college_code = meta.get('college', '')
+        college = COLLEGE_NAMES.get(college_code, college_code)
+        proposal_type = meta.get('proposal_type') or (page or {}).get('proposal_type', '')
+        if 'New Program' in proposal_type:
+            status = 'Added'
+        elif 'Inactivation' in proposal_type:
+            status = 'Deactivated'
+        else:
+            status = 'Edited'
+        name = meta.get('program_title') or pending.get(pid, {}).get('title') \
+            or prev.get('name') or f'Program #{pid}'
+        # step_entered_date priority: last_approval_date → date_submitted → preserve/now
+        sed = (page or {}).get('last_approval_date') or (page or {}).get('date_submitted') or ''
+        curriculum_html = (meta.get('curriculum_html', '') or '') \
+            .replace('<![CDATA[', '').replace(']]>', '').strip()
+        pdata = {
+            'id': pid, 'banner_code': meta.get('banner_code', ''), 'name': name,
+            'status': status, 'current_step': current_step,
+            'total_steps': len(steps),
+            'completed_steps': sum(1 for s in steps if s.get('status') == 'approved'),
+            'current_approver_emails': emails,
+            'program_type': classify_program_type(name, steps, meta.get('degree', '')),
+            'college': college, 'department': meta.get('department', ''),
+            'degree': meta.get('degree', ''),
+            'date_submitted': (page or {}).get('date_submitted', ''),
+            'step_entered_date': sed, 'curriculum_html': curriculum_html,
+            'completion_date': completion_date, 'campus': meta.get('campus', ''),
+            'eff_cat': meta.get('eff_cat', ''),
+        }
+        old_step = prev.get('current_step') or ''
+        if old_step != current_step:
+            kind = 'new' if pid in new_ids else ('complete' if not current_step else 'moved')
+            planned.append((pid, name, old_step, current_step, kind))
+        return pdata, steps
+
+    to_write = []
+    for pid in fetch_ids:
+        r = build(pid)
+        if r is not None:
+            to_write.append((pid, r[0], r[1]))
+
+    result['programs_scanned'] = len(to_write)
+    result['programs_with_workflow'] = len(in_wf)
+    result['changes'] = len(planned)
+    result['completed_in_scan'] = completed_now
+    result['boston_curriculum_changed'] = boston_changed
+
+    if dry_run:
+        result['planned'] = planned
+        if log:
+            print(f"  DRY RUN — {len(planned)} step changes, "
+                  f"{len(completed_now)} completions (nothing written)")
+        return result
+
+    for pid, pdata, steps in to_write:
+        upsert_program(pdata)
+        if steps:
+            upsert_workflow_steps(pid, steps)
+    if log:
+        for pid, name, old, new, kind in planned:
+            print(f"  {kind.upper()}: {name}: {old or '(none)'} -> {new or '(complete)'}")
+        print(f"  Wrote {len(to_write)} programs ({len(planned)} changes, "
+              f"{len(completed_now)} completions)")
+    return result
+
+
 def run_full_scan(force_fetch_only=False):
     """Run a program scan: hybrid discovery, incremental fetch.
 
