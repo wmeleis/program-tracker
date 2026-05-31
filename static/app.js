@@ -1649,13 +1649,127 @@ async function loadWorkflowDetail(id, isCourseView) {
             }
         }
 
+        const actionPanel = isCourseView ? '' : buildProgramActionPanel(id, steps);
         contentEl.innerHTML = `
             <div class="workflow-steps">${stepsHtml}</div>
             ${metaHtml}
             ${courseMetaHtml}
+            ${actionPanel}
         `;
+        if (actionPanel) revealActionPanelIfLocal(id);
     } catch (e) {
         contentEl.innerHTML = '<div class="workflow-meta">Failed to load workflow details.</div>';
+    }
+}
+
+// ==================== Program actions (approve / send-back / comment) ====================
+// These perform WRITE actions in CIM via the local tracker server. On the
+// static (GitHub Pages) site they POST cross-origin to the user's own
+// localhost:5001 — so the controls only appear (and only work) on the machine
+// running the tracker with a valid CIM session. CIM still enforces who may
+// approve; the panel just saves a trip to CIM.
+
+function localApiBase() {
+    return window._staticMode ? 'http://localhost:5001' : '';
+}
+
+let _localServerReachable = null;
+async function ensureLocalServer() {
+    if (_localServerReachable !== null) return _localServerReachable;
+    if (!window._staticMode) { _localServerReachable = true; return true; }
+    try {
+        const res = await fetch(`${localApiBase()}/api/scan/status`, {method: 'GET'});
+        _localServerReachable = res.ok;
+    } catch (_) {
+        _localServerReachable = false;
+    }
+    return _localServerReachable;
+}
+
+// Build the (initially hidden) approve/send-back/comment panel for a program
+// row. Returns '' for courses or programs with no current step.
+function buildProgramActionPanel(programId, steps) {
+    const current = (steps || []).find(s => (s.step_status || '') === 'current');
+    if (!current) return '';
+    const role = current.step_name || '';
+    const approved = (steps || []).filter(s => (s.step_status || '') === 'approved');
+    const opts = approved.map(s => `<option value="${escapeHtml(s.step_name)}">${escapeHtml(s.step_name)}</option>`).join('');
+    const sendback = approved.length
+        ? `<div class="pa-row">
+               <select id="pa-rejectto-${programId}" class="pa-select">${opts}</select>
+               <button class="pa-btn pa-sendback" onclick="submitProgramAction(${programId}, 'sendback')">Send back</button>
+           </div>`
+        : '';
+    return `
+        <div class="program-actions" id="program-actions-${programId}" style="display:none;"
+             data-role="${escapeHtml(role)}">
+            <div class="pa-title">Act on this program <span class="pa-step">(current step: ${escapeHtml(role)})</span></div>
+            <textarea id="pa-comment-${programId}" class="pa-comment" rows="2"
+                      placeholder="Optional comment (logged in CIM)…"></textarea>
+            <div class="pa-row">
+                <button class="pa-btn pa-approve" onclick="submitProgramAction(${programId}, 'approve')">Approve</button>
+                <button class="pa-btn pa-comment-only" onclick="submitProgramAction(${programId}, 'comment')">Comment only</button>
+            </div>
+            ${sendback}
+            <div class="pa-result" id="pa-result-${programId}"></div>
+        </div>`;
+}
+
+// Reveal the panel only when the local tracker server is reachable.
+async function revealActionPanelIfLocal(programId) {
+    const el = document.getElementById(`program-actions-${programId}`);
+    if (!el) return;
+    if (await ensureLocalServer()) el.style.display = '';
+}
+
+async function submitProgramAction(programId, action) {
+    const panel = document.getElementById(`program-actions-${programId}`);
+    const resultEl = document.getElementById(`pa-result-${programId}`);
+    if (!panel) return;
+    const role = panel.getAttribute('data-role') || '';
+    const comment = (document.getElementById(`pa-comment-${programId}`)?.value || '').trim();
+    let rejectto = '';
+    if (action === 'sendback') {
+        rejectto = document.getElementById(`pa-rejectto-${programId}`)?.value || '';
+        if (!rejectto) { resultEl.textContent = 'Pick a step to send back to.'; return; }
+    }
+    if (action === 'comment' && !comment) { resultEl.textContent = 'Enter a comment first.'; return; }
+
+    const prog = (typeof allPrograms !== 'undefined' ? allPrograms : []).find(p => String(p.id) === String(programId));
+    const name = prog ? prog.name : `program #${programId}`;
+    let msg;
+    if (action === 'approve') msg = `Approve “${name}” at step “${role}” in CIM?\n\nThis advances the program in the official workflow.`;
+    else if (action === 'sendback') msg = `Send “${name}” back to “${rejectto}” in CIM?\n\nThis rolls the program back in the official workflow.`;
+    else msg = `Add a comment to “${name}” in CIM? (does not change its step)`;
+    if (comment) msg += `\n\nComment: ${comment}`;
+    if (!window.confirm(msg)) return;
+
+    // Disable buttons during the request.
+    panel.querySelectorAll('.pa-btn').forEach(b => b.disabled = true);
+    resultEl.className = 'pa-result';
+    resultEl.textContent = 'Submitting to CIM…';
+    try {
+        const res = await fetch(`${localApiBase()}/api/program/${programId}/action`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action, comment, rejectto, expected_role: role, confirm: true}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+            resultEl.className = 'pa-result pa-ok';
+            resultEl.textContent = (data.detail || 'Done') +
+                (data.new_step ? ` — now at “${data.new_step}”.` : '') +
+                ' Refreshing…';
+            setTimeout(() => loadDashboard(), 1500);
+        } else {
+            resultEl.className = 'pa-result pa-err';
+            resultEl.textContent = (data.detail || 'Action failed.');
+            panel.querySelectorAll('.pa-btn').forEach(b => b.disabled = false);
+        }
+    } catch (e) {
+        resultEl.className = 'pa-result pa-err';
+        resultEl.textContent = 'Could not reach the tracker server on this machine.';
+        panel.querySelectorAll('.pa-btn').forEach(b => b.disabled = false);
     }
 }
 

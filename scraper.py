@@ -1652,6 +1652,88 @@ def run_http_scan(scope='all', dry_run=False, log=True, sess=None):
     return out
 
 
+def refresh_program_http(pid, sess=None, log=False):
+    """Re-fetch and upsert ONE program from CIM over HTTP. Used right after a
+    tracker-initiated approve/send-back so the dashboard reflects the move in
+    ~1-3s instead of waiting for the next scheduled scan. Applies the same
+    single rule as run_http_program_scan: in the dump → first mustsignoff is
+    current_step; absent from the dump → verify completion / terminal marker
+    via the page; failed fetch → preserve. Returns the new current_step (or
+    '' if completed), or None if unverifiable/failed."""
+    from cim_http import CIMSession, parse_program_page
+    from database import get_db, upsert_program, upsert_workflow_steps
+
+    if sess is None:
+        try:
+            sess = CIMSession()
+        except Exception:
+            return None
+    pending = sess.fetch_approve_pending()
+    if pending is None:
+        return None
+    entry = pending.get(pid)
+    body = sess.get(f"/programadmin/{pid}/")
+    page = parse_program_page(body) if body is not None else None
+    meta = sess.fetch_program_xml(pid)
+    steps = (page or {}).get('steps') or []
+    with get_db() as conn:
+        row = conn.execute("SELECT name, current_step FROM programs WHERE id = ?",
+                           (pid,)).fetchone()
+    prev = dict(row) if row else {}
+
+    if entry is not None:
+        current_step = entry['current_step']
+        completion_date = ''
+        emails = next((s.get('emails', '') for s in steps
+                       if (s.get('name') or '').strip() == current_step), '') or ''
+    else:
+        if page is None:
+            return None
+        found_wf = (page or {}).get('found_workflow')
+        total = len(steps)
+        approved = sum(1 for s in steps if s.get('status') == 'approved')
+        marker = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
+        if (not found_wf) or (total > 0 and approved == total and marker is None):
+            current_step = ''
+            completion_date = (page or {}).get('last_approval_date', '') \
+                or (('Catalog ' + meta.get('eff_cat')) if meta.get('eff_cat') else 'Approved')
+            emails = ''
+        elif marker:
+            current_step = marker
+            completion_date = ''
+            emails = next((s.get('emails', '') for s in steps
+                           if (s.get('name') or '').strip() == marker), '') or ''
+        else:
+            return None
+
+    college_code = meta.get('college', '')
+    ptype = meta.get('proposal_type') or (page or {}).get('proposal_type', '')
+    status = ('Added' if 'New Program' in ptype else
+              'Deactivated' if 'Inactivation' in ptype else 'Edited')
+    name = meta.get('program_title') or (entry or {}).get('title') or prev.get('name') or f'Program #{pid}'
+    upsert_program({
+        'id': pid, 'banner_code': meta.get('banner_code', ''), 'name': name,
+        'status': status, 'current_step': current_step, 'total_steps': len(steps),
+        'completed_steps': sum(1 for s in steps if s.get('status') == 'approved'),
+        'current_approver_emails': emails,
+        'program_type': classify_program_type(name, steps, meta.get('degree', '')),
+        'college': COLLEGE_NAMES.get(college_code, college_code),
+        'department': meta.get('department', ''), 'degree': meta.get('degree', ''),
+        'date_submitted': (page or {}).get('date_submitted', ''),
+        'step_entered_date': (page or {}).get('last_approval_date', '')
+            or (page or {}).get('date_submitted', ''),
+        'curriculum_html': (meta.get('curriculum_html', '') or '')
+                           .replace('<![CDATA[', '').replace(']]>', '').strip(),
+        'completion_date': completion_date, 'campus': meta.get('campus', ''),
+        'eff_cat': meta.get('eff_cat', ''),
+    })
+    if steps:
+        upsert_workflow_steps(pid, steps)
+    if log:
+        print(f"  refresh_program_http({pid}): {prev.get('current_step')!r} -> {current_step!r}")
+    return current_step
+
+
 def sweep_program_ids_http(start_id=1, end_id=2100, max_workers=16, log=True,
                            sess=None):
     """HTTP port of sweep_all_program_ids: walk every CIM program ID in range,

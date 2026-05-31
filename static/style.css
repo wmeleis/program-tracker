@@ -2166,6 +2166,41 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 
 .muted { color: #94a3b8; }
 
+/* Program action panel (approve / send-back / comment) */
+.program-actions {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--accent, #2563eb);
+    border-radius: 8px;
+    background: #f8fbff;
+}
+.pa-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.pa-step { font-weight: 400; color: #64748b; }
+.pa-comment {
+    width: 100%; box-sizing: border-box; resize: vertical;
+    border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px;
+    font: inherit; font-size: 13px; margin-bottom: 8px;
+}
+.pa-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.pa-select {
+    border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px;
+    font: inherit; font-size: 13px; max-width: 320px;
+}
+.pa-btn {
+    border: 1px solid transparent; border-radius: 6px; padding: 6px 14px;
+    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.pa-btn:disabled { opacity: .5; cursor: default; }
+.pa-approve { background: #16a34a; color: #fff; }
+.pa-approve:hover:not(:disabled) { background: #15803d; }
+.pa-sendback { background: #fff; color: #b91c1c; border-color: #b91c1c; }
+.pa-sendback:hover:not(:disabled) { background: #fef2f2; }
+.pa-comment-only { background: #fff; color: var(--accent, #2563eb); border-color: var(--accent, #2563eb); }
+.pa-comment-only:hover:not(:disabled) { background: #eff6ff; }
+.pa-result { margin-top: 8px; font-size: 13px; white-space: pre-wrap; }
+.pa-result.pa-ok { color: #15803d; }
+.pa-result.pa-err { color: #b91c1c; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .pipeline-bar { flex-wrap: wrap; }

@@ -375,6 +375,104 @@ class CIMSession:
         allp = self.fetch_all_pending(timeout=timeout, _body=_body)
         return None if allp is None else allp['programs']
 
+    def post(self, path, data, timeout=60):
+        """POST form-encoded `data` to a CIM-relative path. Returns the body
+        text, or None on HTTP error / login redirect (sets logged_out). This
+        is the ONLY write primitive — all approve/comment/send-back actions
+        funnel through it so there's a single audited choke point."""
+        url = path if path.startswith('http') else (CIM_BASE + path)
+        body_bytes = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(url, data=body_bytes, headers={
+            'User-Agent': 'Mozilla/5.0 (program-tracker cim_http)',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Cache-Control': 'no-store',
+        })
+        try:
+            resp = self._opener.open(req, timeout=timeout)
+            body = resp.read().decode('utf8', 'replace')
+            final = resp.geturl()
+        except urllib.error.HTTPError:
+            return None
+        except Exception:
+            return None
+        if urllib.parse.urlparse(final).netloc != CIM_HOST:
+            self.logged_out = True
+            return None
+        return body
+
+    def fetch_revision_id(self, path, timeout=30):
+        """Read the program's current revision id (`pageleaf_revisionid`) from
+        its approval-preview page (step=tcadiff). Returns the id string or
+        None. CIM requires this in the approvelist POST and rejects the
+        action if it's stale ('Page has changed during approval process'),
+        which is the built-in fail-safe against approving the wrong version."""
+        body = self.get(f"/courseleaf/courseleaf.cgi?page={path}&step=tcadiff",
+                        timeout=timeout)
+        if body is None:
+            return None
+        m = re.search(r'pageleaf_revisionid\s*=\s*"(\d+)"', body)
+        return m.group(1) if m else None
+
+    def approve_item(self, path, role, action='Approved', rejectto='',
+                     comment='', revision_id=None, timeout=60):
+        """Perform an approve / send-back (rollback) / comment action on a
+        program or course, exactly as CIM's Approve Pages "Approve" button
+        does. WRITE ACTION — callers must have explicit per-action user
+        confirmation.
+
+        path: '/programadmin/{id}/' or '/courseadmin/{id}/'
+        role: the current pending role (from the dump's first mustsignoff)
+        action: 'Approved' (advance) or 'Rejected' (send back / rollback)
+        rejectto: target step for a 'Rejected' action ('' for Approved)
+        comment: optional reviewer comment (logged in CIM)
+        revision_id: current pageleaf_revisionid; fetched if not supplied.
+
+        Returns (ok: bool, detail: str). ok is False (without approving) when
+        CIM reports the page changed during approval, the session expired, or
+        the request failed.
+        """
+        if revision_id is None:
+            revision_id = self.fetch_revision_id(path)
+        if not revision_id:
+            return False, "Could not read current revision id (preview fetch failed)."
+        why = (comment or '').replace('\n', ' ').strip()
+
+        # Step 1: log the comment first (mirrors approveCurrent's wfrejectcomments
+        # pre-post). command=nosave stages the note without saving a draft.
+        if why:
+            r = self.post(
+                f"/courseleaf/courseleaf.cgi?page={path}&step=wfrejectcomments&output=xml",
+                {'attr_newrejectcomments': why, 'command': 'nosave'}, timeout=timeout)
+            if self.logged_out:
+                return False, "CIM session expired (comment step)."
+            if r is None:
+                return False, "Comment submission failed."
+
+        # Step 2: the action itself.
+        approvelist = f"{action}:{path}|{revision_id}|{role}|{rejectto}|{why}"
+        data = {'approvelist': approvelist}
+        if why:
+            data['attr_rejectcomments'] = why
+        r = self.post(
+            f"/courseleaf/courseleaf.cgi?page={path}&step=approvelist&output=xml",
+            data, timeout=timeout)
+        if self.logged_out:
+            return False, "CIM session expired (approve step)."
+        if r is None:
+            return False, "Approve submission failed (no response)."
+        # CIM returns <warning> elements; the page-changed warning means the
+        # action did NOT take effect.
+        warnings = [re.sub(r'<[^>]+>', '', w).strip()
+                    for w in re.findall(r'<warning>(.*?)</warning>', r, re.S)]
+        for w in warnings:
+            if 'page has changed during approval' in w.lower():
+                return False, f"Not applied — page changed during approval: {w}"
+        if warnings:
+            # Other warnings are surfaced but not necessarily failures.
+            return True, "Applied (with warnings: " + "; ".join(warnings)[:300] + ")"
+        verb = {'Approved': 'Approved', 'Rejected': 'Sent back'}.get(action, action)
+        return True, f"{verb} successfully" + (f" (comment logged)" if why else "")
+
     def fetch_program_xml(self, pid, timeout=30):
         """Fetch + parse a program's XML API. Returns a metadata dict, or {}."""
         body = self.get(f"/programadmin/{pid}/index.xml", timeout=timeout)

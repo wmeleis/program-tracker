@@ -925,11 +925,14 @@ function __staticInit() {
             }
         }
 
+        const actionPanel = isCourseView ? '' : buildProgramActionPanel(programId, steps);
         contentEl.innerHTML = `
             <div class="workflow-steps">${stepsHtml}</div>
             ${metaHtml}
             ${courseMetaHtml}
+            ${actionPanel}
         `;
+        if (actionPanel) revealActionPanelIfLocal(programId);
     };
 
     // Patch approver filter to use static data (branches on programs vs courses view)

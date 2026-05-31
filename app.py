@@ -752,6 +752,130 @@ def api_heal():
     return jsonify({'ok': True, 'started': True, 'scope': scope, 'deploy': deploy})
 
 
+def _append_action_audit(entry):
+    """Append one approve/comment/send-back action to the audit trail
+    (data/action_audit.jsonl). Every attempt is logged, success or not."""
+    import json as _json
+    cwd = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(cwd, 'data', 'action_audit.jsonl')
+    entry = dict(entry, ts=datetime.now().isoformat())
+    try:
+        with open(path, 'a') as f:
+            f.write(_json.dumps(entry) + '\n')
+    except Exception as e:
+        print(f"audit log write failed: {e}")
+    return entry
+
+
+@app.route('/api/program/<int:pid>/action', methods=['POST'])
+def api_program_action(pid):
+    """Perform a WRITE action on a program in CIM on the user's behalf:
+    approve, send-back (rollback), or comment. Reproduces CIM's Approve Pages
+    "Approve" button via the authenticated HTTP session.
+
+    SAFETY: single program only (no bulk), requires {"confirm": true}, and
+    re-checks the LIVE pending state at action time — if the program already
+    moved off the role the UI showed (`expected_role` mismatch) or is no
+    longer pending, the action is refused. CIM's revision-id guard is a
+    second backstop (a stale page fails without approving). Every attempt is
+    written to data/action_audit.jsonl.
+
+    Body: {
+      "action": "approve" | "sendback" | "comment",
+      "comment": "...",            # optional for approve; the note for comment
+      "rejectto": "Target Step",   # required for sendback
+      "expected_role": "...",      # the role the UI displayed (staleness check)
+      "confirm": true
+    }
+    """
+    from cim_http import CIMSession
+    from database import get_db
+
+    body = request.get_json(silent=True) or {}
+    action = (body.get('action') or '').lower()
+    comment = (body.get('comment') or '').strip()
+    rejectto = (body.get('rejectto') or '').strip()
+    expected_role = (body.get('expected_role') or '').strip()
+
+    if action not in ('approve', 'sendback', 'comment'):
+        return jsonify({'ok': False, 'detail': "action must be approve|sendback|comment"}), 400
+    if not body.get('confirm'):
+        return jsonify({'ok': False, 'detail': "confirmation required"}), 400
+    if action == 'sendback' and not rejectto:
+        return jsonify({'ok': False, 'detail': "sendback requires a target step (rejectto)"}), 400
+    if action == 'comment' and not comment:
+        return jsonify({'ok': False, 'detail': "comment text required"}), 400
+
+    path = f"/programadmin/{pid}/"
+    with get_db() as conn:
+        prow = conn.execute("SELECT name, current_step FROM programs WHERE id = ?",
+                            (pid,)).fetchone()
+    prog_name = prow['name'] if prow else f'Program #{pid}'
+
+    try:
+        sess = CIMSession()
+        ok, detail = sess.check()
+    except Exception as e:
+        ok, detail = False, f'CIM session init failed: {e}'
+    if not ok:
+        _append_action_audit({'program_id': pid, 'name': prog_name, 'action': action,
+                              'comment': comment, 'rejectto': rejectto, 'ok': False,
+                              'detail': detail})
+        return jsonify({'ok': False, 'detail': detail}), 503
+
+    # Re-check LIVE pending state — refuse if the program moved or isn't pending.
+    pending = sess.fetch_approve_pending()
+    if pending is None:
+        return jsonify({'ok': False, 'detail': 'Could not read live pending state.'}), 503
+    entry = pending.get(pid)
+    if entry is None:
+        msg = (f"{prog_name} is no longer pending at any step (it may have just "
+               f"moved or completed). Refresh and re-check before acting.")
+        _append_action_audit({'program_id': pid, 'name': prog_name, 'action': action,
+                              'comment': comment, 'rejectto': rejectto, 'ok': False,
+                              'detail': msg})
+        return jsonify({'ok': False, 'detail': msg, 'moved': True}), 409
+    live_role = entry['current_step']
+    if expected_role and expected_role != live_role:
+        msg = (f"{prog_name} has moved since you opened it: now at '{live_role}', "
+               f"you were viewing '{expected_role}'. Refresh before acting.")
+        _append_action_audit({'program_id': pid, 'name': prog_name, 'action': action,
+                              'comment': comment, 'rejectto': rejectto, 'ok': False,
+                              'detail': msg, 'live_role': live_role})
+        return jsonify({'ok': False, 'detail': msg, 'moved': True, 'live_role': live_role}), 409
+
+    # Perform the action.
+    if action == 'comment':
+        # Standalone note — post the comment step only (no workflow advance).
+        r = sess.post(f"/courseleaf/courseleaf.cgi?page={path}&step=wfrejectcomments&output=xml",
+                      {'attr_newrejectcomments': comment.replace('\n', ' '), 'command': 'nosave'})
+        ok_act = (r is not None and not sess.logged_out)
+        detail_act = "Comment logged" if ok_act else "Comment submission failed"
+    else:
+        cim_action = 'Approved' if action == 'approve' else 'Rejected'
+        ok_act, detail_act = sess.approve_item(
+            path, role=live_role, action=cim_action, rejectto=rejectto, comment=comment)
+
+    audit = _append_action_audit({'program_id': pid, 'name': prog_name, 'action': action,
+                                  'role': live_role, 'comment': comment, 'rejectto': rejectto,
+                                  'ok': ok_act, 'detail': detail_act})
+
+    new_step = live_role
+    if ok_act and action != 'comment':
+        # Fast signal: refresh just this program, then publish.
+        try:
+            from scraper import refresh_program_http
+            ns = refresh_program_http(pid, sess=sess, log=True)
+            if ns is not None:
+                new_step = ns
+            _publish_if_changed(f'action {action} on {pid}')
+        except Exception as e:
+            print(f"post-action refresh error: {e}")
+
+    return jsonify({'ok': ok_act, 'detail': detail_act, 'program_id': pid,
+                    'new_step': new_step, 'ts': audit['ts']}), (200 if ok_act else 502)
+
+
 def _select_scan_mode():
     """Pick scan mode based on what's been run recently.
 
