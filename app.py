@@ -894,6 +894,7 @@ def api_auth_login():
     if the session has expired. After the user logs in there, the tracker's
     next cookie read picks up the refreshed session automatically. Local-only
     (opens Chrome on the machine running the server)."""
+    import subprocess
     from cim_http import CIM_BASE
     url = f"{CIM_BASE}/courseleaf/approve/"
     try:

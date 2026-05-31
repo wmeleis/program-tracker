@@ -1801,11 +1801,17 @@ async function refreshCimAuthStatus() {
 
 async function cimAuthenticate() {
     const btn = document.getElementById('auth-btn');
+    const el = document.getElementById('auth-status');
     if (btn) btn.disabled = true;
     try {
-        await fetch('/api/auth/login', {method: 'POST'});
+        const res = await fetch('/api/auth/login', {method: 'POST'});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+            if (el) { el.textContent = '● could not open Chrome'; el.className = 'auth-status auth-bad'; el.title = data.detail || ''; }
+            if (btn) btn.disabled = false;
+            return;
+        }
         // Give the user a moment to complete SSO in Chrome, then re-check.
-        const el = document.getElementById('auth-status');
         if (el) { el.textContent = '● log in to CIM in Chrome…'; el.className = 'auth-status'; }
         let tries = 0;
         const iv = setInterval(async () => {
