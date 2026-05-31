@@ -36,7 +36,9 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 24px;
+    gap: 16px;
+    row-gap: 10px;
+    flex-wrap: wrap;   /* wrap to a second line instead of squeezing items */
     position: sticky;
     top: 0;
     z-index: 100;
@@ -72,6 +74,8 @@ header h1 {
     font-size: 13px;
     color: var(--text-secondary);
     margin-right: 8px;
+    white-space: nowrap;   /* never truncate the "Updated …" time */
+    flex-shrink: 0;
 }
 
 .scan-status {
@@ -2203,10 +2207,12 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 .pa-result.pa-ok { color: #15803d; }
 .pa-result.pa-err { color: #b91c1c; }
 
-/* CIM session indicator (local site only) */
-.auth-status { font-size: 12px; font-weight: 600; margin: 0 4px; white-space: nowrap; }
-.auth-status.auth-ok { color: #15803d; }
-.auth-status.auth-bad { color: #b91c1c; }
+/* CIM session indicator — folded into the Authenticate button (local only). */
+#auth-btn { white-space: nowrap; }
+#auth-btn.auth-ok { color: #15803d; border-color: #86efac; background: #f0fdf4; }
+#auth-btn.auth-ok:hover { background: #dcfce7; }
+#auth-btn.auth-bad { color: #b91c1c; border-color: #fca5a5; background: #fef2f2; }
+#auth-btn.auth-bad:hover { background: #fee2e2; }
 
 /* Responsive */
 @media (max-width: 768px) {

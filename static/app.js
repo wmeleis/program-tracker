@@ -1779,45 +1779,48 @@ async function submitProgramAction(programId, action) {
 
 // CIM session indicator + one-click re-authenticate (local Flask site only).
 async function refreshCimAuthStatus() {
-    const el = document.getElementById('auth-status');
-    if (!el || window._staticMode) return;  // header controls are local-only
+    const btn = document.getElementById('auth-btn');
+    if (!btn || window._staticMode) return;  // header controls are local-only
     try {
         const res = await fetch('/api/auth/status');
         const data = await res.json();
         if (data.ok) {
-            el.textContent = '● CIM session OK';
-            el.className = 'auth-status auth-ok';
-            el.title = data.detail || 'CIM session is valid';
+            btn.textContent = '● CIM connected';
+            btn.className = 'header-secondary-btn auth-ok';
+            btn.title = (data.detail || 'CIM session is valid') + ' — click to reopen CIM in Chrome';
         } else {
-            el.textContent = '● CIM login needed';
-            el.className = 'auth-status auth-bad';
-            el.title = data.detail || 'CIM session invalid';
+            btn.textContent = '● Log in to CIM';
+            btn.className = 'header-secondary-btn auth-bad';
+            btn.title = data.detail || 'CIM session invalid — click to log in';
         }
     } catch (_) {
-        el.className = 'auth-status';
-        el.textContent = '';
+        btn.textContent = 'Authenticate';
+        btn.className = 'header-secondary-btn';
     }
 }
 
 async function cimAuthenticate() {
     const btn = document.getElementById('auth-btn');
-    const el = document.getElementById('auth-status');
     if (btn) btn.disabled = true;
     try {
         const res = await fetch('/api/auth/login', {method: 'POST'});
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
-            if (el) { el.textContent = '● could not open Chrome'; el.className = 'auth-status auth-bad'; el.title = data.detail || ''; }
-            if (btn) btn.disabled = false;
+            if (btn) {
+                btn.textContent = '● could not open Chrome';
+                btn.className = 'header-secondary-btn auth-bad';
+                btn.title = data.detail || '';
+                btn.disabled = false;
+            }
             return;
         }
         // Give the user a moment to complete SSO in Chrome, then re-check.
-        if (el) { el.textContent = '● log in to CIM in Chrome…'; el.className = 'auth-status'; }
+        if (btn) { btn.textContent = '● log in to CIM in Chrome…'; btn.className = 'header-secondary-btn'; }
         let tries = 0;
         const iv = setInterval(async () => {
             tries++;
             await refreshCimAuthStatus();
-            const ok = document.getElementById('auth-status')?.classList.contains('auth-ok');
+            const ok = document.getElementById('auth-btn')?.classList.contains('auth-ok');
             if (ok || tries > 40) { clearInterval(iv); if (btn) btn.disabled = false; }
         }, 3000);
     } catch (_) {
