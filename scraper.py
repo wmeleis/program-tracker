@@ -3510,122 +3510,59 @@ def _parse_campus_from_name(name):
     return name, None
 
 
-def _search_cim_for_boston_ids(banner_codes):
-    """Search CIM for Boston program IDs by banner code.
+def _search_cim_for_boston_ids(banner_codes, sess=None):
+    """Search CIM for Boston program IDs by banner code — over direct HTTP.
 
-    For each banner code, searches program IDs via XHR to find the one
-    with matching code and Boston campus. Programs that completed the
-    workflow aren't in our DB but still exist in CIM.
+    For each banner code, scans program IDs (1..2099) via parallel XML
+    fetches to find the one with a matching code and a Boston campus.
+    Programs that completed the workflow aren't in our DB but still exist in
+    CIM. Short-circuits per chunk once every code is matched.
 
     Args:
         banner_codes: dict of {banner_code: [non_boston_program_id, ...]}
+        sess: optional shared CIMSession (created if not supplied).
 
     Returns:
         dict of {banner_code: boston_program_id}
     """
     if not banner_codes:
         return {}
-
-    codes_list = list(banner_codes.keys())
-    codes_json = json.dumps(codes_list)
-    print(f"  Searching CIM for {len(codes_list)} Boston program IDs by banner code...")
-
-    # Search in chunks of 200 IDs (async fetch + poll, since Chrome 147 blocks sync XHR)
-    all_found = {}
-    chunk_size = 200
-    for start in range(1, 2100, chunk_size):
-        end = min(start + chunk_size, 2100)
-        remaining = [c for c in codes_list if c.lower() not in all_found]
-        if not remaining:
-            break  # Found all
-        remaining_json = json.dumps(remaining)
-        chunk_tag = f"__bostonsearch_{start}_{int(time.time())}"
-        kickoff_js = f'''
-(function() {{
-    var existing = document.getElementById("{chunk_tag}");
-    if (existing) existing.remove();
-    var holder = document.createElement("div");
-    holder.id = "{chunk_tag}";
-    holder.style.display = "none";
-    holder.setAttribute("data-status", "running");
-    document.body.appendChild(holder);
-
-    var codes = {remaining_json};
-    var codeSet = {{}};
-    for (var c = 0; c < codes.length; c++) codeSet[codes[c].toLowerCase()] = true;
-    var parser = new DOMParser();
-
-    function probe(id) {{
-        return fetch("/programadmin/" + id + "/index.xml", {{cache: 'no-store'}})
-            .then(function(r) {{ return r.ok ? r.text() : ""; }})
-            .then(function(txt) {{
-                if (!txt || txt.length < 100) return null;
-                var xml = parser.parseFromString(txt, "text/xml");
-                var codeEl = xml.querySelector("code");
-                if (!codeEl) return null;
-                var campusEl = xml.querySelector("campus");
-                var code = codeEl.textContent.trim().toLowerCase();
-                var campus = campusEl ? campusEl.textContent.trim().toUpperCase() : "";
-                if (codeSet[code] && (campus === "BOS" || campus === "")) {{
-                    return [code, id];
-                }}
-                return null;
-            }})
-            .catch(function() {{ return null; }});
-    }}
-
-    var ids = [];
-    for (var i = {start}; i < {end}; i++) ids.push(i);
-    Promise.all(ids.map(probe)).then(function(pairs) {{
-        var out = {{}};
-        for (var i = 0; i < pairs.length; i++) {{
-            var p = pairs[i];
-            if (p && !out[p[0]]) out[p[0]] = p[1];
-        }}
-        holder.textContent = JSON.stringify(out);
-        holder.setAttribute("data-status", "done");
-    }}).catch(function(e) {{
-        holder.textContent = "ERROR:" + (e && e.message || e);
-        holder.setAttribute("data-status", "error");
-    }});
-    return "fired";
-}})();
-'''
-        run_js_in_tab("programadmin", kickoff_js, match_by='url', timeout=20)
-
-        check_js = f'''(function(){{ var el = document.getElementById("{chunk_tag}"); if (!el) return "MISSING"; var s = el.getAttribute("data-status"); if (s === "done") return el.textContent; if (s === "error") return el.textContent; return "RUNNING"; }})();'''
-        chunk_text = None
-        for _ in range(60):
-            time.sleep(2)
-            r = run_js_in_tab("programadmin", check_js, match_by='url', timeout=15)
-            if r and r != 'missing value' and r != 'RUNNING' and r != 'MISSING':
-                chunk_text = r
-                break
-
-        run_js_in_tab(
-            "programadmin",
-            f'var e=document.getElementById("{chunk_tag}"); if(e) e.remove();',
-            match_by='url', timeout=10,
-        )
-
-        if not chunk_text or chunk_text.startswith('ERROR:'):
-            print(f"    IDs {start}-{end}: {chunk_text or 'no response'}")
-            continue
+    from concurrent.futures import ThreadPoolExecutor
+    from cim_http import CIMSession
+    if sess is None:
         try:
-            chunk_results = json.loads(chunk_text)
-            for code_lower, boston_id in chunk_results.items():
-                all_found[code_lower] = boston_id
-            if chunk_results:
-                print(f"    IDs {start}-{end}: found {len(chunk_results)} matches")
-        except json.JSONDecodeError:
-            print(f"    IDs {start}-{end}: JSON parse error")
+            sess = CIMSession()
+        except Exception as e:
+            print(f"  Boston-ID search: CIM session unavailable ({e}); skipping")
+            return {}
 
-    # Normalize keys back to original case
-    code_map = {}
-    for code in banner_codes:
-        boston_id = all_found.get(code.lower())
-        if boston_id:
-            code_map[code] = boston_id
+    codes_lower = {c.lower(): c for c in banner_codes}  # lower -> original
+    remaining = set(codes_lower)
+    found = {}  # code_lower -> boston program id
+    print(f"  Searching CIM (HTTP) for {len(banner_codes)} Boston program IDs by banner code...")
+
+    def probe(pid):
+        meta = sess.fetch_program_xml(pid)
+        code = (meta.get('banner_code') or '').strip().lower()
+        if not code or code not in remaining:
+            return None
+        campus = (meta.get('campus') or '').strip().upper()
+        if campus in ('BOS', '', 'BOSTON'):
+            return (code, pid)
+        return None
+
+    chunk = 200
+    for start in range(1, 2100, chunk):
+        if not remaining:
+            break
+        end = min(start + chunk, 2100)
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            for res in ex.map(probe, range(start, end)):
+                if res and res[0] in remaining and res[0] not in found:
+                    found[res[0]] = res[1]
+        remaining -= set(found)
+
+    code_map = {orig: found[low] for low, orig in codes_lower.items() if low in found}
     print(f"  CIM search found {len(code_map)} of {len(banner_codes)} Boston counterparts")
     return code_map
 
@@ -3638,7 +3575,7 @@ REFERENCE_COUNTERPART_OVERRIDES = {
 }
 
 
-def _build_boston_counterpart_map(program_ids):
+def _build_boston_counterpart_map(program_ids, sess=None):
     """For non-Boston programs, find the Boston counterpart's CIM ID.
 
     First checks our database, then searches CIM by banner code for programs
@@ -3693,7 +3630,7 @@ def _build_boston_counterpart_map(program_ids):
 
     # Search CIM for unmatched programs by banner code
     if unmatched_by_code:
-        cim_results = _search_cim_for_boston_ids(unmatched_by_code)
+        cim_results = _search_cim_for_boston_ids(unmatched_by_code, sess=sess)
         for code, boston_id in cim_results.items():
             for pid in unmatched_by_code[code]:
                 counterpart_map[pid] = boston_id

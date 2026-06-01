@@ -715,7 +715,7 @@ def api_heal():
                                 "SELECT program_id FROM reference_curriculum").fetchall()}
                         targeted_ids = (set(prog_ids) - existing_ref_ids) | completed_in_scan
                         if completed_in_scan:
-                            cmap, _ = _build_boston_counterpart_map(prog_ids)
+                            cmap, _ = _build_boston_counterpart_map(prog_ids, sess=sess)
                             for nb_id, b_id in cmap.items():
                                 if b_id in completed_in_scan:
                                     targeted_ids.add(nb_id)
@@ -1268,7 +1268,7 @@ def api_scan_trigger():
                     # completed need their ref recomputed against Boston's
                     # new last-approved version.
                     if completed_in_scan:
-                        counterpart_map, _ = _build_boston_counterpart_map(prog_ids)
+                        counterpart_map, _ = _build_boston_counterpart_map(prog_ids, sess=sess)
                         for nb_id, b_id in counterpart_map.items():
                             if b_id in completed_in_scan:
                                 targeted_ids.add(nb_id)
