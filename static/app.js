@@ -1820,6 +1820,7 @@ async function cimAuthenticate() {
             tries++;
             await refreshCimAuthStatus();
             const ok = !!document.querySelector('#auth-btn .auth-dot.ok');
+            if (ok) dismissErrorBanner();
             if (ok || tries > 40) { clearInterval(iv); if (btn) btn.disabled = false; }
         }, 3000);
     } catch (_) {
@@ -4387,6 +4388,12 @@ setInterval(() => {
     else if (currentView === 'catalog') loadCatalogDashboard();
     else if (currentView === 'portfolio') loadPortfolioDashboard();
 }, 120000);
+
+// Keep the CIM session badge + error banner self-correcting on the local
+// dashboard, so re-authenticating reflects within a minute without a reload.
+if (typeof window._staticMode === 'undefined') {
+    setInterval(() => { refreshCimAuthStatus(); checkSessionHealth(); }, 60000);
+}
 
 // ==================== Portfolio view ====================
 

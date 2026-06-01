@@ -620,27 +620,25 @@ def api_scan_status():
 
 @app.route('/api/session/check')
 def api_session_check():
-    """Verify the CourseLeaf session and all portfolio data source logins."""
-    from fetch_portfolio_data import check_portfolio_sessions
-    cim = check_courseleaf_session()
-    portfolio = check_portfolio_sessions()
-    all_ok = cim.get('ok') and all(s['ok'] for s in portfolio)
-    missing = []
-    if not cim.get('ok'):
-        missing.append(f"CIM: {cim.get('detail', 'session invalid')}")
-    for s in portfolio:
-        if not s['ok']:
-            missing.append(f"{s['source']}: {s['detail']}")
-    result = {
-        'ok': all_ok,
-        'cim': cim,
-        'portfolio': portfolio,
-    }
-    if missing:
+    """Verify the CIM session over direct HTTP (the session the scans + the
+    approve/rollback actions actually use). `ok` is based on CIM ALONE — the
+    dashboard banner should nag only when CIM itself is down.
+
+    Portfolio data-source logins (SharePoint/Tableau/Smartsheet) are best-
+    effort feeds on their own cadence; they are NOT included in `ok` (they
+    used to be, which made the banner show a "session issue" whenever those
+    weren't logged in, even with a perfectly valid CIM session). They can
+    still be inspected via the Console if needed."""
+    from cim_http import CIMSession
+    try:
+        ok, detail = CIMSession().check()
+    except Exception as e:
+        ok, detail = False, f'Could not read CIM session: {e}'
+    result = {'ok': ok, 'cim': {'ok': ok, 'detail': detail}}
+    if not ok:
         result['error'] = 'session_invalid'
-        result['detail'] = ' | '.join(missing)
-    status_code = 200 if all_ok else 503
-    return jsonify(result), status_code
+        result['detail'] = f"CIM: {detail}"
+    return jsonify(result), (200 if ok else 503)
 
 
 @app.route('/api/heal', methods=['POST'])
