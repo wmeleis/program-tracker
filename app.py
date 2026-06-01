@@ -713,11 +713,7 @@ def api_heal():
                         with get_db() as conn:
                             existing_ref_ids = {r['program_id'] for r in conn.execute(
                                 "SELECT program_id FROM reference_curriculum").fetchall()}
-                        # Only target in-workflow programs for missing refs (see
-                        # do_scan note) — avoids re-trying ~200 history-less
-                        # historical programs each time.
-                        active_prog_ids = {p['id'] for p in programs if (p.get('current_step') or '')}
-                        targeted_ids = (active_prog_ids - existing_ref_ids) | completed_in_scan
+                        targeted_ids = (set(prog_ids) - existing_ref_ids) | completed_in_scan
                         if completed_in_scan:
                             cmap, _ = _build_boston_counterpart_map(prog_ids)
                             for nb_id, b_id in cmap.items():
@@ -1268,15 +1264,8 @@ def api_scan_trigger():
                                 "SELECT program_id FROM reference_curriculum"
                             ).fetchall()
                         }
-                    # Per-scan "missing reference" targeting is restricted to
-                    # IN-WORKFLOW programs. Completed/historical programs that
-                    # lack a reference are usually ones with no fetchable CIM
-                    # history — re-targeting all ~200 of them every scan just
-                    # burned ~9s retrying fruitless "no_history" fetches. The
-                    # weekly full refresh (weekly_ref_refresh below) backfills
-                    # the historical set instead.
-                    active_prog_ids = {p['id'] for p in programs if (p.get('current_step') or '')}
-                    targeted_ids = (active_prog_ids - existing_ref_ids) | completed_in_scan
+                    targeted_ids = set(prog_ids) - existing_ref_ids
+                    targeted_ids |= completed_in_scan
                     # Non-Boston deployments whose Boston counterpart just
                     # completed need their ref recomputed against Boston's
                     # new last-approved version.
