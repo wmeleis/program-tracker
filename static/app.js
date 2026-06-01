@@ -2701,6 +2701,30 @@ function extractCourseLines(html) {
         } else if (hasCode || hasOr) {
             inSubjectWildcardSection = false; // explicit course code ends wildcard run
             const codecol = parts[0] || '';
+
+            // Course-range row: "ECON 5200 to ECON 7772" (also "ECON 5200-7772"
+            // / "ECON 5200–ECON 7772") — CourseLeaf shorthand for "any ECON
+            // course in that number range". Emit a subject-range wildcard (same
+            // shape as the inline "Any X course in range" handling) so a
+            // specific course within the range on the other side is matched
+            // instead of flagged.
+            const rangeM = codecol.replace(/ /g, ' ').replace(/\s+/g, ' ').trim().match(
+                /^([A-Z]{2,6})\s*(\d{4})\s*(?:to|through|[-–—])\s*(?:([A-Z]{2,6})\s*)?(\d{4})\b/i);
+            if (rangeM && (!rangeM[3] || rangeM[3].toUpperCase() === rangeM[1].toUpperCase())) {
+                const pre = rangeM[1].toUpperCase();
+                const lo = parseInt(rangeM[2], 10), hi = parseInt(rangeM[4], 10);
+                if (lo <= hi) {
+                    lines.push({
+                        key: 'SUBJ:' + pre,
+                        code: `${pre} ${lo}-${hi}`,
+                        title: `Any ${pre} course ${lo}–${hi}`,
+                        hours: '', isHeader: false,
+                        section: currentSection, category: currentCategory,
+                        subjectWildcard: {prefix: pre, exclusions: [], range: [lo, hi]},
+                    });
+                    return;
+                }
+            }
             const titlecol = parts.length > 2 ? parts[1] : (parts.length === 2 && !/^\d+$/.test(parts[1]) ? parts[1] : '');
             const hourscol = parts.length > 2 ? parts[2] : (parts.length === 2 && /^\d+$/.test(parts[1]) ? parts[1] : '');
 
@@ -3290,7 +3314,35 @@ function diffLines(oldLines, newLines) {
 // ('left'|'right'|undefined) drives the asymmetric color: a right-only
 // alt reads as "added relative to proposal" (green); a left-only alt
 // reads as "in proposal but not reference" (red).
-function renderCourseCell(item, cls, otherItem, mySide, oppositeAll) {
+// Is `codeStr` present on a side described by its discrete code set + ranges?
+// Three cases: (1) exact discrete match; (2) a discrete code that falls inside
+// one of the side's ranges; (3) `codeStr` is itself a range ("PREFIX lo-hi")
+// that contains one of the side's discrete codes. Used so a specific course
+// and a "PREFIX lo to hi" range on opposite sides count as the same.
+function _codePresent(codeStr, discreteSet, ranges) {
+    const c = normForCompare((codeStr || '').replace(/^(or|and)\s+/i, ''));
+    if (!c) return true;                       // no real code → don't flag
+    if (discreteSet && discreteSet.has(c)) return true;
+    const selfRange = c.match(/^([a-z]{2,6})\s*(\d{4})\s*[-–—]\s*(?:[a-z]{2,6}\s*)?(\d{4})/);
+    if (selfRange) {
+        const pre = selfRange[1], lo = +selfRange[2], hi = +selfRange[3];
+        for (const oc of (discreteSet || [])) {
+            const om = oc.match(/^([a-z]{2,6})\s*(\d{4})/);
+            if (om && om[1] === pre) { const n = +om[2]; if (n >= lo && n <= hi) return true; }
+        }
+        return false;
+    }
+    const m = c.match(/^([a-z]{2,6})\s*(\d{4})/);
+    if (m && ranges) {
+        const pre = m[1], n = +m[2];
+        for (const r of ranges) {
+            if ((r.prefix || '').toLowerCase() === pre && n >= r.range[0] && n <= r.range[1]) return true;
+        }
+    }
+    return false;
+}
+
+function renderCourseCell(item, cls, otherItem, mySide, oppositeAll, oppositeRanges) {
     if (!item) return `<td class="${cls}" colspan="2"></td>`;
     if (item.isHeader) {
         return `<td class="${cls} cmp-header" colspan="2">${escapeHtml(item.title)}</td>`;
@@ -3307,8 +3359,7 @@ function renderCourseCell(item, cls, otherItem, mySide, oppositeAll) {
     // leading course.
     function pcls(code) {
         if (!oppositeAll) return '';
-        const c = normForCompare((code || '').replace(/^(or|and)\s+/i, ''));
-        if (!c || oppositeAll.has(c)) return '';   // shared (or no code) → neutral
+        if (_codePresent(code, oppositeAll, oppositeRanges)) return '';  // shared → neutral
         return mySide === 'right' ? 'cmp-c-right' : 'cmp-c-left';
     }
 
@@ -3340,31 +3391,35 @@ function renderSideBySide(diff, leftLabel, rightLabel) {
     // Used for presence-based per-code coloring so a course present on both
     // sides is never flagged, regardless of which "or-group" the LCS paired.
     const leftAll = new Set(), rightAll = new Set();
-    const addCodes = (set, item) => {
+    const leftRanges = [], rightRanges = [];   // {prefix, range:[lo,hi]} per side
+    const collect = (set, ranges, item) => {
         if (!item || item.isHeader) return;
         const norm = c => normForCompare((c || '').replace(/^(or|and)\s+/i, ''));
+        if (item.subjectWildcard && item.subjectWildcard.range) {
+            ranges.push({prefix: item.subjectWildcard.prefix, range: item.subjectWildcard.range});
+        }
         if (item.code) set.add(norm(item.code));
         for (const a of (item.alts || [])) set.add(norm(a.code));
     };
-    diff.forEach(d => { addCodes(leftAll, d.left); addCodes(rightAll, d.right); });
+    diff.forEach(d => { collect(leftAll, leftRanges, d.left); collect(rightAll, rightRanges, d.right); });
 
     let rows = diff.map(d => {
         if (d.type === 'same') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-same', d.right, 'left', rightAll)}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-same', d.right, 'left', rightAll, rightRanges)}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-same', d.left, 'right', leftAll)}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-same', d.left, 'right', leftAll, leftRanges)}</tr>`;
         } else if (d.type === 'moved') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-moved', d.right, 'left', rightAll)}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-moved', d.right, 'left', rightAll, rightRanges)}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-moved', d.left, 'right', leftAll)}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-moved', d.left, 'right', leftAll, leftRanges)}</tr>`;
         } else if (d.type === 'removed') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-removed', null, 'left', rightAll)}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-removed', null, 'left', rightAll, rightRanges)}` +
                    `<td class="cmp-divider"></td>` +
                    `${renderCourseCell(null, 'cmp-empty')}</tr>`;
         } else {
             return `<tr>${renderCourseCell(null, 'cmp-empty')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-added', null, 'right', leftAll)}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-added', null, 'right', leftAll, leftRanges)}</tr>`;
         }
     }).join('');
 
