@@ -74,6 +74,41 @@ if ! curl -s http://localhost:5001/api/scan/status > /dev/null 2>&1; then
     sleep 4
 fi
 
+# --- Heartbeat watchdog ---------------------------------------------------
+# Weekdays only (weekends legitimately gap 3h): if NO scan has *completed*
+# in over 30 min while we expect continuous scans, something is silently
+# wrong (expired CIM session, server down, a regression). Pop a macOS
+# notification so a stalled tracker surfaces in minutes, not a day later.
+# Skipped while a scan is actually running, and rate-limited to once / 30 min
+# so it can't spam. This is a pure watchdog — it never changes scan behavior.
+if [ "$DOW_PT" -lt 6 ]; then
+    HB=$(curl -s --max-time 8 http://localhost:5001/api/scan/status 2>/dev/null | /usr/bin/python3 -c "
+import sys, json, datetime
+try:
+    d = json.load(sys.stdin)
+    if d.get('running'):
+        print('RUNNING'); sys.exit()
+    ls = d.get('last_scan') or {}
+    t = datetime.datetime.fromisoformat(ls['scan_time'])
+    age = int((datetime.datetime.now(t.tzinfo) - t).total_seconds())
+    print(age)
+except Exception:
+    print(999999)   # server unreachable / no scan on record => treat as stalled
+" 2>/dev/null || echo 999999)
+    if [ "$HB" != "RUNNING" ] && [ "${HB:-0}" -gt 1800 ]; then
+        ALERT_STAMP="data/last_heartbeat_alert"
+        NOW=$(date +%s); LAST_ALERT=0
+        [ -f "$ALERT_STAMP" ] && LAST_ALERT=$(cat "$ALERT_STAMP" 2>/dev/null || echo 0)
+        if [ $((NOW - LAST_ALERT)) -gt 1800 ]; then
+            MINS=$((HB / 60))
+            osascript -e "display notification \"No successful scan in ${MINS} min — check the CIM login (Authenticate) and the tracker server.\" with title \"Program Tracker\"" 2>/dev/null
+            echo "$NOW" > "$ALERT_STAMP"
+            echo "$(date): HEARTBEAT ALERT — last successful scan ${MINS} min ago" >> "$LOG"
+        fi
+    fi
+fi
+# --------------------------------------------------------------------------
+
 # If a scan is already running, skip — the launchd cadence is much
 # faster than scan duration, so this is the common case. Continuous
 # scans = "trigger if and only if idle".

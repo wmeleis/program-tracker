@@ -73,7 +73,8 @@ Chrome (CourseLeaf session) <-- AppleScript/JS --> scraper.py
 
 - **Agent:** `~/Library/LaunchAgents/com.programtracker.update.plist`
 - **Schedule:** `StartInterval` 300 sec (5 min). launchd fires `update.sh` every 5 minutes, 24/7.
-- **What `update.sh` does:** preflight — inside the 6am–9pm PT window (exclusive on 9pm); on weekends, at least 3 hours since last scan; Chrome running; CourseLeaf session valid; no scan currently in progress. If all checks pass, triggers `/api/scan/trigger`; otherwise exits silently.
+- **What `update.sh` does:** preflight — inside the 6am–9pm PT window (exclusive on 9pm); on weekends, at least 3 hours since last scan; no scan currently in progress. (No Chrome/tab/AppleScript preflight anymore — the HTTP scan doesn't need it; `/api/scan/trigger` does its own HTTP CIM session check.) If all checks pass, triggers `/api/scan/trigger`; otherwise exits silently. It also (re)starts Flask if the server is down.
+- **Heartbeat watchdog (in `update.sh`):** weekdays only, if no scan has *completed* in >30 min (server down, expired CIM session, or any regression) it pops a macOS notification ("No successful scan in N min — check the CIM login…"). Skipped while a scan is running, and rate-limited to once / 30 min via `data/last_heartbeat_alert`. Pure watchdog — never changes scan behavior. Added after a silent ~15h stall went unnoticed (the trigger preflight had been rejecting every scheduled scan).
 - **Effective cadence:**
   - **Mon–Fri**: continuous back-to-back scans during 6am–9pm PT (~one completed scan per hour given ~50 min scan duration).
   - **Sat–Sun**: every 3 hours during 6am–9pm PT (5 firings/day max: 6am, 9am, 12pm, 3pm, 6pm).
