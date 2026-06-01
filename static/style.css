@@ -2206,6 +2206,14 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
 .auth-dot.ok { color: var(--success); }
 .auth-dot.bad { color: var(--danger); }
 
+/* Campuses tab */
+.campuses-table { border-collapse: collapse; margin-top: 10px; font-size: 13px; min-width: 360px; }
+.campuses-table th, .campuses-table td {
+    text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--border);
+}
+.campuses-table th { color: var(--text-secondary); font-weight: 600; }
+.campus-current { color: var(--accent); font-weight: 600; font-size: 12px; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .pipeline-bar { flex-wrap: wrap; }

@@ -208,6 +208,7 @@ The XML API returns 2-letter college codes. The scraper maps these to full names
 - **Filters:** College (dynamic, shows only colleges with matching programs + counts), Campus, Approver, Step, Search (searches name and banner code)
 - **Table:** Program name, college (abbreviated via `COLLEGE_ABBREVS`), current step, progress bar, days at step. Sortable by all columns.
 - **Expandable rows:** Click to see full workflow with approver emails (semicolon-separated, rendered as mailto links)
+- **Campuses tab:** lists every campus/deployment that has a CIM record for the same base program (same subject+degree), with each one's status (in-workflow step or Approved), **excluding inactivations** (`status === 'Deactivated'`). Computed client-side from the loaded program data via `loadCampusesDetail` + `parseCampusFromName` (the JS mirror of `scraper._parse_campus_from_name`), so it works identically on the local and static sites with no API call. The currently-open record is marked "(this record)".
 - **Colors:** Green left border = new program (Added), blue = change (Edited), red = inactivation (Deactivated)
 - **Progress bar:** Red <33%, yellow 33-66%, green >66%
 - **Days indicator:** Green <14d, yellow 14-30d, red ≥30d ("stuck")

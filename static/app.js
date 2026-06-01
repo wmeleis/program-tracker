@@ -1555,6 +1555,8 @@ function renderTable(items) {
                     onclick="event.stopPropagation(); switchDetailTab('${id}', 'workflow')">Workflow</button>` :
                 `<button class="detail-tab ${activeTab === 'workflow' ? 'active' : ''}" data-tab="workflow"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'workflow')">Workflow</button>
+                <button class="detail-tab ${activeTab === 'campuses' ? 'active' : ''}" data-tab="campuses"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'campuses')">Campuses</button>
                 <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}" data-tab="curriculum"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'curriculum')">Curriculum</button>
                 <button class="detail-tab ${activeTab === 'changes' ? 'active' : ''}" data-tab="changes"
@@ -1597,7 +1599,8 @@ function renderTable(items) {
         const tab = detailTabState[id] || 'workflow';
         if (tab === 'workflow') loadWorkflowDetail(id, isCourseView);
         else if (!isCourseView) {
-            if (tab === 'reference') loadReferenceDetail(id);
+            if (tab === 'campuses') loadCampusesDetail(id);
+            else if (tab === 'reference') loadReferenceDetail(id);
             else if (tab === 'compare') loadCompareDetail(id);
             else if (tab === 'misaligned') loadMisalignedDetail(id);
             else if (tab === 'changes') loadChangesDetail(id);
@@ -1840,6 +1843,68 @@ async function cimAuthenticate() {
     } catch (_) {
         if (btn) btn.disabled = false;
     }
+}
+
+// Mirror of scraper._parse_campus_from_name: split a program name into its
+// base (subject + degree) and campus/deployment. Parenthetical campus wins
+// ("Management, MS (Oakland)" → base "Management, MS", campus "Oakland");
+// otherwise an em-dash delivery suffix ("…MS—Online" → campus "Online").
+// Distinct-program suffixes like "—Align" are left in the base.
+function parseCampusFromName(name) {
+    name = (name || '').trim();
+    let m = name.match(/\(([^)]+)\)\s*$/);
+    if (m) return {base: name.slice(0, m.index).trim(), campus: m[1].trim()};
+    m = name.match(/—(Online|Accelerated|Part-Time)\s*$/);
+    if (m) return {base: name.slice(0, m.index).trim(), campus: m[1].trim()};
+    return {base: name, campus: null};
+}
+
+// Campuses tab: list every campus/deployment that has a CIM record for this
+// program (same base subject+degree), excluding inactivations. Computed from
+// the loaded program data, so it works identically on the local and static
+// sites without an API call.
+function loadCampusesDetail(programId) {
+    const contentEl = document.getElementById(`detail-content-${programId}`);
+    if (!contentEl) return;
+    const prog = (allPrograms || []).find(p => String(p.id) === String(programId));
+    if (!prog) { contentEl.innerHTML = '<div class="workflow-meta">Program not found.</div>'; return; }
+    const base = parseCampusFromName(prog.name).base;
+    const baseKey = base.toLowerCase();
+
+    // Group matching, non-inactivated records by campus label.
+    const byCampus = {};   // campusLabel -> {step, completed}
+    (allPrograms || []).forEach(p => {
+        if (parseCampusFromName(p.name).base.toLowerCase() !== baseKey) return;
+        if ((p.status || '') === 'Deactivated') return;              // exclude inactivations
+        let campus = parseCampusFromName(p.name).campus;
+        if (!campus) campus = (p.campus && p.campus.toUpperCase() !== 'BOS') ? p.campus : 'Boston';
+        const slot = byCampus[campus] || (byCampus[campus] = {step: '', completed: false});
+        if (p.current_step && p.current_step.trim()) slot.step = p.current_step.trim();
+        else if (p.completion_date) slot.completed = true;
+    });
+
+    const campuses = Object.keys(byCampus).sort((a, b) => a.localeCompare(b));
+    if (!campuses.length) {
+        contentEl.innerHTML = '<div class="workflow-meta">No campus records found.</div>';
+        return;
+    }
+    const body = campuses.map(c => {
+        const s = byCampus[c];
+        const status = s.step ? `In workflow — ${escapeHtml(s.step)}`
+                     : s.completed ? 'Approved' : '—';
+        const isThis = parseCampusFromName(prog.name).campus
+            ? (parseCampusFromName(prog.name).campus === c)
+            : (c === 'Boston');
+        return `<tr><td>${escapeHtml(c)}${isThis ? ' <span class="campus-current">(this record)</span>' : ''}</td>`
+             + `<td>${status}</td></tr>`;
+    }).join('');
+    contentEl.innerHTML = `
+        <div class="workflow-meta">${campuses.length} campus${campuses.length === 1 ? '' : 'es'} with a CIM record for `
+        + `<strong>${escapeHtml(base)}</strong> <span class="pa-step">(inactivations excluded)</span></div>
+        <table class="campuses-table">
+            <thead><tr><th>Campus</th><th>Status</th></tr></thead>
+            <tbody>${body}</tbody>
+        </table>`;
 }
 
 async function loadCurriculumDetail(programId) {
@@ -2473,6 +2538,7 @@ function switchDetailTab(programId, tab) {
         btn.classList.toggle('active', btnTab === tab);
     });
     if (tab === 'workflow') loadWorkflowDetail(programId);
+    else if (tab === 'campuses') loadCampusesDetail(programId);
     else if (tab === 'reference') loadReferenceDetail(programId);
     else if (tab === 'compare') loadCompareDetail(programId);
     else if (tab === 'misaligned') loadMisalignedDetail(programId);
