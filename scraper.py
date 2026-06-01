@@ -1025,6 +1025,28 @@ def check_courseleaf_session():
     return {'ok': True, 'detail': 'CourseLeaf session is valid.'}
 
 
+def _align_current_marker(steps, current_step):
+    """Make the workflow div's 'current' marker agree with the authoritative
+    Approve Pages current_step. CIM's per-program/course workflow div can lag
+    (still marking the previous step 'current') or render a different parallel
+    branch, which leaves the Workflow tab + action panel disagreeing with the
+    Current Step column. If current_step is among the steps, mark it 'current'
+    and demote any other step still marked 'current' to 'approved' (the item
+    advanced past it). If current_step isn't in the linear div (parallel
+    branch), leave the markers untouched."""
+    if not current_step:
+        return
+    names = [(s.get('name') or '').strip() for s in steps]
+    if current_step not in names:
+        return
+    for s in steps:
+        nm = (s.get('name') or '').strip()
+        if nm == current_step:
+            s['status'] = 'current'
+        elif s.get('status') == 'current':
+            s['status'] = 'approved'
+
+
 def run_http_program_scan(dry_run=False, max_workers=12, log=True,
                           sess=None, pending=None):
     """Program scan over direct authenticated HTTP — no AppleScript, no Chrome.
@@ -1133,6 +1155,9 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True,
         if in_dump:
             current_step = pending[pid]['current_step']
             completion_date = ''
+            # Align the workflow div's 'current' marker with the dump role so
+            # the Workflow tab + action panel agree with the Current Step column.
+            _align_current_marker(steps, current_step)
             # approver emails for the current step from the page workflow div
             emails = ''
             for s in steps:
@@ -1343,6 +1368,7 @@ def run_http_course_scan(dry_run=False, max_workers=12, log=True,
         if in_dump:
             current_step = pending[cid]['current_step']
             completion_date = ''
+            _align_current_marker(steps, current_step)
             emails = next((s.get('emails', '') for s in steps
                            if (s.get('name') or '').strip() == current_step), '') or ''
         else:
@@ -1684,6 +1710,7 @@ def refresh_program_http(pid, sess=None, log=False):
     if entry is not None:
         current_step = entry['current_step']
         completion_date = ''
+        _align_current_marker(steps, current_step)
         emails = next((s.get('emails', '') for s in steps
                        if (s.get('name') or '').strip() == current_step), '') or ''
     else:

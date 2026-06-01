@@ -1692,10 +1692,24 @@ function buildProgramActionPanel(programId, steps) {
     // Approvals are local-only: the panel renders only on the Flask-served
     // dashboard (localhost), never on the public GitHub Pages static site.
     if (window._staticMode) return '';
-    const current = (steps || []).find(s => (s.step_status || '') === 'current');
-    if (!current) return '';
-    const role = current.step_name || '';
-    const approved = (steps || []).filter(s => (s.step_status || '') === 'approved');
+    // The AUTHORITATIVE current step is the program's `current_step` (set from
+    // the Approve Pages dump — the same value shown in the Current Step column
+    // and re-checked live at action time). The per-step `current` marker in
+    // the workflow div can lag behind it, so prefer current_step here; that
+    // keeps `expected_role` consistent with the live check (otherwise a valid
+    // program looks "moved" purely from a stale workflow marker).
+    const prog = (typeof allPrograms !== 'undefined' ? allPrograms : [])
+        .find(p => String(p.id) === String(programId));
+    const role = (prog && prog.current_step)
+        || ((steps || []).find(s => (s.step_status || '') === 'current') || {}).step_name
+        || '';
+    if (!role) return '';
+    // Rollback targets: steps already approved, plus the workflow-marked
+    // current step if it differs from the authoritative role (covers the lag
+    // case where the div still marks the previous step current).
+    const approved = (steps || []).filter(s =>
+        (s.step_status || '') === 'approved' ||
+        ((s.step_status || '') === 'current' && s.step_name !== role));
     const opts = approved.map(s => `<option value="${escapeHtml(s.step_name)}">${escapeHtml(s.step_name)}</option>`).join('');
     const sendback = approved.length
         ? `<div class="pa-row">
