@@ -3290,56 +3290,44 @@ function diffLines(oldLines, newLines) {
 // ('left'|'right'|undefined) drives the asymmetric color: a right-only
 // alt reads as "added relative to proposal" (green); a left-only alt
 // reads as "in proposal but not reference" (red).
-function renderCourseCell(item, cls, otherItem, mySide) {
+function renderCourseCell(item, cls, otherItem, mySide, oppositeAll) {
     if (!item) return `<td class="${cls}" colspan="2"></td>`;
     if (item.isHeader) {
         return `<td class="${cls} cmp-header" colspan="2">${escapeHtml(item.title)}</td>`;
     }
-    const titleWithHours = item.hours
-        ? `${item.title} (${item.hours}SH)`
-        : item.title;
-    // Standalone "or COURSE 1234" rows (no preceding primary, or
-    // mergeAlts missed it) keep the cmp-alt indent fallback.
+    // PRESENCE-BASED coloring. A course code present ANYWHERE on the opposite
+    // side (as a leader OR an "or"-alternative) is treated as shared and shown
+    // neutral — never flagged. Only a code truly absent from the other side is
+    // colored, per the established convention:
+    //   left column  = Proposed  → cmp-c-left  = RED   = in proposal, not in reference
+    //   right column = Reference → cmp-c-right = GREEN = in reference, not in proposal
+    // This fixes the false-red on courses like CS 5200 / DS 5220 that are a
+    // leader on one side and an alternative on the other because the two
+    // campuses word the same "X or Y or Z" requirement with a different
+    // leading course.
+    function pcls(code) {
+        if (!oppositeAll) return '';
+        const c = normForCompare((code || '').replace(/^(or|and)\s+/i, ''));
+        if (!c || oppositeAll.has(c)) return '';   // shared (or no code) → neutral
+        return mySide === 'right' ? 'cmp-c-right' : 'cmp-c-left';
+    }
+
+    const titleWithHours = item.hours ? `${item.title} (${item.hours}SH)` : item.title;
     const isAlt = /^(or|and)\s+/i.test(item.code || '');
     const codeCls = isAlt ? `${cls} cmp-code cmp-alt` : `${cls} cmp-code`;
 
-    // Build a normalized lookup of every code (primary + alts) on the
-    // OTHER side, so we can flag asymmetric alts (codes that don't
-    // appear anywhere on the opposite side). The "or "/"and " prefix
-    // is stripped before comparison.
-    const otherSet = new Set();
-    if (otherItem) {
-        otherSet.add(normForCompare((otherItem.code || '').replace(/^(or|and)\s+/i, '')));
-        for (const a of (otherItem.alts || [])) {
-            otherSet.add(normForCompare((a.code || '').replace(/^(or|and)\s+/i, '')));
-        }
-    }
-
-    // Render the primary + any alternatives in the same cell so they
-    // can never be visually separated by the LCS diff layout. Each
-    // alternative becomes a sub-line with indent + lighter weight.
-    // Asymmetric alts (not on the other side) get cmp-alt-asym which
-    // tints them green/red to match the row's added/removed color so
-    // partial differences inside a "same" row remain visible.
-    let codeHtml = escapeHtml(item.code);
-    let titleHtml = escapeHtml(titleWithHours);
+    // Render the primary + any alternatives in the same cell so they can never
+    // be visually separated by the LCS diff layout. Each code (primary + each
+    // alt) is colored independently by its own presence on the opposite side.
+    const p = pcls(item.code);
+    let codeHtml = `<span class="${p}">${escapeHtml(item.code)}</span>`;
+    let titleHtml = `<span class="${p}">${escapeHtml(titleWithHours)}</span>`;
     if (item.alts && item.alts.length) {
         for (const a of item.alts) {
             const altTitleWithHours = a.hours ? `${a.title} (${a.hours}SH)` : a.title;
-            const myAltCode = (a.code || '').replace(/^(or|and)\s+/i, '');
-            const isShared = otherItem !== undefined &&
-                otherSet.has(normForCompare(myAltCode));
-            let lineCls = 'cmp-alt-line';
-            if (otherItem !== undefined && !isShared) {
-                // Asymmetric — color based on which side this is.
-                // mySide=right → "added relative to proposal" (green)
-                // mySide=left  → "in proposal but not reference" (red)
-                lineCls += mySide === 'left'
-                    ? ' cmp-alt-asym-left'
-                    : ' cmp-alt-asym-right';
-            }
-            codeHtml += `<div class="${lineCls}">${escapeHtml(a.code)}</div>`;
-            titleHtml += `<div class="${lineCls}">${escapeHtml(altTitleWithHours)}</div>`;
+            const ap = pcls(a.code);
+            codeHtml += `<div class="cmp-alt-line ${ap}">${escapeHtml(a.code)}</div>`;
+            titleHtml += `<div class="cmp-alt-line ${ap}">${escapeHtml(altTitleWithHours)}</div>`;
         }
     }
     return `<td class="${codeCls}">${codeHtml}</td>` +
@@ -3348,26 +3336,35 @@ function renderCourseCell(item, cls, otherItem, mySide) {
 
 // Render a side-by-side comparison table
 function renderSideBySide(diff, leftLabel, rightLabel) {
+    // Global presence sets: every code (leader + alternatives) on each side.
+    // Used for presence-based per-code coloring so a course present on both
+    // sides is never flagged, regardless of which "or-group" the LCS paired.
+    const leftAll = new Set(), rightAll = new Set();
+    const addCodes = (set, item) => {
+        if (!item || item.isHeader) return;
+        const norm = c => normForCompare((c || '').replace(/^(or|and)\s+/i, ''));
+        if (item.code) set.add(norm(item.code));
+        for (const a of (item.alts || [])) set.add(norm(a.code));
+    };
+    diff.forEach(d => { addCodes(leftAll, d.left); addCodes(rightAll, d.right); });
+
     let rows = diff.map(d => {
-        // For 'same' and 'moved' (both sides present), pass each side's
-        // alts to the OPPOSITE cell so asymmetric alts can be visually
-        // highlighted within an otherwise matching row.
         if (d.type === 'same') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-same', d.right, 'left')}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-same', d.right, 'left', rightAll)}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-same', d.left, 'right')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-same', d.left, 'right', leftAll)}</tr>`;
         } else if (d.type === 'moved') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-moved', d.right, 'left')}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-moved', d.right, 'left', rightAll)}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-moved', d.left, 'right')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-moved', d.left, 'right', leftAll)}</tr>`;
         } else if (d.type === 'removed') {
-            return `<tr>${renderCourseCell(d.left, 'cmp-removed')}` +
+            return `<tr>${renderCourseCell(d.left, 'cmp-removed', null, 'left', rightAll)}` +
                    `<td class="cmp-divider"></td>` +
                    `${renderCourseCell(null, 'cmp-empty')}</tr>`;
         } else {
             return `<tr>${renderCourseCell(null, 'cmp-empty')}` +
                    `<td class="cmp-divider"></td>` +
-                   `${renderCourseCell(d.right, 'cmp-added')}</tr>`;
+                   `${renderCourseCell(d.right, 'cmp-added', null, 'right', leftAll)}</tr>`;
         }
     }).join('');
 

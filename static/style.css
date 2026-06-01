@@ -1716,15 +1716,18 @@ mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
     color: #334155;
 }
 
-.compare-table td.cmp-removed {
-    background: #fee2e2;
-    color: #991b1b;
-}
+/* Removed/added cells use a NEUTRAL background; meaning is carried per-code
+   by .cmp-c-left / .cmp-c-right below (presence-based coloring), so a shared
+   course inside a one-sided "or-group" row isn't painted as flagged. */
+.compare-table td.cmp-removed { background: #fff; }
+.compare-table td.cmp-added   { background: #fff; }
 
-.compare-table td.cmp-added {
-    background: #dcfce7;
-    color: #166534;
-}
+/* Per-code presence color (left column = Proposed, right column = Reference):
+   a code only in the proposal (left, missing from reference) is red; a code
+   only in the reference (right, missing from proposal) is green; shared codes
+   carry no class and inherit the neutral cell color. */
+.compare-table .cmp-c-left  { color: #b91c1c; font-weight: 600; }
+.compare-table .cmp-c-right { color: #15803d; font-weight: 600; }
 
 .compare-table td.cmp-moved {
     background: #fef3c7;
