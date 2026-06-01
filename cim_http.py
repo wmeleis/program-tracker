@@ -563,9 +563,14 @@ def _xml_tag(xml, tag):
 def parse_program_xml(xml):
     """Extract program metadata from the CIM XML API (mirrors the JS getXml)."""
     statustype = _xml_tag(xml, 'statustype')
+    delete_justification = _xml_tag(xml, 'deletejustification')
     if re.search(r'new', statustype, re.I):
         proposal_type = 'New Program Proposal'
-    elif re.search(r'inactivat', statustype, re.I):
+    elif re.search(r'inactivat', statustype, re.I) or delete_justification.strip():
+        # A non-empty <deletejustification> means this is an inactivation
+        # proposal even when <statustype> is absent — CIM frequently signals
+        # inactivation only via that field. (Matches the original scraper's
+        # rule; without it, inactivations show as "Edited"/blue instead of red.)
         proposal_type = 'Inactivation Proposal'
     else:
         proposal_type = 'Program Revision Proposal'
@@ -581,7 +586,7 @@ def parse_program_xml(xml):
         'eff_cat': _xml_tag(xml, 'eff_cat'),
         'curriculum_html': _xml_tag(xml, 'body'),
         'proposal_type': proposal_type,
-        'delete_justification': _xml_tag(xml, 'deletejustification'),
+        'delete_justification': delete_justification,
     }
 
 
@@ -600,7 +605,8 @@ def parse_course_xml(xml):
     statustype = _xml_tag(xml, 'statustype')
     if re.search(r'new', statustype, re.I):
         proposal_type = 'New Course Proposal'
-    elif re.search(r'inactivat', statustype, re.I):
+    elif re.search(r'inactivat', statustype, re.I) or _xml_tag(xml, 'deletejustification').strip():
+        # Non-empty <deletejustification> ⇒ inactivation even without statustype.
         proposal_type = 'Inactivation Proposal'
     else:
         proposal_type = 'Course Revision Proposal'

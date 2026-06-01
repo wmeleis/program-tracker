@@ -860,15 +860,21 @@ def api_program_action(pid):
 
     new_step = live_role
     if ok_act and action != 'comment':
-        # Fast signal: refresh just this program, then publish.
+        # Fast signal: refresh just this program (updates the local DB so the
+        # dashboard reload shows the move). Done SYNCHRONOUSLY because the
+        # local dashboard reads the DB. The static-site publish (export + git
+        # push, ~15s) is NOT needed for the local view, so it runs in the
+        # BACKGROUND — that's what made the button take ~30s.
         try:
             from scraper import refresh_program_http
             ns = refresh_program_http(pid, sess=sess, log=True)
             if ns is not None:
                 new_step = ns
-            _publish_if_changed(f'action {action} on {pid}')
         except Exception as e:
             print(f"post-action refresh error: {e}")
+        threading.Thread(
+            target=lambda: _publish_if_changed(f'action {action} on {pid}'),
+            daemon=True).start()
 
     return jsonify({'ok': ok_act, 'detail': detail_act, 'program_id': pid,
                     'new_step': new_step, 'ts': audit['ts']}), (200 if ok_act else 502)
