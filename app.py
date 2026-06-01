@@ -1328,21 +1328,44 @@ def api_scan_trigger():
                 # or expired session must not block the rest of the scan.
                 print(f"Regulatory fetch error: {e}")
 
-            # Portfolio: re-download feeds from SharePoint/Smartsheet, then ingest.
-            # Both steps are best-effort — failures must not block export or deployment.
-            try:
-                import subprocess, sys
-                script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fetch_portfolio_data.py')
-                subprocess.run([sys.executable, script], check=True, timeout=300)
-                print("Portfolio feeds downloaded.")
-            except Exception as e:
-                print(f"Portfolio feed download error (non-fatal): {e}")
-            try:
-                from portfolio_ingest import ingest as portfolio_ingest
-                portfolio_ingest()
-                print("Portfolio ingest complete.")
-            except Exception as e:
-                print(f"Portfolio ingest error (non-fatal): {e}")
+            # Portfolio: re-download feeds (SharePoint/Smartsheet/Tableau) then
+            # ingest. Rate-limited to once per hour — the Portfolio tab's feeds
+            # change slowly and re-pulling them every 5-min scan cost ~30-60s.
+            # Best-effort: failures must not block export or deployment. To
+            # force a refresh sooner, delete data/last_portfolio_fetch.
+            cwd = os.path.dirname(os.path.abspath(__file__))
+            portfolio_stamp = os.path.join(cwd, 'data', 'last_portfolio_fetch')
+            portfolio_due = True
+            if os.path.exists(portfolio_stamp):
+                age_h = (time.time() - os.path.getmtime(portfolio_stamp)) / 3600.0
+                if age_h < 1:
+                    portfolio_due = False
+                    print(f"Portfolio: skipping (last run {age_h*60:.0f} min ago, < 60 min)")
+            if portfolio_due:
+                feeds_ok = False
+                try:
+                    import subprocess, sys
+                    script = os.path.join(cwd, 'fetch_portfolio_data.py')
+                    subprocess.run([sys.executable, script], check=True, timeout=300)
+                    print("Portfolio feeds downloaded.")
+                    feeds_ok = True
+                except Exception as e:
+                    print(f"Portfolio feed download error (non-fatal): {e}")
+                try:
+                    from portfolio_ingest import ingest as portfolio_ingest
+                    portfolio_ingest()
+                    print("Portfolio ingest complete.")
+                except Exception as e:
+                    print(f"Portfolio ingest error (non-fatal): {e}")
+                # Advance the timestamp only when feeds actually downloaded, so a
+                # failed pull (e.g. Smartsheet/SharePoint logged out) retries next
+                # scan instead of waiting an hour.
+                if feeds_ok:
+                    try:
+                        with open(portfolio_stamp, 'w') as f:
+                            f.write(str(int(time.time())))
+                    except Exception:
+                        pass
 
             # C1: Auto-export + git push only when DB content actually
             # changed since last successful export. The fingerprint hashes
