@@ -1055,20 +1055,18 @@ def api_scan_trigger():
     if scan_status['running']:
         return jsonify({'error': 'Scan already in progress'}), 409
 
-    # Fast session probe (~1-3s per source); abort scan if any required login is missing.
-    from fetch_portfolio_data import check_portfolio_sessions
-    session = check_courseleaf_session()
-    portfolio_sessions = check_portfolio_sessions()
-    missing = []
-    if not session.get('ok'):
-        missing.append(f"CIM: {session.get('detail', 'session invalid')}")
-    for s in portfolio_sessions:
-        if not s['ok']:
-            missing.append(f"{s['source']}: {s['detail']}")
-    if missing:
-        detail = ' | '.join(missing)
-        scan_status['error'] = detail
-        return jsonify({'error': 'session_invalid', 'detail': detail}), 503
+    # Fast HTTP session probe — abort only if the CIM session itself is invalid.
+    # Portfolio/SharePoint/Chrome-tab logins are best-effort feeds and must NOT
+    # gate the scan (requiring open Chrome tabs here was blocking every
+    # scheduled scan even with a perfectly valid CIM session).
+    from cim_http import CIMSession
+    try:
+        ok, detail = CIMSession().check()
+    except Exception as e:
+        ok, detail = False, f'Could not read CIM session: {e}'
+    if not ok:
+        scan_status['error'] = f"CIM: {detail}"
+        return jsonify({'error': 'session_invalid', 'detail': f"CIM: {detail}"}), 503
 
     def do_quick_role_update(label='quick role update'):
         """Force-fetch every DB-active program and course's workflow div,
