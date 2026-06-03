@@ -1578,8 +1578,9 @@ function renderTable(items) {
                             ${tabs}
                             <input type="text" class="detail-search"
                                 id="detail-search-${id}"
-                                placeholder="Search within this page..."
+                                placeholder="Search within this page (Enter = next)…"
                                 oninput="filterDetailContent(${id})"
+                                onkeydown="cycleDetailMatch(${id}, event)"
                                 onclick="event.stopPropagation()">
                         </div>
                         <div class="detail-content" id="detail-content-${id}">
@@ -3956,44 +3957,77 @@ function renderChanges(changes) {
 // content area down to those whose text contains the query. Heading/section
 // rows (areaheader, h2/h3) are kept visible when any of their following
 // rows match, to preserve context.
+// In-page search: HIGHLIGHT matches and scroll to the first one — do NOT
+// filter/hide content. (Previously this hid non-matching rows.) Typing
+// re-highlights live; Enter cycles to the next match.
 function filterDetailContent(programId) {
     const input = document.getElementById(`detail-search-${programId}`);
     const content = document.getElementById(`detail-content-${programId}`);
     if (!input || !content) return;
-    const q = input.value.trim().toLowerCase();
-    const rows = Array.from(content.querySelectorAll('tr'));
-    if (!q) {
-        rows.forEach(r => { r.style.display = ''; });
-        // Clear any prior highlights
-        content.querySelectorAll('mark.detail-hl').forEach(m => {
-            const t = document.createTextNode(m.textContent);
-            m.parentNode.replaceChild(t, m);
-        });
-        return;
-    }
-    // First pass: mark each row's own match status
-    const rowMatches = rows.map(r => r.textContent.toLowerCase().includes(q));
-    // Heading rows (areaheader / h2/h3/h4-equivalent): show if any following
-    // non-heading row matches until the next heading.
-    const isHeading = r =>
-        r.classList.contains('areaheader') ||
-        r.querySelector('.areaheader, h2, h3, h4') !== null;
-    const show = new Array(rows.length).fill(false);
-    for (let i = 0; i < rows.length; i++) {
-        if (rowMatches[i]) show[i] = true;
-    }
-    // Propagate: a heading shows if any descendant row (up to next heading) matches
-    for (let i = 0; i < rows.length; i++) {
-        if (!isHeading(rows[i])) continue;
-        let j = i + 1;
-        let anyMatch = false;
-        while (j < rows.length && !isHeading(rows[j])) {
-            if (rowMatches[j]) { anyMatch = true; break; }
-            j++;
+
+    // Clear prior highlights (unwrap each <mark class="detail-hl">) and merge
+    // the split text back so re-searching works cleanly.
+    content.querySelectorAll('mark.detail-hl').forEach(m => {
+        m.replaceWith(document.createTextNode(m.textContent));
+    });
+    content.normalize();
+
+    const q = input.value.trim();
+    if (!q) { delete content.dataset.hlIndex; return; }
+    const ql = q.toLowerCase();
+
+    // Collect text nodes that contain the query (skip script/style/existing marks).
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.nodeValue || !node.nodeValue.toLowerCase().includes(ql)) return NodeFilter.FILTER_REJECT;
+            const p = node.parentNode;
+            if (p && (p.tagName === 'SCRIPT' || p.tagName === 'STYLE')) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
         }
-        if (anyMatch) show[i] = true;
-    }
-    rows.forEach((r, i) => { r.style.display = show[i] ? '' : 'none'; });
+    });
+    const nodes = [];
+    let n; while ((n = walker.nextNode())) nodes.push(n);
+
+    const marks = [];
+    nodes.forEach(node => {
+        const text = node.nodeValue, lower = text.toLowerCase();
+        const frag = document.createDocumentFragment();
+        let idx = 0, pos;
+        while ((pos = lower.indexOf(ql, idx)) !== -1) {
+            if (pos > idx) frag.appendChild(document.createTextNode(text.slice(idx, pos)));
+            const mark = document.createElement('mark');
+            mark.className = 'detail-hl';
+            mark.textContent = text.slice(pos, pos + ql.length);
+            frag.appendChild(mark);
+            marks.push(mark);
+            idx = pos + ql.length;
+        }
+        if (idx < text.length) frag.appendChild(document.createTextNode(text.slice(idx)));
+        node.parentNode.replaceChild(frag, node);
+    });
+
+    if (!marks.length) { delete content.dataset.hlIndex; return; }
+    // On plain typing, jump to the first match; reset cycle position.
+    const cur = marks[0];
+    content.dataset.hlIndex = '0';
+    marks.forEach(m => m.classList.remove('detail-hl-current'));
+    cur.classList.add('detail-hl-current');
+    cur.scrollIntoView({block: 'center', behavior: 'smooth'});
+}
+
+// Enter in the in-page search cycles to the next highlighted match.
+function cycleDetailMatch(programId, ev) {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const content = document.getElementById(`detail-content-${programId}`);
+    if (!content) return;
+    const marks = Array.from(content.querySelectorAll('mark.detail-hl'));
+    if (!marks.length) return;
+    let i = (parseInt(content.dataset.hlIndex || '0', 10) + 1) % marks.length;
+    content.dataset.hlIndex = String(i);
+    marks.forEach(m => m.classList.remove('detail-hl-current'));
+    marks[i].classList.add('detail-hl-current');
+    marks[i].scrollIntoView({block: 'center', behavior: 'smooth'});
 }
 
 function toggleRow(programId) {

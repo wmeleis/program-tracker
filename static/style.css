@@ -927,6 +927,7 @@ tr.program-row.expanded td {
 }
 
 mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
+mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #fb923c; }
 
 /* The content area that opens when a detail tab is selected. Give it a
  * white card background distinct from the (pale blue-grey) detail panel
