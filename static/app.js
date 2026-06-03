@@ -3611,31 +3611,36 @@ async function loadCompareDetail(programId) {
         const campus = campusMatch ? campusMatch[1] : null;
         const isNonBoston = campus && campus.toLowerCase() !== 'boston';
 
-        // If a custom reference override is active, always compare proposed vs that custom ref,
-        // regardless of the program's campus relationships.
+        // If an EXPLICIT reference override is active — either an uploaded
+        // file (source 'custom') OR another program chosen via the picker
+        // (source 'program') — always compare the proposal against that
+        // override, regardless of the program's campus relationships.
         const refRes0 = await fetch(`/api/program/${programId}/reference`);
         const refData0 = refRes0.ok ? await refRes0.json() : {};
-        const hasCustomOverride = refData0.source === 'custom';
+        const hasOverride = refData0.source === 'custom' || refData0.source === 'program';
 
-        if (hasCustomOverride) {
+        if (hasOverride) {
+            const isProg = refData0.source === 'program';
+            const kind = isProg ? 'reference program' : 'custom reference';
+            const refName = refData0.name || refData0.version_date || '';
             const refHtml = refData0.curriculum_html || '';
             if (!currHtml || !refHtml) {
-                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or custom reference data not available for comparison.</div>';
+                contentEl.innerHTML = `<div class="workflow-meta">Curriculum or ${kind} data not available for comparison.</div>`;
                 updateCompareButton(programId, null);
                 return;
             }
             const {identical, diff} = compareCurricula(currHtml, refHtml);
             updateCompareButton(programId, identical);
-            const header = `<div class="reference-header">Comparing against custom reference: ${escapeHtml(refData0.name || refData0.version_date || '')}</div>`;
+            const header = `<div class="reference-header">Comparing against ${kind}: ${escapeHtml(refName)}</div>`;
             if (identical) {
-                contentEl.innerHTML = `${header}<div class="compare-identical">Proposed curriculum is identical to the custom reference.</div>`;
+                contentEl.innerHTML = `${header}<div class="compare-identical">Proposed curriculum is identical to the ${kind}.</div>`;
             } else {
-                const customLabel = `Custom reference: ${refData0.name || refData0.version_date || ''}`;
-                const table = renderSideBySide(diff, 'This proposal', customLabel);
+                const refLabel = `${isProg ? 'Reference: ' : 'Custom reference: '}${refName}`;
+                const table = renderSideBySide(diff, 'This proposal', refLabel);
                 contentEl.innerHTML = `${header}
                     <div class="compare-legend">
                         <span class="compare-legend-item"><span class="legend-box diff-removed-bg"></span> Only in this proposal</span>
-                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in custom reference</span>
+                        <span class="compare-legend-item"><span class="legend-box diff-added-bg"></span> Only in ${kind}</span>
                         <span class="compare-legend-item"><span class="legend-box diff-moved-bg"></span> Moved between sections</span>
                     </div>${table}`;
             }

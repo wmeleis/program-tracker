@@ -1189,21 +1189,22 @@ function __staticInit() {
         const campus = campusMatch ? campusMatch[1] : null;
         const isNonBoston = campus && campus.toLowerCase() !== 'boston';
 
-        // Custom-reference override takes precedence over campus-based comparison logic
+        // Explicit reference override (uploaded file OR another program chosen
+        // via the picker) takes precedence over campus-based comparison logic.
         const _ref = (_referenceCache || {})[String(programId)];
-        const isCustomRef = _ref && _ref.version_date && _ref.version_date.indexOf('Custom reference') === 0;
-        if (isCustomRef) {
+        const isOverrideRef = _ref && (_ref.source === 'custom' || _ref.source === 'program');
+        if (isOverrideRef) {
             const refHtml = _ref.html || '';
             if (!currHtml || !refHtml) {
-                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or custom reference data not available for comparison.</div>';
+                contentEl.innerHTML = '<div class="workflow-meta">Curriculum or reference data not available for comparison.</div>';
                 updateCompareButton(programId, null);
                 return;
             }
             const {identical, diff} = compareCurricula(currHtml, refHtml);
             updateCompareButton(programId, identical);
-            const header = '<div class="reference-header">Comparing against ' + escapeHtml(_ref.version_date) + '</div>';
+            const header = '<div class="reference-header">Comparing against ' + escapeHtml(_ref.version_date || 'selected reference') + '</div>';
             if (identical) {
-                contentEl.innerHTML = header + '<div class="compare-identical">Proposed curriculum is identical to the custom reference.</div>';
+                contentEl.innerHTML = header + '<div class="compare-identical">Proposed curriculum is identical to the reference.</div>';
             } else {
                 const table = renderSideBySide(diff, 'Proposed Curriculum', 'Reference Curriculum');
                 contentEl.innerHTML = header +
