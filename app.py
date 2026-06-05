@@ -1656,6 +1656,41 @@ def api_portfolio_refresh():
         return jsonify({'error': f'ingest failed: {e}'}), 500
 
 
+_PORTFOLIO_VIEWS_PATH = os.path.join(_DATA_DIR, 'portfolio_views.json')
+
+
+def _load_portfolio_team_views():
+    try:
+        with open(_PORTFOLIO_VIEWS_PATH, 'r') as f:
+            data = _json.load(f)
+        return data.get('views', []) if isinstance(data, dict) else (data or [])
+    except Exception:
+        return []
+
+
+@app.route('/api/portfolio/views', methods=['GET', 'POST'])
+def api_portfolio_views():
+    """Shared (team) portfolio views, persisted to data/portfolio_views.json.
+
+    GET  -> {views: [...]}
+    POST -> body {action: 'save'|'delete', id, views: [...]} replaces the
+            stored list with the client's full list (client is source of truth).
+    """
+    if request.method == 'GET':
+        return jsonify({'views': _load_portfolio_team_views()})
+    data = request.get_json(force=True) or {}
+    views = data.get('views', [])
+    if not isinstance(views, list):
+        return jsonify({'error': 'views must be a list'}), 400
+    try:
+        os.makedirs(_DATA_DIR, exist_ok=True)
+        with open(_PORTFOLIO_VIEWS_PATH, 'w') as f:
+            _json.dump({"views": views}, f, indent=2)
+    except Exception as e:
+        return jsonify({'error': f'save failed: {e}'}), 500
+    return jsonify({'ok': True, 'views': views})
+
+
 @app.route('/api/portfolio/note/<path:program_id>', methods=['POST'])
 def api_portfolio_note(program_id):
     from database import upsert_portfolio_note

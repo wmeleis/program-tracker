@@ -194,6 +194,17 @@ def export_data():
     from database import get_all_portfolio_programs, get_all_program_reference_overrides
     portfolio_programs = get_all_portfolio_programs()
 
+    # Shared (team) portfolio views — baked in so the static site shows them
+    # read-only. Personal views still live in each browser's localStorage.
+    _pv_views_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'portfolio_views.json')
+    portfolio_team_views = []
+    try:
+        with open(_pv_views_path) as _pf:
+            _pv = json.load(_pf)
+        portfolio_team_views = _pv.get('views', []) if isinstance(_pv, dict) else (_pv or [])
+    except Exception:
+        portfolio_team_views = []
+
     # referenced_by — reverse lookup of {target_program_id: [{id, name}, ...]}
     # combining explicit (reference_program_id) and implicit (Boston→deployments)
     # references. Mirrors /api/program/<id>/referenced_by on the static site.
@@ -232,6 +243,7 @@ def export_data():
         'catalog_pages': catalog_pages,
         'catalog_pipeline': catalog_pipeline,
         'portfolio_programs': portfolio_programs,
+        'team_views': portfolio_team_views,
         'referenced_by': referenced_by,
     }
 
@@ -882,8 +894,20 @@ function __staticInit() {
                     ? JSON.parse(p.concentrations_json) : [];
             } catch (e) { p.concentrations = []; }
         });
+        // Hydrate baked team views (read-only on the static site).
+        if (typeof portfolioTeamViews !== 'undefined') {
+            portfolioTeamViews = D.team_views || [];
+        }
         if (typeof populatePortfolioFilters === 'function') populatePortfolioFilters();
-        renderPortfolioTable();
+        // Restore the previously-active view, mirroring the Flask version.
+        let _sv = null;
+        try { _sv = localStorage.getItem('cim-portfolio-active-view'); } catch (e) {}
+        if (_sv && typeof getPortfolioViewById === 'function' && getPortfolioViewById(_sv)) {
+            applyPortfolioView(_sv);
+        } else {
+            if (typeof renderPortfolioViewTiles === 'function') renderPortfolioViewTiles();
+            renderPortfolioTable();
+        }
     };
     window.refreshPortfolio = function() {
         alert('Refresh is only available on the local server.');

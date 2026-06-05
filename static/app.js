@@ -4789,6 +4789,7 @@ const _PORTFOLIO_ACTIVE_LS = 'cim-portfolio-active-view';
 // State
 let portfolioActiveViewId = null;
 let portfolioActiveViewDirty = false;  // filters changed since view was applied
+let portfolioTeamViews = [];           // shared team views (API-hydrated, local; baked on static)
 
 function getPortfolioPersonalViews() {
     try { return JSON.parse(localStorage.getItem(_PORTFOLIO_VIEWS_LS) || '[]'); }
@@ -4798,7 +4799,7 @@ function setPortfolioPersonalViews(views) {
     try { localStorage.setItem(_PORTFOLIO_VIEWS_LS, JSON.stringify(views)); } catch(_) {}
 }
 function getAllPortfolioViews() {
-    return [...PORTFOLIO_BUILT_IN_VIEWS, ...getPortfolioPersonalViews()];
+    return [...PORTFOLIO_BUILT_IN_VIEWS, ...getPortfolioTeamViews(), ...getPortfolioPersonalViews()];
 }
 function getPortfolioViewById(id) {
     return getAllPortfolioViews().find(v => v.id === id) || null;
@@ -4913,6 +4914,88 @@ function _syncPortfolioFilterUi() {
     updateClearButtons();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// Portfolio filter-tree engine (adapted from the student tracker's builder)
+// ══════════════════════════════════════════════════════════════════════════
+// A view's advanced filter is a recursive tree of AND/OR groups + rules.
+// Each rule = {field, op, value}. Fields are defined in PORTFOLIO_FILTER_FIELDS
+// with a value(p) accessor returning the row's value as a display string.
+
+const PORTFOLIO_FILTER_FIELDS = [
+    {key: 'program',     label: 'Program',          type: 'text',   value: p => p.program_name || ''},
+    {key: 'level',       label: 'Level',            type: 'select', value: p => classifyPortfolioLevel(p.program_name) || ''},
+    {key: 'credential',  label: 'Credential',       type: 'select', value: p => extractPortfolioDegree(p.program_name) || ''},
+    {key: 'college',     label: 'College',          type: 'select', value: p => p.college || ''},
+    {key: 'campus',      label: 'Campus',           type: 'select', value: p => p.campus || ''},
+    {key: 'in_cim',      label: 'In CIM',           type: 'select', value: p => p.cim_program_id ? 'Yes' : 'No'},
+    {key: 'cim_step',    label: 'CIM Step',         type: 'select', value: p => p.cim_step || ''},
+    {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
+    {key: 'svt',         label: 'SVT Status',       type: 'select', value: p => p.svt_status || ''},
+    {key: 'substatus',   label: 'SVT Sub-status',   type: 'select', value: p => p.roster_sub_status || ''},
+    {key: 'speed',       label: 'Speed to Market',  type: 'select', value: p => p.speed_to_market === 'True' ? 'Yes' : p.speed_to_market === 'False' ? 'No' : ''},
+    {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
+    {key: 'otp',         label: 'OTP Status',       type: 'select', value: p => p.otp_status || ''},
+    {key: 'inact_admit', label: 'Inactivation of Admission', type: 'select', value: p => p.inactivation_admission || ''},
+    {key: 'admit_today', label: 'Admitting Today',  type: 'select', value: p => _inactAdmittingToday(p) || ''},
+    {key: 'note',        label: 'Notes',            type: 'text',   value: p => p.note || ''},
+];
+function _pvField(key) { return PORTFOLIO_FILTER_FIELDS.find(f => f.key === key); }
+
+// Distinct values for a select field (across all portfolio rows), sorted.
+function getPortfolioFieldValues(key) {
+    const f = _pvField(key);
+    if (!f) return [];
+    const set = new Set();
+    (allPortfolioPrograms || []).forEach(p => set.add(f.value(p)));
+    return [...set].sort((a, b) => String(a).localeCompare(String(b)));
+}
+
+// Tree model + evaluation
+let portfolioFilterTree = null;   // currently-applied advanced filter (or null)
+function makeEmptyPvGroup(conj) { return {type: 'group', conj: conj || 'all', children: []}; }
+
+function evalPortfolioNode(p, node) {
+    if (!node) return true;
+    if (node.type === 'group') {
+        const kids = node.children || [];
+        if (!kids.length) return true;
+        return node.conj === 'any' ? kids.some(c => evalPortfolioNode(p, c))
+                                   : kids.every(c => evalPortfolioNode(p, c));
+    }
+    if (node.type === 'rule') return evalPortfolioRule(p, node);
+    return true;
+}
+function evalPortfolioRule(p, rule) {
+    const f = _pvField(rule.field);
+    if (!f) return true;
+    let v = String(f.value(p) == null ? '' : f.value(p));
+    const op = rule.op || '';
+    if (op === 'is_set')   return v !== '';
+    if (op === 'is_empty') return v === '';
+    if (f.type === 'text') {
+        if (!rule.value) return true;
+        const q = String(rule.value).toLowerCase(), hay = v.toLowerCase();
+        if (op === 'equals')      return hay === q;
+        if (op === 'starts_with') return hay.startsWith(q);
+        return hay.includes(q);   // contains (default)
+    }
+    // select
+    const arr = Array.isArray(rule.value) ? rule.value : (rule.value ? [rule.value] : []);
+    if (!arr.length) return true;
+    const hit = new Set(arr).has(v);
+    return op === 'not_in' ? !hit : hit;
+}
+
+function _opsForPvType(t) {
+    if (t === 'text') return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is set'],['is_empty','is empty']];
+    return [['in','is one of'],['not_in','is not one of'],['is_set','is set'],['is_empty','is empty']];
+}
+function _defaultPvRule(key) {
+    const f = _pvField(key) || PORTFOLIO_FILTER_FIELDS[0];
+    return f.type === 'text' ? {type:'rule', field:f.key, op:'contains', value:''}
+                             : {type:'rule', field:f.key, op:'in', value:[]};
+}
+
 // Apply a named view: restore column visibility + filters, mark active.
 function applyPortfolioView(id) {
     const view = getPortfolioViewById(id);
@@ -4928,153 +5011,317 @@ function applyPortfolioView(id) {
         portfolioVisibleCols = new Set(cols);
     }
     try { localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols])); } catch(_) {}
-    // Filters
+    // Top-bar filters
     _applyPortfolioFilters(view.state.filters || {});
+    // Advanced filter tree
+    portfolioFilterTree = view.state.tree ? JSON.parse(JSON.stringify(view.state.tree)) : null;
     renderPortfolioViewTiles();
     renderPortfolioTable();
 }
 
-// ── Portfolio Views modal ────────────────────────────────────────────────────
-// Mirrors the student tracker's Views modal: left sidebar (view list with
-// delete), right panel (current state summary + name input + Save button),
-// footer (Close). Opens from the "★ Views" button in the toolbar.
+// ══════════════════════════════════════════════════════════════════════════
+// Portfolio Views modal — full filter-tree builder (mirrors student tracker)
+// ══════════════════════════════════════════════════════════════════════════
+// Sidebar: + New view, Team views (built-in + saved team), My views (personal),
+//          each with delete. Clicking a view applies it AND loads it for editing.
+// Main:    recursive AND/OR group + rule builder with per-field operators and
+//          nested groups; edits apply LIVE so the count + table update as you go.
+// Footer:  Clear all | Editing: X | Cancel | Update "X" | + Save as My/Team View.
+// Header:  live "N programs match".
 
-let _pvModalSavingName = '';
+let _pvDraftTree   = null;   // tree being edited (also the live-applied tree)
+let _pvLoadedViewId = null;  // the view currently loaded into the builder
+let _pvMultiOpen   = null;   // path-string of the open select popup
+let _pvSavingScope = null;   // null | 'personal' | 'team' (Save-as form active)
 
 function openPortfolioViewsModal() {
     const bd = document.getElementById('pv-modal-backdrop');
     if (!bd) return;
-    _pvModalSavingName = '';
+    // Seed the draft from the applied tree (or empty group).
+    _pvDraftTree = portfolioFilterTree
+        ? JSON.parse(JSON.stringify(portfolioFilterTree))
+        : makeEmptyPvGroup('all');
+    portfolioFilterTree = _pvDraftTree;   // live-apply by reference
+    _pvLoadedViewId = portfolioActiveViewId;
+    _pvMultiOpen = null;
+    _pvSavingScope = null;
     bd.classList.add('open');
-    _renderPvModalSidebar();
-    _renderPvModalMain();
-    _renderPvModalFooter();
+    renderPvModal();
 }
 
 function closePortfolioViewsModal() {
     const bd = document.getElementById('pv-modal-backdrop');
     if (bd) bd.classList.remove('open');
+    _pvMultiOpen = null;
 }
 
-function _renderPvModalSidebar() {
+// Re-render the whole modal + the table (edits apply live).
+function renderPvModal() {
+    portfolioFilterTree = (_pvDraftTree && (_pvDraftTree.children || []).length) ? _pvDraftTree : (_pvDraftTree || null);
+    _renderPvSidebar();
+    _renderPvBuilder();
+    _renderPvFooter();
+    _renderPvCount();
+    renderPortfolioTable();
+    renderPortfolioViewTiles();
+}
+
+function _renderPvCount() {
+    const el = document.getElementById('pv-modal-count');
+    if (!el) return;
+    const n = getPortfolioFiltered().length;
+    el.textContent = `${n} program${n === 1 ? '' : 's'} match`;
+}
+
+function _renderPvSidebar() {
     const host = document.getElementById('pv-modal-sidebar');
     if (!host) return;
     const personal = getPortfolioPersonalViews();
-    const renderItem = (v, deletable) => {
-        const isActive = v.id === portfolioActiveViewId;
-        const dirty    = isActive && portfolioActiveViewDirty;
-        const del      = deletable
-            ? `<button class="pv-side-del" onclick="pvDeleteView('${v.id}')" title="Delete">×</button>`
-            : '';
-        return `<div class="pv-side-item${isActive ? ' active' : ''}" onclick="pvApplyFromModal('${v.id}')">
-            <span class="pv-side-name">${escapeHtml(v.name)}</span>
-            ${dirty ? '<span class="pv-dirty" title="Filters changed since this view was applied">●</span>' : ''}
-            ${del}
-        </div>`;
+    const team     = getPortfolioTeamViews();
+    const item = (v, deletable) => {
+        const loaded = v.id === _pvLoadedViewId;
+        const del = deletable ? `<button class="pv-side-del" onclick="pvDeleteView('${v.id}',event)" title="Delete">×</button>` : '';
+        return `<div class="pv-side-item${loaded ? ' active' : ''}" onclick="pvLoadView('${v.id}')">
+            <span class="pv-side-name">${escapeHtml(v.name)}</span>${del}</div>`;
     };
-    let html = `<button class="pv-side-newbtn" onclick="pvFocusNewView()">+ New view</button>`;
-    html += '<div class="pv-side-section">Team views</div>';
-    html += PORTFOLIO_BUILT_IN_VIEWS.map(v => renderItem(v, false)).join('');
-    html += '<div class="pv-side-section">My views</div>';
-    html += personal.length
-        ? personal.map(v => renderItem(v, true)).join('')
-        : '<div class="pv-side-empty">None saved yet.</div>';
+    let html = `<button class="pv-side-newbtn" onclick="pvNewView()">+ New view</button>`;
+    html += `<div class="pv-side-section">Team views</div>`;
+    html += PORTFOLIO_BUILT_IN_VIEWS.map(v => item(v, false)).join('');
+    html += team.length ? team.map(v => item(v, true)).join('') : '';
+    html += `<div class="pv-side-section">My views</div>`;
+    html += personal.length ? personal.map(v => item(v, true)).join('')
+                            : '<div class="pv-side-empty">None saved yet.</div>';
     host.innerHTML = html;
 }
 
-function _renderPvModalMain() {
+function _renderPvBuilder() {
     const host = document.getElementById('pv-modal-main');
     if (!host) return;
-    const allKeys  = PORTFOLIO_COLUMNS.map(c => c.key);
-    const visCols  = [...portfolioVisibleCols];
-    const isAllCols = allKeys.every(k => visCols.includes(k));
-    const colSummary = isAllCols ? 'All columns' : `${visCols.length} of ${allKeys.length} columns`;
-    const f = _snapshotPortfolioFilters();
-    const nFilters = Object.entries(f).filter(([, v]) => Array.isArray(v) ? v.length > 0 : (v !== '')).length;
-    const filterSummary = nFilters ? `${nFilters} filter${nFilters > 1 ? 's' : ''} active` : 'No filters active';
-    const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
-    const editingTag = active
-        ? `<span class="pv-editing-tag${portfolioActiveViewDirty ? ' dirty' : ''}">${portfolioActiveViewDirty ? '● ' : ''}Active view: <strong>${escapeHtml(active.name)}</strong></span>`
-        : '<span class="pv-editing-tag">No view active</span>';
-    host.innerHTML = `
-        <div class="pv-main-summary">
-            ${editingTag}
-            <div class="pv-summary-line">Columns: <strong>${escapeHtml(colSummary)}</strong></div>
-            <div class="pv-summary-line">Filters: <strong>${escapeHtml(filterSummary)}</strong></div>
-        </div>
-        <hr class="pv-main-divider">
-        <div class="pv-save-section">
-            <div class="pv-save-label">Save current columns + filters as a new personal view:</div>
-            <div class="pv-save-row">
-                <input id="pv-name-input" class="pv-name-input" type="text" maxlength="60"
-                       placeholder="Name this view…"
-                       value="${escapeHtml(_pvModalSavingName)}"
-                       oninput="_pvModalSavingName=this.value"
-                       onkeydown="if(event.key==='Enter')pvConfirmSave()">
-                <button class="pv-btn pv-btn-primary" onclick="pvConfirmSave()">+ Save as My View</button>
-            </div>
-        </div>`;
-    setTimeout(() => document.getElementById('pv-name-input')?.focus(), 50);
+    host.innerHTML = _renderPvGroup(_pvDraftTree, '');
 }
 
-function _renderPvModalFooter() {
+function _renderPvGroup(group, path) {
+    const kids = group.children || [];
+    const conjSel = `<select class="pv-conj" onchange="pvbSetConj('${path}', this.value)">
+        <option value="all"${group.conj === 'all' ? ' selected' : ''}>all</option>
+        <option value="any"${group.conj === 'any' ? ' selected' : ''}>any</option>
+    </select>`;
+    const head = `<div class="pvb-group-head">Match ${conjSel} of the following:
+        ${path ? `<button class="pvb-iconbtn" title="Remove group" onclick="pvbRemove('${path}')">✕</button>` : ''}
+    </div>`;
+    const body = kids.map((c, i) => {
+        const childPath = path ? `${path}.${i}` : `${i}`;
+        return c.type === 'group'
+            ? `<div class="pvb-group">${_renderPvGroup(c, childPath)}</div>`
+            : _renderPvRule(c, childPath);
+    }).join('');
+    const add = `<div class="pvb-add-row">
+        <button onclick="pvbAddRule('${path}')">+ Add rule</button>
+        <button onclick="pvbAddGroup('${path}')">⊕ Add nested group</button>
+    </div>`;
+    return head + body + add;
+}
+
+function _renderPvRule(rule, path) {
+    const f = _pvField(rule.field) || PORTFOLIO_FILTER_FIELDS[0];
+    const fieldSel = `<select onchange="pvbSetField('${path}', this.value)">${
+        PORTFOLIO_FILTER_FIELDS.map(x => `<option value="${x.key}"${x.key === rule.field ? ' selected' : ''}>${escapeHtml(x.label)}</option>`).join('')
+    }</select>`;
+    const opSel = `<select onchange="pvbSetOp('${path}', this.value)">${
+        _opsForPvType(f.type).map(([op, lbl]) => `<option value="${op}"${op === rule.op ? ' selected' : ''}>${lbl}</option>`).join('')
+    }</select>`;
+    return `<div class="pvb-rule">${fieldSel}${opSel}${_renderPvRuleValue(rule, f, path)}
+        <button class="pvb-iconbtn" title="Remove rule" onclick="pvbRemove('${path}')">✕</button></div>`;
+}
+
+function _renderPvRuleValue(rule, f, path) {
+    if (rule.op === 'is_set' || rule.op === 'is_empty') return '';
+    if (f.type === 'text') {
+        return `<input type="text" class="pvb-text" value="${escapeHtml(rule.value || '')}"
+                 oninput="pvbSetValue('${path}', this.value)" placeholder="search…">`;
+    }
+    // select — chips + popup
+    const vals = Array.isArray(rule.value) ? rule.value : [];
+    const chips = vals.length
+        ? vals.map(v => `<span class="pvb-chip">${escapeHtml(v || '(blank)')}</span>`).join('')
+        : '<span class="pvb-values-empty">choose values…</span>';
+    let pop = '';
+    if (_pvMultiOpen === path) {
+        const all = getPortfolioFieldValues(rule.field);
+        pop = `<div class="pvb-multi-pop" onclick="event.stopPropagation()">${
+            all.map(v => `<label><input type="checkbox" ${vals.includes(v) ? 'checked' : ''}
+                 onchange="pvbToggleMulti('${path}', '${_escJsPv(v)}')"> ${escapeHtml(v || '(blank)')}</label>`).join('')
+        }</div>`;
+    }
+    return `<span class="pvb-valwrap"><span class="pvb-values" onclick="pvbOpenMulti('${path}', event)">${chips}</span>${pop}</span>`;
+}
+
+function _escJsPv(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+function _renderPvFooter() {
     const host = document.getElementById('pv-modal-footer');
     if (!host) return;
-    host.innerHTML = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Close</button>`;
+    const loaded = _pvLoadedViewId ? getPortfolioViewById(_pvLoadedViewId) : null;
+    const canUpdate = loaded && !loaded.team && loaded.id !== 'all' && loaded.id !== 'gtm';
+    let left = `<button class="pv-btn pv-btn-ghost" onclick="pvClearAll()">Clear all</button>`;
+    if (loaded) left += ` <span class="pv-editing-tag">Editing: <strong>${escapeHtml(loaded.name)}</strong></span>`;
+    let right;
+    if (_pvSavingScope) {
+        right = `<span class="pv-save-form">
+            <input id="pv-name-input" class="pv-name-input" type="text" maxlength="60" placeholder="Name this view…"
+                   onkeydown="if(event.key==='Enter')pvConfirmSave();else if(event.key==='Escape')pvCancelSave()">
+            <button class="pv-btn pv-btn-primary" onclick="pvConfirmSave()">Save ${_pvSavingScope === 'team' ? 'as Team View' : 'as My View'}</button>
+            <button class="pv-btn pv-btn-ghost" onclick="pvCancelSave()">Cancel</button></span>`;
+    } else {
+        right = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Cancel</button> `;
+        if (canUpdate) right += `<button class="pv-btn pv-btn-primary" onclick="pvUpdateLoaded()" title="Save changes to this view">↻ Update "${escapeHtml(loaded.name)}"</button> `;
+        right += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')">+ Save as My View</button>
+                  <button class="pv-btn pv-btn-ghost" onclick="pvStartSave('team')">+ Save as Team View</button>`;
+    }
+    host.innerHTML = `${left}<span style="flex:1"></span>${right}`;
+    if (_pvSavingScope) setTimeout(() => document.getElementById('pv-name-input')?.focus(), 30);
 }
 
-function pvFocusNewView() {
-    _pvModalSavingName = '';
-    _renderPvModalMain();
-    const inp = document.getElementById('pv-name-input');
-    if (inp) { inp.value = ''; inp.scrollIntoView({block:'center'}); inp.focus(); }
+// ── Tree mutators (path = child indices like "0.2.1"; "" = root) ──────────────
+function _pvWalk(path) {
+    if (!_pvDraftTree) return null;
+    if (!path) return {node: _pvDraftTree, parent: null, index: -1};
+    const parts = path.split('.').map(n => parseInt(n, 10));
+    let node = _pvDraftTree, parent = null, idx = -1;
+    for (const i of parts) {
+        if (!node || node.type !== 'group') return null;
+        parent = node; idx = i; node = (node.children || [])[i];
+    }
+    return {node, parent, index: idx};
+}
+function pvbAddRule(path)  { const w = _pvWalk(path); if (w && w.node.type === 'group') { w.node.children.push(_defaultPvRule(PORTFOLIO_FILTER_FIELDS[0].key)); renderPvModal(); } }
+function pvbAddGroup(path) { const w = _pvWalk(path); if (w && w.node.type === 'group') { w.node.children.push(makeEmptyPvGroup(w.node.conj === 'all' ? 'any' : 'all')); renderPvModal(); } }
+function pvbRemove(path)   { const w = _pvWalk(path); if (w && w.parent) { w.parent.children.splice(w.index, 1); renderPvModal(); } }
+function pvbSetConj(path, conj) { const w = _pvWalk(path); if (w && w.node.type === 'group') { w.node.conj = conj === 'any' ? 'any' : 'all'; renderPvModal(); } }
+function pvbSetField(path, key) { const w = _pvWalk(path); if (w && w.node.type === 'rule' && w.node.field !== key) { Object.assign(w.node, _defaultPvRule(key)); renderPvModal(); } }
+function pvbSetOp(path, op)      { const w = _pvWalk(path); if (w && w.node.type === 'rule') { w.node.op = op; if (op === 'is_set' || op === 'is_empty') w.node.value = null; else if (!w.node.value) w.node.value = (_pvField(w.node.field) || {}).type === 'text' ? '' : []; renderPvModal(); } }
+function pvbSetValue(path, val) { const w = _pvWalk(path); if (w && w.node.type === 'rule') { w.node.value = val; renderPvModal(); } }
+function pvbToggleMulti(path, v) { const w = _pvWalk(path); if (w && w.node.type === 'rule') { const a = Array.isArray(w.node.value) ? w.node.value.slice() : []; const i = a.indexOf(v); i === -1 ? a.push(v) : a.splice(i, 1); w.node.value = a; renderPvModal(); } }
+function pvbOpenMulti(path, ev) { ev && ev.stopPropagation(); _pvMultiOpen = (_pvMultiOpen === path ? null : path); _renderPvBuilder(); }
+document.addEventListener('click', e => {
+    if (!_pvMultiOpen) return;
+    if (!e.target.closest('.pvb-multi-pop') && !e.target.closest('.pvb-values')) { _pvMultiOpen = null; _renderPvBuilder(); }
+});
+
+function pvClearAll() { _pvDraftTree = makeEmptyPvGroup('all'); _pvLoadedViewId = null; renderPvModal(); }
+function pvNewView()  { _pvDraftTree = makeEmptyPvGroup('all'); _pvLoadedViewId = null; portfolioActiveViewId = null; renderPvModal(); }
+
+// Click a sidebar view → apply it AND load its tree into the builder.
+function pvLoadView(id) {
+    applyPortfolioView(id);                       // restores cols + top-bar + tree, sets active
+    _pvDraftTree = portfolioFilterTree
+        ? JSON.parse(JSON.stringify(portfolioFilterTree))
+        : makeEmptyPvGroup('all');
+    portfolioFilterTree = _pvDraftTree;
+    _pvLoadedViewId = id;
+    _pvSavingScope = null;
+    renderPvModal();
 }
 
-function pvApplyFromModal(id) {
-    applyPortfolioView(id);
-    closePortfolioViewsModal();
+function pvDeleteView(id, ev) {
+    ev && ev.stopPropagation();
+    if (id.startsWith('team_')) {
+        portfolioTeamViews = portfolioTeamViews.filter(v => v.id !== id);
+        _persistTeamViews('delete', id);
+    } else {
+        setPortfolioPersonalViews(getPortfolioPersonalViews().filter(v => v.id !== id));
+    }
+    if (portfolioActiveViewId === id) { portfolioActiveViewId = null; }
+    if (_pvLoadedViewId === id) { _pvLoadedViewId = null; }
+    renderPvModal();
 }
 
-function pvDeleteView(id) {
-    const views = getPortfolioPersonalViews().filter(v => v.id !== id);
-    setPortfolioPersonalViews(views);
-    if (portfolioActiveViewId === id) { portfolioActiveViewId = null; portfolioActiveViewDirty = false; }
-    _renderPvModalSidebar();
-    _renderPvModalMain();
-    renderPortfolioViewTiles();
-}
+function pvStartSave(scope) { _pvSavingScope = scope; _renderPvFooter(); }
+function pvCancelSave()     { _pvSavingScope = null;  _renderPvFooter(); }
 
 function pvConfirmSave() {
-    const name = (_pvModalSavingName || '').trim();
-    if (!name) { document.getElementById('pv-name-input')?.focus(); return; }
-    const id = 'personal_' + Date.now();
-    const views = getPortfolioPersonalViews();
-    views.push({ id, name, team: false, state: { visibleCols: [...portfolioVisibleCols], filters: _snapshotPortfolioFilters() } });
-    setPortfolioPersonalViews(views);
-    portfolioActiveViewId    = id;
-    portfolioActiveViewDirty = false;
-    _pvModalSavingName       = '';
-    _renderPvModalSidebar();
-    _renderPvModalMain();
-    renderPortfolioViewTiles();
+    const inp = document.getElementById('pv-name-input');
+    const name = (inp && inp.value || '').trim();
+    if (!name) { inp && inp.focus(); return; }
+    const scope = _pvSavingScope || 'personal';
+    const state = {
+        visibleCols: [...portfolioVisibleCols],
+        filters: _snapshotPortfolioFilters(),
+        tree: (_pvDraftTree && (_pvDraftTree.children || []).length) ? JSON.parse(JSON.stringify(_pvDraftTree)) : null,
+    };
+    let id;
+    if (scope === 'team') {
+        id = 'team_' + Date.now();
+        portfolioTeamViews.push({id, name, team: true, state});
+        _persistTeamViews('save', id);
+    } else {
+        id = 'personal_' + Date.now();
+        const views = getPortfolioPersonalViews();
+        views.push({id, name, team: false, state});
+        setPortfolioPersonalViews(views);
+    }
+    portfolioActiveViewId = id;
+    _pvLoadedViewId = id;
+    _pvSavingScope = null;
+    renderPvModal();
 }
 
-// Mark active view dirty when a filter changes; update the button label.
-function _portfolioViewTouch() {
-    if (!portfolioActiveViewId) return;
-    const view = getPortfolioViewById(portfolioActiveViewId);
-    if (!view) return;
-    portfolioActiveViewDirty = !_snapshotEq(_snapshotPortfolioFilters(), view.state.filters || {});
-    renderPortfolioViewTiles();
+function pvUpdateLoaded() {
+    const id = _pvLoadedViewId;
+    if (!id) return;
+    const state = {
+        visibleCols: [...portfolioVisibleCols],
+        filters: _snapshotPortfolioFilters(),
+        tree: (_pvDraftTree && (_pvDraftTree.children || []).length) ? JSON.parse(JSON.stringify(_pvDraftTree)) : null,
+    };
+    if (id.startsWith('team_')) {
+        const v = portfolioTeamViews.find(x => x.id === id);
+        if (v) { v.state = state; _persistTeamViews('save', id); }
+    } else {
+        const views = getPortfolioPersonalViews();
+        const v = views.find(x => x.id === id);
+        if (v) { v.state = state; setPortfolioPersonalViews(views); }
+    }
+    portfolioActiveViewId = id;
+    renderPvModal();
 }
 
-// Update the Views button label to show the active view name + dirty dot.
+// Team views: in-memory list, hydrated from the API (local) or baked data
+// (static). Personal stays in localStorage. (declared near portfolioActiveViewId)
+function getPortfolioTeamViews() { return portfolioTeamViews; }
+
+// Hydrate team views: from the baked payload on the static site, otherwise
+// from the /api/portfolio/views endpoint (local Flask).
+async function _hydratePortfolioTeamViews(portfolioPayload) {
+    try {
+        if (window._staticMode) {
+            portfolioTeamViews = (portfolioPayload && portfolioPayload.team_views) || window._portfolioTeamViews || [];
+            return;
+        }
+        const r = await fetch('/api/portfolio/views');
+        if (r.ok) { const d = await r.json(); portfolioTeamViews = d.views || []; }
+    } catch (e) { portfolioTeamViews = portfolioTeamViews || []; }
+}
+async function _persistTeamViews(action, id) {
+    if (window._staticMode) return;   // no backend on the static site
+    try {
+        await fetch('/api/portfolio/views', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action, id, views: portfolioTeamViews}),
+        });
+    } catch (e) { console.error('team view persist failed', e); }
+}
+
+// No-op left for the filter-change hooks (top-bar edits no longer mark a view
+// dirty now that views are managed in the modal builder).
+function _portfolioViewTouch() {}
+
+// Update the Views button label to show the active view name.
 function renderPortfolioViewTiles() {
     const btn = document.getElementById('portfolio-views-btn');
     if (!btn) return;
     const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
-    const dot    = portfolioActiveViewDirty ? ' ●' : '';
-    btn.textContent = active ? `${active.name}${dot}` : 'Views';
+    btn.textContent = active ? `${active.name}` : 'Views';
     btn.classList.toggle('pv-active-btn', !!active);
 }
 
@@ -5376,10 +5623,12 @@ async function loadPortfolioDashboard() {
             fetch('/api/portfolio'),
             loadScanStatus(),
         ]);
-        allPortfolioPrograms = (await res.json()).programs || [];
+        const pj = await res.json();
+        allPortfolioPrograms = pj.programs || [];
         allPortfolioPrograms.forEach(p => {
             p.concentrations = p.concentrations_json ? JSON.parse(p.concentrations_json) : [];
         });
+        await _hydratePortfolioTeamViews(pj);
         portfolioExpandedIds = new Set();
         portfolioCollapsedIds = new Set();
         populatePortfolioFilters();
@@ -5625,6 +5874,9 @@ function getPortfolioFiltered() {
     if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? 'Yes' : 'No'));
     if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
+    // Advanced filter tree (from the Views builder) — ANDed with everything above.
+    if (portfolioFilterTree && (portfolioFilterTree.children || []).length)
+        rows = rows.filter(p => evalPortfolioNode(p, portfolioFilterTree));
     if (portfolioSearch && portfolioSearch.trim()) {
         // Supports `*` (any chars) and `?` (one char) wildcards.
         const match = buildSearchMatcher(portfolioSearch);
