@@ -168,7 +168,18 @@ function switchView(view) {
 
     const portfolioToolbar  = document.getElementById('portfolio-table-toolbar');
     const portfolioHdrAct   = document.getElementById('portfolio-header-actions');
+    // CIM-specific header buttons: hidden on portfolio view (replaced by
+    // Export / Views / Columns). Non-portfolio views restore them.
+    const cimHdrBtns = ['scan-btn','auth-btn','console-btn','refs-btn']
+        .map(id => document.getElementById(id)).filter(Boolean);
+    const lastUpdatedEl = document.getElementById('last-updated');
+    const scanStatusEl  = document.getElementById('scan-status');
+    const progressEl    = document.getElementById('progress-container');
     if (view === 'portfolio') {
+        cimHdrBtns.forEach(b => b.style.display = 'none');
+        if (lastUpdatedEl) lastUpdatedEl.style.display = 'none';
+        if (scanStatusEl)  scanStatusEl.style.display  = 'none';
+        if (progressEl)    progressEl.style.display    = 'none';
         if (portfolioFilters)    portfolioFilters.style.display = 'flex';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'flex';
         if (portfolioHdrAct)     portfolioHdrAct.style.display = 'flex';
@@ -179,6 +190,10 @@ function switchView(view) {
         if (filtersSection)      filtersSection.style.display = 'none';
         if (subjectGroup)        subjectGroup.style.display = 'none';
     } else {
+        cimHdrBtns.forEach(b => b.style.display = '');
+        if (lastUpdatedEl) lastUpdatedEl.style.display = '';
+        if (scanStatusEl)  scanStatusEl.style.display  = '';
+        if (progressEl)    progressEl.style.display    = 'none';  // stays hidden until scan runs
         if (portfolioFilters)    portfolioFilters.style.display = 'none';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'none';
         if (portfolioHdrAct)     portfolioHdrAct.style.display = 'none';
