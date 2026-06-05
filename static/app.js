@@ -5467,11 +5467,7 @@ function renderPortfolioViewTiles() {
         </button>`;
     }).join('');
 
-    const hint = starred.length === 0
-        ? '<span class="pv-tile-hint">★ Star a view to add a quick tile</span>'
-        : '';
-
-    bar.innerHTML = allTile + tiles + hint;
+    bar.innerHTML = allTile + tiles;
 }
 
 // Back-compat aliases
