@@ -198,14 +198,26 @@
         <span id="portfolio-result-count" class="result-count"></span>
         <div class="portfolio-toolbar-right">
             <button class="header-secondary-btn portfolio-export-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
-            <div class="portfolio-col-picker" id="portfolio-views-picker">
-                <button class="portfolio-col-picker-btn" id="portfolio-views-btn" onclick="togglePortfolioViewPicker(event)">★ Views ▾</button>
-                <div class="portfolio-col-dropdown" id="portfolio-views-dropdown"></div>
-            </div>
+            <button class="portfolio-col-picker-btn" id="portfolio-views-btn" onclick="openPortfolioViewsModal()">★ Views</button>
             <div class="portfolio-col-picker" id="portfolio-col-picker">
                 <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
                 <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Portfolio Views modal (mirrors student tracker's filter builder modal) -->
+    <div id="pv-modal-backdrop" class="pv-modal-backdrop" onclick="if(event.target===this)closePortfolioViewsModal()">
+        <div class="pv-modal" role="dialog" aria-modal="true" aria-label="Portfolio Views">
+            <div class="pv-modal-header">
+                <span class="pv-modal-title">★ Views</span>
+                <button class="pv-modal-x" onclick="closePortfolioViewsModal()" aria-label="Close">×</button>
+            </div>
+            <div class="pv-modal-body">
+                <aside class="pv-modal-sidebar" id="pv-modal-sidebar"></aside>
+                <div class="pv-modal-main" id="pv-modal-main"></div>
+            </div>
+            <div class="pv-modal-footer" id="pv-modal-footer"></div>
         </div>
     </div>
 

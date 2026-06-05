@@ -4916,85 +4916,145 @@ function applyPortfolioView(id) {
     renderPortfolioTable();
 }
 
-// Save current state as a new personal view (prompts for name).
-function saveCurrentAsPortfolioView() {
-    const name = prompt('Name for this view:');
-    if (!name || !name.trim()) return;
+// ── Portfolio Views modal ────────────────────────────────────────────────────
+// Mirrors the student tracker's Views modal: left sidebar (view list with
+// delete), right panel (current state summary + name input + Save button),
+// footer (Close). Opens from the "★ Views" button in the toolbar.
+
+let _pvModalSavingName = '';
+
+function openPortfolioViewsModal() {
+    const bd = document.getElementById('pv-modal-backdrop');
+    if (!bd) return;
+    _pvModalSavingName = '';
+    bd.classList.add('open');
+    _renderPvModalSidebar();
+    _renderPvModalMain();
+    _renderPvModalFooter();
+}
+
+function closePortfolioViewsModal() {
+    const bd = document.getElementById('pv-modal-backdrop');
+    if (bd) bd.classList.remove('open');
+}
+
+function _renderPvModalSidebar() {
+    const host = document.getElementById('pv-modal-sidebar');
+    if (!host) return;
+    const personal = getPortfolioPersonalViews();
+    const renderItem = (v, deletable) => {
+        const isActive = v.id === portfolioActiveViewId;
+        const dirty    = isActive && portfolioActiveViewDirty;
+        const del      = deletable
+            ? `<button class="pv-side-del" onclick="pvDeleteView('${v.id}')" title="Delete">×</button>`
+            : '';
+        return `<div class="pv-side-item${isActive ? ' active' : ''}" onclick="pvApplyFromModal('${v.id}')">
+            <span class="pv-side-name">${escapeHtml(v.name)}</span>
+            ${dirty ? '<span class="pv-dirty" title="Filters changed since this view was applied">●</span>' : ''}
+            ${del}
+        </div>`;
+    };
+    let html = '<div class="pv-side-section">Team views</div>';
+    html += PORTFOLIO_BUILT_IN_VIEWS.map(v => renderItem(v, false)).join('');
+    html += '<div class="pv-side-section">My views</div>';
+    html += personal.length
+        ? personal.map(v => renderItem(v, true)).join('')
+        : '<div class="pv-side-empty">None saved yet — use "+ Save as My View" to create one.</div>';
+    host.innerHTML = html;
+}
+
+function _renderPvModalMain() {
+    const host = document.getElementById('pv-modal-main');
+    if (!host) return;
+    const allKeys  = PORTFOLIO_COLUMNS.map(c => c.key);
+    const visCols  = [...portfolioVisibleCols];
+    const isAllCols = allKeys.every(k => visCols.includes(k));
+    const colSummary = isAllCols ? 'All columns' : `${visCols.length} of ${allKeys.length} columns`;
+    const f = _snapshotPortfolioFilters();
+    const nFilters = Object.entries(f).filter(([, v]) => Array.isArray(v) ? v.length > 0 : (v !== '')).length;
+    const filterSummary = nFilters ? `${nFilters} filter${nFilters > 1 ? 's' : ''} active` : 'No filters active';
+    const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
+    const editingTag = active
+        ? `<span class="pv-editing-tag${portfolioActiveViewDirty ? ' dirty' : ''}">${portfolioActiveViewDirty ? '● ' : ''}Active view: <strong>${escapeHtml(active.name)}</strong></span>`
+        : '<span class="pv-editing-tag">No view active</span>';
+    host.innerHTML = `
+        <div class="pv-main-summary">
+            ${editingTag}
+            <div class="pv-summary-line">Columns: <strong>${escapeHtml(colSummary)}</strong></div>
+            <div class="pv-summary-line">Filters: <strong>${escapeHtml(filterSummary)}</strong></div>
+        </div>
+        <hr class="pv-main-divider">
+        <div class="pv-save-section">
+            <div class="pv-save-label">Save current columns + filters as a new personal view:</div>
+            <div class="pv-save-row">
+                <input id="pv-name-input" class="pv-name-input" type="text" maxlength="60"
+                       placeholder="Name this view…"
+                       value="${escapeHtml(_pvModalSavingName)}"
+                       oninput="_pvModalSavingName=this.value"
+                       onkeydown="if(event.key==='Enter')pvConfirmSave()">
+                <button class="pv-btn pv-btn-primary" onclick="pvConfirmSave()">+ Save as My View</button>
+            </div>
+        </div>`;
+    setTimeout(() => document.getElementById('pv-name-input')?.focus(), 50);
+}
+
+function _renderPvModalFooter() {
+    const host = document.getElementById('pv-modal-footer');
+    if (!host) return;
+    host.innerHTML = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Close</button>`;
+}
+
+function pvApplyFromModal(id) {
+    applyPortfolioView(id);
+    closePortfolioViewsModal();
+}
+
+function pvDeleteView(id) {
+    const views = getPortfolioPersonalViews().filter(v => v.id !== id);
+    setPortfolioPersonalViews(views);
+    if (portfolioActiveViewId === id) { portfolioActiveViewId = null; portfolioActiveViewDirty = false; }
+    _renderPvModalSidebar();
+    _renderPvModalMain();
+    renderPortfolioViewTiles();
+}
+
+function pvConfirmSave() {
+    const name = (_pvModalSavingName || '').trim();
+    if (!name) { document.getElementById('pv-name-input')?.focus(); return; }
     const id = 'personal_' + Date.now();
     const views = getPortfolioPersonalViews();
-    views.push({
-        id, name: name.trim(), team: false,
-        state: {
-            visibleCols: [...portfolioVisibleCols],
-            filters: _snapshotPortfolioFilters(),
-        },
-    });
+    views.push({ id, name, team: false, state: { visibleCols: [...portfolioVisibleCols], filters: _snapshotPortfolioFilters() } });
     setPortfolioPersonalViews(views);
     portfolioActiveViewId    = id;
     portfolioActiveViewDirty = false;
+    _pvModalSavingName       = '';
+    _renderPvModalSidebar();
+    _renderPvModalMain();
     renderPortfolioViewTiles();
 }
 
-function deletePortfolioView(id, ev) {
-    ev && ev.stopPropagation();
-    const views = getPortfolioPersonalViews().filter(v => v.id !== id);
-    setPortfolioPersonalViews(views);
-    if (portfolioActiveViewId === id) portfolioActiveViewId = null;
-    renderPortfolioViewTiles();
-}
-
-// Mark active view as dirty whenever the user changes a filter.
-// Call this from filter-change handlers.
+// Mark active view dirty when a filter changes; update the button label.
 function _portfolioViewTouch() {
     if (!portfolioActiveViewId) return;
-    if (portfolioActiveViewDirty) return;
     const view = getPortfolioViewById(portfolioActiveViewId);
     if (!view) return;
-    const expected = _snapshotPortfolioFilters();
-    portfolioActiveViewDirty = !_snapshotEq(expected, view.state.filters || {});
+    portfolioActiveViewDirty = !_snapshotEq(_snapshotPortfolioFilters(), view.state.filters || {});
     renderPortfolioViewTiles();
 }
 
-// Render views into the dropdown and update the button label to show active view.
+// Update the Views button label to show the active view name + dirty dot.
 function renderPortfolioViewTiles() {
-    const dd = document.getElementById('portfolio-views-dropdown');
     const btn = document.getElementById('portfolio-views-btn');
-    if (!dd) return;
-    const views = getAllPortfolioViews();
-    const active = views.find(v => v.id === portfolioActiveViewId);
-    if (btn) {
-        const label = active ? active.name : 'Views';
-        const dot = portfolioActiveViewDirty ? ' ●' : '';
-        btn.textContent = `★ ${label}${dot} ▾`;
-        btn.classList.toggle('pv-active-btn', !!active);
-    }
-    dd.innerHTML = views.map(v => {
-        const isActive = v.id === portfolioActiveViewId;
-        const dirty    = isActive && portfolioActiveViewDirty;
-        const del      = !v.team
-            ? `<button class="pv-dd-del" onclick="deletePortfolioView('${v.id}',event)" title="Delete">×</button>`
-            : '';
-        return `<div class="pv-dd-item${isActive ? ' active' : ''}" onclick="applyPortfolioView('${v.id}'); togglePortfolioViewPicker()">
-            <span class="pv-dd-name">${escapeHtml(v.name)}</span>
-            ${dirty ? '<span class="pv-dirty">●</span>' : ''}${del}
-        </div>`;
-    }).join('') +
-    `<div class="pv-dd-divider"></div>
-     <div class="pv-dd-item pv-dd-save" onclick="saveCurrentAsPortfolioView(); togglePortfolioViewPicker()">+ Save current as view…</div>`;
+    if (!btn) return;
+    const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
+    const dot    = portfolioActiveViewDirty ? ' ●' : '';
+    btn.textContent = active ? `★ ${active.name}${dot}` : '★ Views';
+    btn.classList.toggle('pv-active-btn', !!active);
 }
 
-function togglePortfolioViewPicker(e) {
-    if (e) e.stopPropagation();
-    const dd = document.getElementById('portfolio-views-dropdown');
-    if (!dd) return;
-    const wasOpen = dd.classList.contains('open');
-    // close all other pickers first
-    document.querySelectorAll('.portfolio-col-dropdown.open').forEach(el => el.classList.remove('open'));
-    if (!wasOpen) {
-        renderPortfolioViewTiles();
-        dd.classList.add('open');
-    }
-}
+// Back-compat aliases
+function saveCurrentAsPortfolioView() { openPortfolioViewsModal(); }
+function deletePortfolioView(id)      { pvDeleteView(id); }
 
 let allPortfolioPrograms   = [];
 let portfolioExpandedIds   = new Set();

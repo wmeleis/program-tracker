@@ -2210,25 +2210,81 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 /* Portfolio toolbar right group (Export | Views | Columns) */
 #portfolio-table-toolbar { justify-content: space-between; }
 .portfolio-toolbar-right { display: flex; align-items: center; gap: 8px; }
-
-/* Views dropdown — same structure as the Columns picker */
 .pv-active-btn { border-color: var(--accent) !important; color: var(--accent) !important; background: #eff6ff !important; }
-.pv-dirty { color: #f59e0b; font-size: 10px; margin: 0 1px; }
-.pv-dd-item {
+.pv-dirty { color: #f59e0b; font-size: 10px; margin: 0 2px; }
+
+/* Portfolio Views modal */
+.pv-modal-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(15,23,42,.45); z-index: 500;
+    align-items: center; justify-content: center;
+}
+.pv-modal-backdrop.open { display: flex; }
+.pv-modal {
+    background: #fff; border-radius: 10px;
+    width: min(820px, 96vw); max-height: 90vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,.25);
+}
+.pv-modal-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.pv-modal-title { font-size: 16px; font-weight: 700; flex: 1; }
+.pv-modal-x {
+    background: none; border: none; font-size: 22px; cursor: pointer;
+    color: var(--text-secondary); line-height: 1; padding: 0 4px;
+}
+.pv-modal-x:hover { color: var(--text); }
+.pv-modal-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.pv-modal-sidebar {
+    width: 220px; flex-shrink: 0; border-right: 1px solid var(--border);
+    background: #f9fafb; overflow-y: auto; padding: 8px 0;
+}
+.pv-modal-main { flex: 1; overflow-y: auto; padding: 20px 24px; }
+.pv-modal-footer {
+    padding: 12px 18px; border-top: 1px solid var(--border); flex-shrink: 0;
+    display: flex; justify-content: flex-end; gap: 8px;
+}
+.pv-side-section {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--text-secondary);
+    padding: 10px 14px 4px;
+}
+.pv-side-item {
     display: flex; align-items: center; gap: 6px;
-    padding: 7px 12px; font-size: 13px; cursor: pointer;
-    border-radius: 4px; white-space: nowrap;
+    padding: 7px 14px; cursor: pointer; font-size: 13px;
 }
-.pv-dd-item:hover { background: #f1f5f9; }
-.pv-dd-item.active { color: var(--accent); font-weight: 600; }
-.pv-dd-name { flex: 1; }
-.pv-dd-del {
-    background: none; border: none; cursor: pointer; padding: 0 2px;
-    font-size: 15px; color: var(--text-secondary); line-height: 1;
+.pv-side-item:hover { background: #e5e7eb; }
+.pv-side-item.active { background: #eff6ff; color: var(--accent); font-weight: 600; }
+.pv-side-name { flex: 1; }
+.pv-side-empty { font-size: 12px; color: var(--text-secondary); padding: 6px 14px 10px; font-style: italic; }
+.pv-side-del {
+    background: none; border: none; cursor: pointer; font-size: 16px;
+    color: var(--text-secondary); line-height: 1; padding: 0; opacity: 0;
 }
-.pv-dd-del:hover { color: var(--danger, #ef4444); }
-.pv-dd-divider { height: 1px; background: var(--border); margin: 4px 0; }
-.pv-dd-save { color: var(--accent); font-weight: 500; }
+.pv-side-item:hover .pv-side-del { opacity: 1; }
+.pv-side-del:hover { color: var(--danger, #ef4444); }
+.pv-editing-tag {
+    display: inline-block; margin-bottom: 10px; font-size: 13px;
+    color: var(--text-secondary); background: #f1f5f9;
+    padding: 4px 10px; border-radius: 4px;
+}
+.pv-editing-tag.dirty { background: #fef3c7; color: #92400e; }
+.pv-summary-line { font-size: 13px; margin-top: 5px; color: var(--text-secondary); }
+.pv-main-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.pv-save-label { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.pv-save-row { display: flex; gap: 8px; align-items: center; }
+.pv-name-input {
+    flex: 1; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font: inherit; font-size: 13px;
+}
+.pv-name-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
+.pv-btn { padding: 7px 16px; border-radius: 6px; font: inherit; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
+.pv-btn-primary { background: var(--accent); color: #fff; }
+.pv-btn-primary:hover { background: var(--accent-hover); }
+.pv-btn-ghost { background: #fff; color: var(--text); border-color: var(--border); }
+.pv-btn-ghost:hover { border-color: var(--accent); color: var(--accent); background: #eff6ff; }
 
 /* Campuses tab */
 .campuses-table { border-collapse: collapse; margin-top: 10px; font-size: 13px; min-width: 360px; }
