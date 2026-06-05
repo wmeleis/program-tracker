@@ -5691,6 +5691,91 @@ function renderPortfolioRow(p, opts = {}) {
     </tr>`;
 }
 
+// Export the currently-visible, currently-filtered Portfolio rows to CSV.
+// Mirrors the student-tracker pattern: visible columns × filtered rows,
+// UTF-8 BOM for Excel, RFC-4180 quoting, timestamped filename.
+function exportPortfolioCsv() {
+    const filtered = getPortfolioFiltered();
+
+    // Build a flat list of rows exactly as they appear in the table (top-level
+    // programs + any currently-expanded concentration children).
+    const rows = [];
+    const concsByParent = {};
+    allPortfolioPrograms.forEach(p => {
+        if (p.concentration_of) {
+            (concsByParent[p.concentration_of] = concsByParent[p.concentration_of] || []).push(p);
+        }
+    });
+    const filteredIds = new Set(filtered.map(p => p.id));
+    filtered.forEach(p => {
+        rows.push({prog: p, isConc: false, parent: null});
+        (concsByParent[p.id] || [])
+            .filter(c => filteredIds.has(c.id) || true)  // concentrations follow parent
+            .forEach(c => rows.push({prog: c, isConc: true, parent: p}));
+    });
+
+    // Per-column plain-text accessor (strips HTML, resolves values) -------
+    function colText(p, key, isConc, parent) {
+        const ep = isConc && parent ? parent : p;  // effective parent for inherited cols
+        switch (key) {
+            case 'degree':      return isConc ? 'Concentration' : extractPortfolioDegree(p.program_name);
+            case 'college':     return (isConc && !p.college && parent) ? parent.college || '' : p.college || '';
+            case 'campus':      return isConc && parent ? parent.campus || p.campus || '' : p.campus || '';
+            case 'otp':         return p.otp_status || '';
+            case 'svt':         return p.svt_status || '';
+            case 'substatus':   return p.roster_sub_status || '';
+            case 'speed':       return p.speed_to_market === 'True' ? 'Yes' : p.speed_to_market === 'False' ? 'No' : '';
+            case 'gls':         return p.gls_status || '';
+            case 'launch':      return p.roster_launch_date || '';
+            case 'cim':         return p.cim_step || '';
+            case 'cimchange':   return (p.cim_step && p.cim_change_type) ? p.cim_change_type : p.cim_program_id ? '' : '';
+            case 'inworkflow':  return p.cim_program_id ? 'Yes' : 'No';
+            case 'inactadmit':  return p.inactivation_admission || '';
+            case 'inacttoday':  return _inactAdmittingToday(p) || '';
+            case 'market2025':      return p.market_2025 || '';
+            case 'perf2025':        return p.performance_2025 || '';
+            case 'marketscore2025': return p.market_score_2025 != null ? String(p.market_score_2025) : '';
+            case 'perfscore2025':   return p.performance_score_2025 != null ? String(p.performance_score_2025) : '';
+            case 'notes':       return p.note || '';
+            default:            return '';
+        }
+    }
+
+    const visCols = PORTFOLIO_COLUMNS.filter(c => portfolioVisibleCols.has(c.key));
+    const headers = ['Program', ...visCols.map(c => c.label)];
+    const csvRows = rows.map(({prog: p, isConc, parent}) => {
+        const name = isConc ? _portfolioShortConcName(p.program_name) : normalizePortfolioName(stripCampusFromName(p.program_name));
+        return [name, ...visCols.map(c => colText(p, c.key, isConc, parent))];
+    });
+
+    const csv = [headers, ...csvRows].map(row =>
+        row.map(cell => {
+            const s = String(cell == null ? '' : cell);
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        }).join(',')
+    ).join('\n');
+
+    const blob = new Blob(['﻿' + csv], {type: 'text/csv;charset=utf-8'});
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '');
+    const fname = `portfolio-${stamp}.csv`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// Short-name helper for concentration sub-rows (used in the CSV export).
+function _portfolioShortConcName(full) {
+    const n = (full || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    let m;
+    m = n.match(/^.+?,\s*concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i); if (m) return m[1].trim();
+    m = n.match(/^.+?\s+with\s+Concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i); if (m) return m[1].trim();
+    m = n.match(/^.+?\s*[-—]\s*(.+?)\s+Concentration,?\s+[A-Z]{1,7}\s*$/i); if (m) return m[1].trim();
+    m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i); if (m) return m[1].trim();
+    return n;
+}
+
 async function editPortfolioNote(el, programId) {
     const current = el.querySelector('.add-note') ? '' : el.innerText.trim();
     const textarea = document.createElement('textarea');
