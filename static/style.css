@@ -2310,6 +2310,40 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     font-size: 13px; cursor: pointer; border-radius: 4px;
 }
 .pvb-multi-pop label:hover { background: #eff6ff; }
+.pvb-bool { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── Sidebar select state + star marks + ADMIN pill ──────────────── */
+.pv-side-item.selected { background: #eff6ff; color: var(--accent); font-weight: 600; }
+.pv-side-starmark { color: #f59e0b; font-size: 12px; margin-right: 2px; }
+.pv-admin-pill {
+    display: inline-block; background: #7c3aed; color: #fff; font-size: 9px;
+    font-weight: 700; letter-spacing: .05em; padding: 1px 5px; border-radius: 8px;
+    vertical-align: middle; margin-left: 4px;
+}
+
+/* ── Footer: context label + dirty dot + grouped actions ─────────── */
+.pv-active-tag { font-size: 14px; color: var(--text); }
+.pv-active-tag b { font-weight: 700; }
+.pv-dirty-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #f59e0b; margin-right: 6px; vertical-align: middle;
+}
+.pv-footer-actions { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pv-btn-danger { color: var(--danger, #ef4444); }
+.pv-btn-danger:hover { border-color: var(--danger, #ef4444); background: #fee2e2; color: var(--danger, #ef4444); }
+
+/* ── Starred-view quick tiles above the Portfolio table ──────────── */
+.portfolio-view-tiles {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    padding: 6px 0 2px; margin: 0 0 4px;
+}
+.pv-tile {
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: 16px;
+    background: #fff; font: inherit; font-size: 12px; font-weight: 600;
+    color: var(--text-secondary); cursor: pointer;
+}
+.pv-tile:hover { border-color: var(--accent); color: var(--accent); background: #eff6ff; }
+.pv-tile.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
 .pv-side-newbtn {
     display: block; width: calc(100% - 16px); margin: 8px 8px 4px;
     padding: 7px 12px; background: #fff; border: 1px solid var(--border);

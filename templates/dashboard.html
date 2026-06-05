@@ -211,7 +211,7 @@
     <div id="pv-modal-backdrop" class="pv-modal-backdrop" onclick="if(event.target===this)closePortfolioViewsModal()">
         <div class="pv-modal" role="dialog" aria-modal="true" aria-label="Portfolio Views">
             <div class="pv-modal-header">
-                <span class="pv-modal-title">★ Views</span>
+                <span class="pv-modal-title">Views</span>
                 <span class="pv-modal-count" id="pv-modal-count"></span>
                 <button class="pv-modal-x" onclick="closePortfolioViewsModal()" aria-label="Close">×</button>
             </div>
@@ -222,6 +222,9 @@
             <div class="pv-modal-footer" id="pv-modal-footer"></div>
         </div>
     </div>
+
+    <!-- Portfolio starred-view tiles (quick-apply); only shown on Portfolio view -->
+    <div id="portfolio-view-tiles" class="portfolio-view-tiles" style="display:none"></div>
 
     <!-- Pipeline Summary -->
     <section id="pipeline" class="pipeline-section">

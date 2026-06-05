@@ -190,6 +190,8 @@ function switchView(view) {
         if (filtersSection)      filtersSection.style.display = 'none';
         if (subjectGroup)        subjectGroup.style.display = 'none';
     } else {
+        const tiles = document.getElementById('portfolio-view-tiles');
+        if (tiles) tiles.style.display = 'none';
         cimHdrBtns.forEach(b => b.style.display = '');
         if (lastUpdatedEl) lastUpdatedEl.style.display = '';
         if (scanStatusEl)  scanStatusEl.style.display  = '';
@@ -4927,16 +4929,16 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'credential',  label: 'Credential',       type: 'select', value: p => extractPortfolioDegree(p.program_name) || ''},
     {key: 'college',     label: 'College',          type: 'select', value: p => p.college || ''},
     {key: 'campus',      label: 'Campus',           type: 'select', value: p => p.campus || ''},
-    {key: 'in_cim',      label: 'In CIM',           type: 'select', value: p => p.cim_program_id ? 'Yes' : 'No'},
+    {key: 'in_cim',      label: 'In CIM',           type: 'boolean', value: p => p.cim_program_id ? 'Y' : 'N'},
     {key: 'cim_step',    label: 'CIM Step',         type: 'select', value: p => p.cim_step || ''},
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
     {key: 'svt',         label: 'SVT Status',       type: 'select', value: p => p.svt_status || ''},
     {key: 'substatus',   label: 'SVT Sub-status',   type: 'select', value: p => p.roster_sub_status || ''},
-    {key: 'speed',       label: 'Speed to Market',  type: 'select', value: p => p.speed_to_market === 'True' ? 'Yes' : p.speed_to_market === 'False' ? 'No' : ''},
+    {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
     {key: 'otp',         label: 'OTP Status',       type: 'select', value: p => p.otp_status || ''},
     {key: 'inact_admit', label: 'Inactivation of Admission', type: 'select', value: p => p.inactivation_admission || ''},
-    {key: 'admit_today', label: 'Admitting Today',  type: 'select', value: p => _inactAdmittingToday(p) || ''},
+    {key: 'admit_today', label: 'Admitting Today',  type: 'boolean', value: p => { const v = _inactAdmittingToday(p); return v === 'Yes' ? 'Y' : v === 'No' ? 'N' : ''; }},
     {key: 'note',        label: 'Notes',            type: 'text',   value: p => p.note || ''},
 ];
 function _pvField(key) { return PORTFOLIO_FILTER_FIELDS.find(f => f.key === key); }
@@ -4979,7 +4981,7 @@ function evalPortfolioRule(p, rule) {
         if (op === 'starts_with') return hay.startsWith(q);
         return hay.includes(q);   // contains (default)
     }
-    // select
+    // select / boolean (value is an array of allowed tokens)
     const arr = Array.isArray(rule.value) ? rule.value : (rule.value ? [rule.value] : []);
     if (!arr.length) return true;
     const hit = new Set(arr).has(v);
@@ -4987,13 +4989,15 @@ function evalPortfolioRule(p, rule) {
 }
 
 function _opsForPvType(t) {
-    if (t === 'text') return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is set'],['is_empty','is empty']];
+    if (t === 'text')    return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is set'],['is_empty','is empty']];
+    if (t === 'boolean') return [['in','is'],['is_set','is set'],['is_empty','is empty']];
     return [['in','is one of'],['not_in','is not one of'],['is_set','is set'],['is_empty','is empty']];
 }
 function _defaultPvRule(key) {
     const f = _pvField(key) || PORTFOLIO_FILTER_FIELDS[0];
-    return f.type === 'text' ? {type:'rule', field:f.key, op:'contains', value:''}
-                             : {type:'rule', field:f.key, op:'in', value:[]};
+    if (f.type === 'text')    return {type:'rule', field:f.key, op:'contains', value:''};
+    if (f.type === 'boolean') return {type:'rule', field:f.key, op:'in', value:['Y']};
+    return {type:'rule', field:f.key, op:'in', value:[]};
 }
 
 // Apply a named view: restore column visibility + filters, mark active.
@@ -5029,19 +5033,35 @@ function applyPortfolioView(id) {
 // Footer:  Clear all | Editing: X | Cancel | Update "X" | + Save as My/Team View.
 // Header:  live "N programs match".
 
-let _pvDraftTree   = null;   // tree being edited (also the live-applied tree)
-let _pvLoadedViewId = null;  // the view currently loaded into the builder
-let _pvMultiOpen   = null;   // path-string of the open select popup
-let _pvSavingScope = null;   // null | 'personal' | 'team' (Save-as form active)
+let _pvDraftTree    = null;  // tree being edited in the modal (NOT applied until Apply)
+let _pvLoadedViewId = null;  // the view currently selected/loaded in the editor
+let _pvMultiOpen    = null;  // path-string of the open select popup
+let _pvSavingScope  = null;  // null | 'personal' | 'team' (Save-as naming mode)
+const _PORTFOLIO_STARS_LS = 'cim-portfolio-starred-v1';
+// Local Flask = full edit rights (the dean's own machine); static site = read-only.
+function _pvIsAdmin() { return !window._staticMode; }
+
+function getPortfolioStarredIds() {
+    try { return new Set(JSON.parse(localStorage.getItem(_PORTFOLIO_STARS_LS) || '[]')); }
+    catch (_) { return new Set(); }
+}
+function setPortfolioStarredIds(set) {
+    try { localStorage.setItem(_PORTFOLIO_STARS_LS, JSON.stringify([...set])); } catch (_) {}
+}
+function togglePortfolioStar(id) {
+    const s = getPortfolioStarredIds();
+    s.has(id) ? s.delete(id) : s.add(id);
+    setPortfolioStarredIds(s);
+}
 
 function openPortfolioViewsModal() {
     const bd = document.getElementById('pv-modal-backdrop');
     if (!bd) return;
-    // Seed the draft from the applied tree (or empty group).
+    // Seed the editor draft from the applied tree (or empty group). Editing the
+    // draft does NOT touch the table until the user clicks Apply.
     _pvDraftTree = portfolioFilterTree
         ? JSON.parse(JSON.stringify(portfolioFilterTree))
         : makeEmptyPvGroup('all');
-    portfolioFilterTree = _pvDraftTree;   // live-apply by reference
     _pvLoadedViewId = portfolioActiveViewId;
     _pvMultiOpen = null;
     _pvSavingScope = null;
@@ -5055,21 +5075,29 @@ function closePortfolioViewsModal() {
     _pvMultiOpen = null;
 }
 
-// Re-render the whole modal + the table (edits apply live).
+// Re-render the modal (sidebar + editor + footer + live preview count). The
+// table is NOT touched here — only Apply commits the draft.
 function renderPvModal() {
-    portfolioFilterTree = (_pvDraftTree && (_pvDraftTree.children || []).length) ? _pvDraftTree : (_pvDraftTree || null);
     _renderPvSidebar();
     _renderPvBuilder();
     _renderPvFooter();
     _renderPvCount();
-    renderPortfolioTable();
     renderPortfolioViewTiles();
+}
+
+// Preview how many programs the DRAFT tree matches (temporarily swap it in).
+function _pvPreviewCount() {
+    const saved = portfolioFilterTree;
+    portfolioFilterTree = (_pvDraftTree && (_pvDraftTree.children || []).length) ? _pvDraftTree : null;
+    let n;
+    try { n = getPortfolioFiltered().length; } finally { portfolioFilterTree = saved; }
+    return n;
 }
 
 function _renderPvCount() {
     const el = document.getElementById('pv-modal-count');
     if (!el) return;
-    const n = getPortfolioFiltered().length;
+    const n = _pvPreviewCount();
     el.textContent = `${n} program${n === 1 ? '' : 's'} match`;
 }
 
@@ -5078,19 +5106,21 @@ function _renderPvSidebar() {
     if (!host) return;
     const personal = getPortfolioPersonalViews();
     const team     = getPortfolioTeamViews();
-    const item = (v, deletable) => {
-        const loaded = v.id === _pvLoadedViewId;
-        const del = deletable ? `<button class="pv-side-del" onclick="pvDeleteView('${v.id}',event)" title="Delete">×</button>` : '';
-        return `<div class="pv-side-item${loaded ? ' active' : ''}" onclick="pvLoadView('${v.id}')">
-            <span class="pv-side-name">${escapeHtml(v.name)}</span>${del}</div>`;
+    const stars    = getPortfolioStarredIds();
+    // Rows are name-only and SELECT (load into editor) on click; all actions
+    // live in the footer. A leading ★ marks views starred as a top tile.
+    const item = (v) => {
+        const sel  = v.id === _pvLoadedViewId;
+        const mark = stars.has(v.id) ? '<span class="pv-side-starmark" title="Starred — shows as a top tile">★</span>' : '';
+        return `<div class="pv-side-item${sel ? ' selected' : ''}" onclick="pvLoadView('${v.id}')">
+            ${mark}<span class="pv-side-name">${escapeHtml(v.name)}</span></div>`;
     };
     let html = `<button class="pv-side-newbtn" onclick="pvNewView()">+ New view</button>`;
-    html += `<div class="pv-side-section">Team views</div>`;
-    html += PORTFOLIO_BUILT_IN_VIEWS.map(v => item(v, false)).join('');
-    html += team.length ? team.map(v => item(v, true)).join('') : '';
-    html += `<div class="pv-side-section">My views</div>`;
-    html += personal.length ? personal.map(v => item(v, true)).join('')
-                            : '<div class="pv-side-empty">None saved yet.</div>';
+    html += `<div class="pv-side-section">Team ${_pvIsAdmin() ? '<span class="pv-admin-pill">ADMIN</span>' : ''}</div>`;
+    const teamAll = [...PORTFOLIO_BUILT_IN_VIEWS, ...team];
+    html += teamAll.length ? teamAll.map(item).join('') : '<div class="pv-side-empty">None</div>';
+    html += `<div class="pv-side-section">Personal</div>`;
+    html += personal.length ? personal.map(item).join('') : '<div class="pv-side-empty">None saved yet</div>';
     host.innerHTML = html;
 }
 
@@ -5140,6 +5170,11 @@ function _renderPvRuleValue(rule, f, path) {
         return `<input type="text" class="pvb-text" value="${escapeHtml(rule.value || '')}"
                  oninput="pvbSetValue('${path}', this.value)" placeholder="search…">`;
     }
+    if (f.type === 'boolean') {
+        const vals = Array.isArray(rule.value) ? rule.value : (rule.value ? [rule.value] : []);
+        return `<label class="pvb-bool"><input type="checkbox" ${vals.includes('Y') ? 'checked' : ''} onchange="pvbToggleMulti('${path}','Y')"> Yes</label>
+                <label class="pvb-bool"><input type="checkbox" ${vals.includes('N') ? 'checked' : ''} onchange="pvbToggleMulti('${path}','N')"> No</label>`;
+    }
     // select — chips + popup
     const vals = Array.isArray(rule.value) ? rule.value : [];
     const chips = vals.length
@@ -5161,25 +5196,87 @@ function _escJsPv(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').
 function _renderPvFooter() {
     const host = document.getElementById('pv-modal-footer');
     if (!host) return;
-    const loaded = _pvLoadedViewId ? getPortfolioViewById(_pvLoadedViewId) : null;
-    const canUpdate = loaded && !loaded.team && loaded.id !== 'all' && loaded.id !== 'gtm';
-    let left = `<button class="pv-btn pv-btn-ghost" onclick="pvClearAll()">Clear all</button>`;
-    if (loaded) left += ` <span class="pv-editing-tag">Editing: <strong>${escapeHtml(loaded.name)}</strong></span>`;
-    let right;
+
+    // ── Save-as naming mode takes over the footer ──────────────────────────
     if (_pvSavingScope) {
-        right = `<span class="pv-save-form">
+        host.innerHTML = `<span class="pv-save-form">
             <input id="pv-name-input" class="pv-name-input" type="text" maxlength="60" placeholder="Name this view…"
                    onkeydown="if(event.key==='Enter')pvConfirmSave();else if(event.key==='Escape')pvCancelSave()">
             <button class="pv-btn pv-btn-primary" onclick="pvConfirmSave()">Save ${_pvSavingScope === 'team' ? 'as Team View' : 'as My View'}</button>
             <button class="pv-btn pv-btn-ghost" onclick="pvCancelSave()">Cancel</button></span>`;
-    } else {
-        right = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Cancel</button> `;
-        if (canUpdate) right += `<button class="pv-btn pv-btn-primary" onclick="pvUpdateLoaded()" title="Save changes to this view">↻ Update "${escapeHtml(loaded.name)}"</button> `;
-        right += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')">+ Save as My View</button>
-                  <button class="pv-btn pv-btn-ghost" onclick="pvStartSave('team')">+ Save as Team View</button>`;
+        setTimeout(() => document.getElementById('pv-name-input')?.focus(), 30);
+        return;
     }
-    host.innerHTML = `${left}<span style="flex:1"></span>${right}`;
-    if (_pvSavingScope) setTimeout(() => document.getElementById('pv-name-input')?.focus(), 30);
+
+    const loaded   = _pvLoadedViewId ? getPortfolioViewById(_pvLoadedViewId) : null;
+    const builtIn  = loaded && (loaded.id === 'all' || loaded.id === 'gtm');
+    const canEdit  = loaded && !builtIn && (loaded.team ? _pvIsAdmin() : true);  // update/delete/move
+    const starred  = loaded && getPortfolioStarredIds().has(loaded.id);
+    const draftJson = JSON.stringify((_pvDraftTree && (_pvDraftTree.children || []).length) ? _pvDraftTree : null);
+    const savedJson = loaded ? JSON.stringify((loaded.state && loaded.state.tree) || null) : null;
+    const dirty = loaded && draftJson !== savedJson;
+
+    // Left: selected-view context label
+    const left = loaded
+        ? `<span class="pv-active-tag">${dirty ? '<span class="pv-dirty-dot" title="Unsaved changes"></span>' : ''}<b>${escapeHtml(loaded.name)}</b></span>`
+        : `<span class="pv-active-tag">New view</span>`;
+
+    // Right: actions on the selected view + save/apply
+    let acts = '';
+    if (loaded) {
+        acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStarLoaded()" title="${starred ? 'Remove from top tiles' : 'Show as a top tile'}">${starred ? '★ Unstar' : '☆ Star'}</button>`;
+        if (canEdit) {
+            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(-1)" title="Move up">↑</button>`;
+            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(1)" title="Move down">↓</button>`;
+            acts += `<button class="pv-btn pv-btn-ghost pv-btn-danger" onclick="pvDeleteLoaded()" title="Delete this view">Delete</button>`;
+        }
+    }
+    acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')" title="Save as a new personal view">Save as My View</button>`;
+    if (_pvIsAdmin()) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('team')" title="Save as a new team view">Save as Team View</button>`;
+    if (canEdit && dirty) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvUpdateLoaded()" title="Save changes to this view">↻ Update</button>`;
+    acts += `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Cancel</button>`;
+    acts += `<button class="pv-btn pv-btn-primary" onclick="pvApplyDraft()" title="Apply to the table">Apply</button>`;
+
+    host.innerHTML = `${left}<span style="flex:1"></span><span class="pv-footer-actions">${acts}</span>`;
+}
+
+// Commit whatever's in the editor to the table, then close. When a saved view
+// is loaded, first restore that view's columns + top-bar filters, then override
+// its tree with the (possibly edited) draft.
+function pvApplyDraft() {
+    if (_pvLoadedViewId && getPortfolioViewById(_pvLoadedViewId)) {
+        applyPortfolioView(_pvLoadedViewId);   // restores cols + top-bar + tree + active id
+    } else {
+        portfolioActiveViewId = null;
+        try { localStorage.setItem(_PORTFOLIO_ACTIVE_LS, ''); } catch (_) {}
+    }
+    portfolioFilterTree = (_pvDraftTree && (_pvDraftTree.children || []).length)
+        ? JSON.parse(JSON.stringify(_pvDraftTree)) : null;
+    closePortfolioViewsModal();
+    renderPortfolioViewTiles();
+    renderPortfolioTable();
+}
+
+// Footer actions on the selected view.
+function pvStarLoaded()  { if (!_pvLoadedViewId) return; togglePortfolioStar(_pvLoadedViewId); renderPvModal(); }
+function pvDeleteLoaded() { if (_pvLoadedViewId) pvDeleteView(_pvLoadedViewId); }
+function pvMoveLoaded(dir) {
+    const id = _pvLoadedViewId; if (!id) return;
+    const view = getPortfolioViewById(id); if (!view) return;
+    if (view.id === 'all' || view.id === 'gtm') return;   // built-ins are fixed
+    if (view.team) {
+        if (!_pvIsAdmin()) return;
+        const arr = portfolioTeamViews, i = arr.findIndex(v => v.id === id), j = i + dir;
+        if (i < 0 || j < 0 || j >= arr.length) return;
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+        _persistTeamViews('reorder', id);
+    } else {
+        const arr = getPortfolioPersonalViews(), i = arr.findIndex(v => v.id === id), j = i + dir;
+        if (i < 0 || j < 0 || j >= arr.length) return;
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+        setPortfolioPersonalViews(arr);
+    }
+    renderPvModal();
 }
 
 // ── Tree mutators (path = child indices like "0.2.1"; "" = root) ──────────────
@@ -5208,18 +5305,19 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.pvb-multi-pop') && !e.target.closest('.pvb-values')) { _pvMultiOpen = null; _renderPvBuilder(); }
 });
 
-function pvClearAll() { _pvDraftTree = makeEmptyPvGroup('all'); _pvLoadedViewId = null; renderPvModal(); }
-function pvNewView()  { _pvDraftTree = makeEmptyPvGroup('all'); _pvLoadedViewId = null; portfolioActiveViewId = null; renderPvModal(); }
+function pvNewView() { _pvDraftTree = makeEmptyPvGroup('all'); _pvLoadedViewId = null; _pvSavingScope = null; renderPvModal(); }
 
-// Click a sidebar view → apply it AND load its tree into the builder.
+// Click a sidebar view → SELECT it (load its tree into the editor). Does not
+// touch the table until Apply.
 function pvLoadView(id) {
-    applyPortfolioView(id);                       // restores cols + top-bar + tree, sets active
-    _pvDraftTree = portfolioFilterTree
-        ? JSON.parse(JSON.stringify(portfolioFilterTree))
+    const view = getPortfolioViewById(id);
+    if (!view) return;
+    _pvDraftTree = (view.state && view.state.tree)
+        ? JSON.parse(JSON.stringify(view.state.tree))
         : makeEmptyPvGroup('all');
-    portfolioFilterTree = _pvDraftTree;
     _pvLoadedViewId = id;
     _pvSavingScope = null;
+    _pvMultiOpen = null;
     renderPvModal();
 }
 
@@ -5260,10 +5358,9 @@ function pvConfirmSave() {
         views.push({id, name, team: false, state});
         setPortfolioPersonalViews(views);
     }
-    portfolioActiveViewId = id;
     _pvLoadedViewId = id;
     _pvSavingScope = null;
-    renderPvModal();
+    pvApplyDraft();   // save + apply + close (mirrors student tracker)
 }
 
 function pvUpdateLoaded() {
@@ -5282,8 +5379,7 @@ function pvUpdateLoaded() {
         const v = views.find(x => x.id === id);
         if (v) { v.state = state; setPortfolioPersonalViews(views); }
     }
-    portfolioActiveViewId = id;
-    renderPvModal();
+    pvApplyDraft();   // save changes + apply + close
 }
 
 // Team views: in-memory list, hydrated from the API (local) or baked data
@@ -5316,13 +5412,26 @@ async function _persistTeamViews(action, id) {
 // dirty now that views are managed in the modal builder).
 function _portfolioViewTouch() {}
 
-// Update the Views button label to show the active view name.
+// Update the Views button label + render the starred-view quick tiles.
 function renderPortfolioViewTiles() {
     const btn = document.getElementById('portfolio-views-btn');
-    if (!btn) return;
-    const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
-    btn.textContent = active ? `${active.name}` : 'Views';
-    btn.classList.toggle('pv-active-btn', !!active);
+    const all = getAllPortfolioViews();
+    if (btn) {
+        const active = all.find(v => v.id === portfolioActiveViewId);
+        btn.textContent = active ? `${active.name}` : 'Views';
+        btn.classList.toggle('pv-active-btn', !!active);
+    }
+    // Starred views render as quick-apply tiles above the table (Portfolio only).
+    const bar = document.getElementById('portfolio-view-tiles');
+    if (!bar) return;
+    if (currentView !== 'portfolio') { bar.style.display = 'none'; return; }
+    const stars = getPortfolioStarredIds();
+    const starred = all.filter(v => stars.has(v.id));
+    if (!starred.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    bar.style.display = 'flex';
+    bar.innerHTML = starred.map(v =>
+        `<button class="pv-tile${v.id === portfolioActiveViewId ? ' active' : ''}" onclick="applyPortfolioView('${v.id}'); renderPortfolioTable();">★ ${escapeHtml(v.name)}</button>`
+    ).join('');
 }
 
 // Back-compat aliases
