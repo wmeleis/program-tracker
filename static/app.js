@@ -5038,7 +5038,12 @@ let _pvMultiOpen    = null;  // path-string of the open select popup
 let _pvSavingScope  = null;  // null | 'personal' | 'team' (Save-as naming mode)
 const _PORTFOLIO_STARS_LS = 'cim-portfolio-starred-v1';
 // Local Flask = full edit rights (the dean's own machine); static site = read-only.
-function _pvIsAdmin() { return !window._staticMode; }
+// Admin flag — set via ?admin=1 in the URL (mirrors the student tracker).
+// Only admins can create / edit / reorder / delete TEAM views.
+function _pvIsAdmin() {
+    try { return new URLSearchParams(location.search).get('admin') === '1'; }
+    catch (_) { return false; }
+}
 
 function getPortfolioStarredIds() {
     try { return new Set(JSON.parse(localStorage.getItem(_PORTFOLIO_STARS_LS) || '[]')); }
@@ -5209,7 +5214,9 @@ function _renderPvFooter() {
 
     const loaded   = _pvLoadedViewId ? getPortfolioViewById(_pvLoadedViewId) : null;
     const builtIn  = loaded && (loaded.id === 'all' || loaded.id === 'gtm');
-    const canEdit  = loaded && !builtIn && (loaded.team ? _pvIsAdmin() : true);  // update/delete/move
+    // Team views (incl. built-in All/GTM) are editable only by admins; personal
+    // views are always editable by their owner. Drives ↑/↓/Delete/Update.
+    const canEdit  = loaded && (loaded.team ? _pvIsAdmin() : true);
     const starred  = loaded && getPortfolioStarredIds().has(loaded.id);
     const draftJson = JSON.stringify((_pvDraftTree && (_pvDraftTree.children || []).length) ? _pvDraftTree : null);
     const savedJson = loaded ? JSON.stringify((loaded.state && loaded.state.tree) || null) : null;
@@ -5220,16 +5227,17 @@ function _renderPvFooter() {
         ? `<span class="pv-active-tag">${dirty ? '<span class="pv-dirty-dot" title="Unsaved changes"></span>' : ''}<b>${escapeHtml(loaded.name)}</b></span>`
         : `<span class="pv-active-tag">New view</span>`;
 
-    // Right: actions on the selected view + save/apply. When a view is selected
-    // the full set is shown in a fixed order — exactly mirroring the student
-    // tracker — so the footer never looks "half populated". Reorder/Delete are
-    // safe no-ops on the built-in All/GTM views (guarded in their handlers).
+    // Right: actions on the selected view + save/apply, in the fixed student-
+    // tracker order. Star is available to anyone; ↑/↓/Delete only when the view
+    // is editable (own personal view, or any team view when you're an admin).
     let acts = '';
     if (loaded) {
         acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStarLoaded()" title="${starred ? 'Remove from top tiles' : 'Show as a top tile'}">${starred ? '★ Unstar' : '☆ Star'}</button>`;
-        acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(-1)" title="Move up">↑</button>`;
-        acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(1)" title="Move down">↓</button>`;
-        acts += `<button class="pv-btn pv-btn-ghost pv-btn-danger" onclick="pvDeleteLoaded()" title="Delete this view">Delete</button>`;
+        if (canEdit) {
+            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(-1)" title="Move up">↑</button>`;
+            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(1)" title="Move down">↓</button>`;
+            acts += `<button class="pv-btn pv-btn-ghost pv-btn-danger" onclick="pvDeleteLoaded()" title="Delete this view">Delete</button>`;
+        }
     }
     acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')" title="Save as a new personal view">Save as My View</button>`;
     if (_pvIsAdmin()) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('team')" title="Save as a new team view">Save as Team View</button>`;
@@ -5418,10 +5426,12 @@ function _portfolioViewTouch() {}
 
 // Update the Views button label + render the starred-view tile bar.
 function renderPortfolioViewTiles() {
-    // Views button label — always "Views" (matches the student tracker; the
-    // active view is reflected by the highlighted tile, not the button text).
+    // Views button — always "★ Views" (active view shown by the highlighted
+    // tile, not the button text), plus an ADMIN pill when ?admin=1 is set.
     const btn = document.getElementById('portfolio-views-btn');
-    if (btn) btn.textContent = 'Views';
+    if (btn) {
+        btn.innerHTML = '★ Views' + (_pvIsAdmin() ? ' <span class="pv-admin-pill">ADMIN</span>' : '');
+    }
 
     const bar = document.getElementById('portfolio-view-tiles');
     if (!bar) return;
