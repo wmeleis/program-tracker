@@ -83,12 +83,6 @@
         </div>
     </div>
 
-    <!-- Portfolio view tiles (named presets — similar to student tracker flag bar) -->
-    <div id="portfolio-view-bar" class="portfolio-view-bar" style="display:none">
-        <span class="pv-bar-label">View:</span>
-        <span id="portfolio-view-tiles" class="portfolio-view-tiles"></span>
-    </div>
-
     <!-- Portfolio filter bar (visible only in portfolio view) -->
     <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
       <div class="portfolio-filter-block portfolio-filter-block-1">
@@ -199,14 +193,20 @@
       </div>
     </section>
 
-    <!-- Portfolio table toolbar -->
+    <!-- Portfolio table toolbar — Export | Views | Columns (mirrors student tracker) -->
     <div id="portfolio-table-toolbar" style="display:none">
         <span id="portfolio-result-count" class="result-count"></span>
-        <div class="portfolio-col-picker" id="portfolio-col-picker">
-            <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">Columns ▾</button>
-            <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
+        <div class="portfolio-toolbar-right">
+            <button class="header-secondary-btn portfolio-export-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
+            <div class="portfolio-col-picker" id="portfolio-views-picker">
+                <button class="portfolio-col-picker-btn" id="portfolio-views-btn" onclick="togglePortfolioViewPicker(event)">★ Views ▾</button>
+                <div class="portfolio-col-dropdown" id="portfolio-views-dropdown"></div>
+            </div>
+            <div class="portfolio-col-picker" id="portfolio-col-picker">
+                <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
+                <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
+            </div>
         </div>
-        <button class="header-secondary-btn portfolio-export-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
     </div>
 
     <!-- Pipeline Summary -->

@@ -2207,34 +2207,28 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .auth-dot.ok { color: var(--success); }
 .auth-dot.bad { color: var(--danger); }
 
-/* Portfolio view tiles (named presets bar) */
-.portfolio-view-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 24px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
+/* Portfolio toolbar right group (Export | Views | Columns) */
+#portfolio-table-toolbar { justify-content: space-between; }
+.portfolio-toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+/* Views dropdown — same structure as the Columns picker */
+.pv-active-btn { border-color: var(--accent) !important; color: var(--accent) !important; background: #eff6ff !important; }
+.pv-dirty { color: #f59e0b; font-size: 10px; margin: 0 1px; }
+.pv-dd-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 12px; font-size: 13px; cursor: pointer;
+    border-radius: 4px; white-space: nowrap;
 }
-.pv-bar-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
-.portfolio-view-tiles { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
-.pv-tile {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 5px 12px; border-radius: 6px; font-size: 13px; font-weight: 500;
-    border: 1px solid var(--border); background: var(--surface);
-    color: var(--text); cursor: pointer; white-space: nowrap;
-    transition: all 0.15s;
+.pv-dd-item:hover { background: #f1f5f9; }
+.pv-dd-item.active { color: var(--accent); font-weight: 600; }
+.pv-dd-name { flex: 1; }
+.pv-dd-del {
+    background: none; border: none; cursor: pointer; padding: 0 2px;
+    font-size: 15px; color: var(--text-secondary); line-height: 1;
 }
-.pv-tile:hover { border-color: var(--accent); color: var(--accent); background: #eff6ff; }
-.pv-tile.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.pv-dirty { color: #f59e0b; font-size: 10px; margin-left: 2px; }
-.pv-tile-del {
-    font-size: 14px; line-height: 1; color: var(--text-secondary);
-    margin-left: 2px; padding: 0 1px;
-}
-.pv-tile-del:hover { color: var(--danger, #ef4444); }
-.pv-save-btn { flex-shrink: 0; font-size: 12px; padding: 5px 10px; }
+.pv-dd-del:hover { color: var(--danger, #ef4444); }
+.pv-dd-divider { height: 1px; background: var(--border); margin: 4px 0; }
+.pv-dd-save { color: var(--accent); font-weight: 500; }
 
 /* Campuses tab */
 .campuses-table { border-collapse: collapse; margin-top: 10px; font-size: 13px; min-width: 360px; }

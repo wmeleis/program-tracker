@@ -167,11 +167,9 @@ function switchView(view) {
     const filtersSection    = document.querySelector('.filters-section');
 
     const portfolioToolbar  = document.getElementById('portfolio-table-toolbar');
-    const portfolioViewBar  = document.getElementById('portfolio-view-bar');
     if (view === 'portfolio') {
         if (portfolioFilters)    portfolioFilters.style.display = 'flex';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'flex';
-        if (portfolioViewBar)    portfolioViewBar.style.display = 'flex';
         if (pipelineSection)     pipelineSection.style.display = 'none';
         if (smartViewsSection)   smartViewsSection.style.display = 'none';
         if (kindFilterRow)       kindFilterRow.style.display = 'none';
@@ -181,7 +179,6 @@ function switchView(view) {
     } else {
         if (portfolioFilters)    portfolioFilters.style.display = 'none';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'none';
-        if (portfolioViewBar)    portfolioViewBar.style.display = 'none';
         if (pipelineSection)     pipelineSection.style.display = 'block';
         // Catalog view has neither type nor proposal buttons — hide the
         // whole row so the (now-tinted) band doesn't render as an empty
@@ -4958,22 +4955,45 @@ function _portfolioViewTouch() {
     renderPortfolioViewTiles();
 }
 
-// Render the view tiles bar.
+// Render views into the dropdown and update the button label to show active view.
 function renderPortfolioViewTiles() {
-    const bar = document.getElementById('portfolio-view-tiles');
-    if (!bar) return;
+    const dd = document.getElementById('portfolio-views-dropdown');
+    const btn = document.getElementById('portfolio-views-btn');
+    if (!dd) return;
     const views = getAllPortfolioViews();
-    bar.innerHTML = views.map(v => {
-        const active = v.id === portfolioActiveViewId;
-        const dirty  = active && portfolioActiveViewDirty;
-        const del    = !v.team
-            ? `<span class="pv-tile-del" onclick="deletePortfolioView('${v.id}',event)" title="Delete view">×</span>`
+    const active = views.find(v => v.id === portfolioActiveViewId);
+    if (btn) {
+        const label = active ? active.name : 'Views';
+        const dot = portfolioActiveViewDirty ? ' ●' : '';
+        btn.textContent = `★ ${label}${dot} ▾`;
+        btn.classList.toggle('pv-active-btn', !!active);
+    }
+    dd.innerHTML = views.map(v => {
+        const isActive = v.id === portfolioActiveViewId;
+        const dirty    = isActive && portfolioActiveViewDirty;
+        const del      = !v.team
+            ? `<button class="pv-dd-del" onclick="deletePortfolioView('${v.id}',event)" title="Delete">×</button>`
             : '';
-        return `<span class="pv-tile${active ? ' active' : ''}" onclick="applyPortfolioView('${v.id}')">
-            ${escapeHtml(v.name)}${dirty ? '<span class="pv-dirty">●</span>' : ''}${del}
-        </span>`;
+        return `<div class="pv-dd-item${isActive ? ' active' : ''}" onclick="applyPortfolioView('${v.id}'); togglePortfolioViewPicker()">
+            <span class="pv-dd-name">${escapeHtml(v.name)}</span>
+            ${dirty ? '<span class="pv-dirty">●</span>' : ''}${del}
+        </div>`;
     }).join('') +
-    `<button class="pv-save-btn header-secondary-btn" onclick="saveCurrentAsPortfolioView()" title="Save current columns + filters as a named view">+ Save view</button>`;
+    `<div class="pv-dd-divider"></div>
+     <div class="pv-dd-item pv-dd-save" onclick="saveCurrentAsPortfolioView(); togglePortfolioViewPicker()">+ Save current as view…</div>`;
+}
+
+function togglePortfolioViewPicker(e) {
+    if (e) e.stopPropagation();
+    const dd = document.getElementById('portfolio-views-dropdown');
+    if (!dd) return;
+    const wasOpen = dd.classList.contains('open');
+    // close all other pickers first
+    document.querySelectorAll('.portfolio-col-dropdown.open').forEach(el => el.classList.remove('open'));
+    if (!wasOpen) {
+        renderPortfolioViewTiles();
+        dd.classList.add('open');
+    }
 }
 
 let allPortfolioPrograms   = [];
