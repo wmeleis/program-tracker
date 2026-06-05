@@ -2222,7 +2222,7 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 }
 .pv-modal-backdrop.open { display: flex; }
 .pv-modal {
-    background: #fff; border-radius: 10px;
+    background: #fff; border-radius: 10px; overflow: hidden;
     width: min(1080px, 100%); max-height: calc(100vh - 80px);
     display: flex; flex-direction: column;
     box-shadow: 0 16px 48px rgba(0,0,0,.3);
@@ -2243,10 +2243,11 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     width: 240px; flex-shrink: 0; border-right: 1px solid #e5e7eb;
     background: #f9fafb; overflow-y: auto; padding: 10px 8px;
 }
+.pv-modal-maincol { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .pv-modal-main { flex: 1; overflow-y: auto; padding: 14px 16px; }
 .pv-modal-footer {
     padding: 10px 16px; border-top: 1px solid #e5e7eb; flex-shrink: 0;
-    background: #f9fafb; border-radius: 0 0 10px 10px;
+    background: #f9fafb; border-radius: 0 0 10px 0;
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .pv-modal-count { font-size: 12px; color: #6b7280; }
