@@ -5418,13 +5418,10 @@ function _portfolioViewTouch() {}
 
 // Update the Views button label + render the starred-view tile bar.
 function renderPortfolioViewTiles() {
-    // Views button label
+    // Views button label — always "Views" (matches the student tracker; the
+    // active view is reflected by the highlighted tile, not the button text).
     const btn = document.getElementById('portfolio-views-btn');
-    if (btn) {
-        const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
-        btn.textContent = active ? active.name : 'Views';
-        btn.classList.toggle('pv-active-btn', !!active);
-    }
+    if (btn) btn.textContent = 'Views';
 
     const bar = document.getElementById('portfolio-view-tiles');
     if (!bar) return;
