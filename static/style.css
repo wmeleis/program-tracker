@@ -2230,10 +2230,11 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     display: flex; align-items: center; gap: 10px;
     padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
-.pv-modal-title { font-size: 16px; font-weight: 700; flex: 1; }
+.pv-modal-title { font-size: 16px; font-weight: 700; }
 .pv-modal-x {
     background: none; border: none; font-size: 22px; cursor: pointer;
     color: var(--text-secondary); line-height: 1; padding: 0 4px;
+    margin-left: auto;   /* push close button to the far right */
 }
 .pv-modal-x:hover { color: var(--text); }
 .pv-modal-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
@@ -2246,10 +2247,7 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     padding: 12px 18px; border-top: 1px solid var(--border); flex-shrink: 0;
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
-.pv-modal-count {
-    font-size: 13px; font-weight: 600; color: var(--accent);
-    background: #eff6ff; padding: 3px 10px; border-radius: 12px; margin-left: 4px;
-}
+.pv-modal-count { font-size: 12px; color: #6b7280; }
 .pv-save-form { display: inline-flex; gap: 8px; align-items: center; }
 .pv-save-form .pv-name-input { width: 220px; flex: none; }
 
