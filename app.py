@@ -1704,5 +1704,5 @@ if __name__ == '__main__':
     init_db()
     migrate_db()
     # Scans are driven externally by launchd/update.sh, not on a Flask timer.
-    port = int(os.environ.get('CIM_PORT', 5001))
+    port = int(os.environ.get('CIM_PORT') or os.environ.get('PORT') or 5001)
     app.run(debug=True, port=port, use_reloader=False)

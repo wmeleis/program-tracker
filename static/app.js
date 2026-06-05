@@ -5030,7 +5030,8 @@ function applyPortfolioView(id) {
 //          each with delete. Clicking a view applies it AND loads it for editing.
 // Main:    recursive AND/OR group + rule builder with per-field operators and
 //          nested groups; edits apply LIVE so the count + table update as you go.
-// Footer:  Clear all | Editing: X | Cancel | Update "X" | + Save as My/Team View.
+// Footer:  <selected name> | ☆Star | ↑ | ↓ | Delete | Save as My/Team View |
+//          ↻Update (when dirty) | Cancel | Apply. Edits stay in a draft until Apply.
 // Header:  live "N programs match".
 
 let _pvDraftTree    = null;  // tree being edited in the modal (NOT applied until Apply)
