@@ -190,8 +190,6 @@ function switchView(view) {
         if (filtersSection)      filtersSection.style.display = 'none';
         if (subjectGroup)        subjectGroup.style.display = 'none';
     } else {
-        const tiles = document.getElementById('portfolio-view-tiles');
-        if (tiles) tiles.style.display = 'none';
         cimHdrBtns.forEach(b => b.style.display = '');
         if (lastUpdatedEl) lastUpdatedEl.style.display = '';
         if (scanStatusEl)  scanStatusEl.style.display  = '';
@@ -5413,26 +5411,67 @@ async function _persistTeamViews(action, id) {
 // dirty now that views are managed in the modal builder).
 function _portfolioViewTouch() {}
 
-// Update the Views button label + render the starred-view quick tiles.
+// Update the Views button label + render the starred-view tile bar.
 function renderPortfolioViewTiles() {
+    // Views button label
     const btn = document.getElementById('portfolio-views-btn');
-    const all = getAllPortfolioViews();
     if (btn) {
-        const active = all.find(v => v.id === portfolioActiveViewId);
-        btn.textContent = active ? `${active.name}` : 'Views';
+        const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
+        btn.textContent = active ? active.name : 'Views';
         btn.classList.toggle('pv-active-btn', !!active);
     }
-    // Starred views render as quick-apply tiles above the table (Portfolio only).
+
     const bar = document.getElementById('portfolio-view-tiles');
     if (!bar) return;
     if (currentView !== 'portfolio') { bar.style.display = 'none'; return; }
-    const stars = getPortfolioStarredIds();
-    const starred = all.filter(v => stars.has(v.id));
-    if (!starred.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+
+    const stars   = getPortfolioStarredIds();
+    const all     = getAllPortfolioViews();
+    const starred = [...getPortfolioTeamViews(), ...getPortfolioPersonalViews()]
+                      .filter(v => stars.has(v.id));
+
     bar.style.display = 'flex';
-    bar.innerHTML = starred.map(v =>
-        `<button class="pv-tile${v.id === portfolioActiveViewId ? ' active' : ''}" onclick="applyPortfolioView('${v.id}'); renderPortfolioTable();">★ ${escapeHtml(v.name)}</button>`
-    ).join('');
+
+    // "All Programs" tile — always first, shows total visible count, resets all filters
+    const allCount = (allPortfolioPrograms || []).length;
+    const noFilters = !portfolioFilterTree && !portfolioActiveViewId;
+    const allTile = `<button class="pv-tile${noFilters ? ' active' : ''}"
+        onclick="applyPortfolioView('all'); renderPortfolioTable();"
+        title="Show all programs">
+        <span class="pv-tile-count">${allCount.toLocaleString()}</span>
+        <span class="pv-tile-label">All Programs</span>
+    </button>`;
+
+    // Count how many programs match each starred view's saved tree + filters
+    function countForView(v) {
+        try {
+            const saved = portfolioFilterTree;
+            const savedId = portfolioActiveViewId;
+            applyPortfolioView(v.id);
+            const n = getPortfolioFiltered().length;
+            // restore
+            portfolioFilterTree = saved;
+            portfolioActiveViewId = savedId;
+            return n;
+        } catch(_) { return '—'; }
+    }
+
+    const tiles = starred.map(v => {
+        const cnt = countForView(v);
+        const active = v.id === portfolioActiveViewId;
+        return `<button class="pv-tile${active ? ' active' : ''}"
+            onclick="applyPortfolioView('${v.id}'); renderPortfolioTable();"
+            title="${escapeHtml(v.name)}">
+            <span class="pv-tile-count">${typeof cnt === 'number' ? cnt.toLocaleString() : cnt}</span>
+            <span class="pv-tile-label">${escapeHtml(v.name)}</span>
+        </button>`;
+    }).join('');
+
+    const hint = starred.length === 0
+        ? '<span class="pv-tile-hint">★ Star a view to add a quick tile</span>'
+        : '';
+
+    bar.innerHTML = allTile + tiles + hint;
 }
 
 // Back-compat aliases
