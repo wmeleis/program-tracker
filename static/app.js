@@ -167,9 +167,11 @@ function switchView(view) {
     const filtersSection    = document.querySelector('.filters-section');
 
     const portfolioToolbar  = document.getElementById('portfolio-table-toolbar');
+    const portfolioHdrAct   = document.getElementById('portfolio-header-actions');
     if (view === 'portfolio') {
         if (portfolioFilters)    portfolioFilters.style.display = 'flex';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'flex';
+        if (portfolioHdrAct)     portfolioHdrAct.style.display = 'flex';
         if (pipelineSection)     pipelineSection.style.display = 'none';
         if (smartViewsSection)   smartViewsSection.style.display = 'none';
         if (kindFilterRow)       kindFilterRow.style.display = 'none';
@@ -179,6 +181,7 @@ function switchView(view) {
     } else {
         if (portfolioFilters)    portfolioFilters.style.display = 'none';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'none';
+        if (portfolioHdrAct)     portfolioHdrAct.style.display = 'none';
         if (pipelineSection)     pipelineSection.style.display = 'block';
         // Catalog view has neither type nor proposal buttons — hide the
         // whole row so the (now-tinted) band doesn't render as an empty
