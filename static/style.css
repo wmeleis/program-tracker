@@ -2246,6 +2246,13 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     padding: 12px 18px; border-top: 1px solid var(--border); flex-shrink: 0;
     display: flex; justify-content: flex-end; gap: 8px;
 }
+.pv-side-newbtn {
+    display: block; width: calc(100% - 16px); margin: 8px 8px 4px;
+    padding: 7px 12px; background: #fff; border: 1px solid var(--border);
+    border-radius: 6px; font: inherit; font-size: 13px; font-weight: 600;
+    color: var(--accent); cursor: pointer; text-align: left;
+}
+.pv-side-newbtn:hover { background: #eff6ff; border-color: var(--accent); }
 .pv-side-section {
     font-size: 11px; font-weight: 700; text-transform: uppercase;
     letter-spacing: .05em; color: var(--text-secondary);

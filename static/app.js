@@ -4954,12 +4954,13 @@ function _renderPvModalSidebar() {
             ${del}
         </div>`;
     };
-    let html = '<div class="pv-side-section">Team views</div>';
+    let html = `<button class="pv-side-newbtn" onclick="pvFocusNewView()">+ New view</button>`;
+    html += '<div class="pv-side-section">Team views</div>';
     html += PORTFOLIO_BUILT_IN_VIEWS.map(v => renderItem(v, false)).join('');
     html += '<div class="pv-side-section">My views</div>';
     html += personal.length
         ? personal.map(v => renderItem(v, true)).join('')
-        : '<div class="pv-side-empty">None saved yet — use "+ Save as My View" to create one.</div>';
+        : '<div class="pv-side-empty">None saved yet.</div>';
     host.innerHTML = html;
 }
 
@@ -5002,6 +5003,13 @@ function _renderPvModalFooter() {
     const host = document.getElementById('pv-modal-footer');
     if (!host) return;
     host.innerHTML = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Close</button>`;
+}
+
+function pvFocusNewView() {
+    _pvModalSavingName = '';
+    _renderPvModalMain();
+    const inp = document.getElementById('pv-name-input');
+    if (inp) { inp.value = ''; inp.scrollIntoView({block:'center'}); inp.focus(); }
 }
 
 function pvApplyFromModal(id) {
@@ -5048,7 +5056,7 @@ function renderPortfolioViewTiles() {
     if (!btn) return;
     const active = getAllPortfolioViews().find(v => v.id === portfolioActiveViewId);
     const dot    = portfolioActiveViewDirty ? ' ●' : '';
-    btn.textContent = active ? `★ ${active.name}${dot}` : '★ Views';
+    btn.textContent = active ? `${active.name}${dot}` : 'Views';
     btn.classList.toggle('pv-active-btn', !!active);
 }
 
