@@ -5038,9 +5038,11 @@ let _pvMultiOpen    = null;  // path-string of the open select popup
 let _pvSavingScope  = null;  // null | 'personal' | 'team' (Save-as naming mode)
 const _PORTFOLIO_STARS_LS = 'cim-portfolio-starred-v1';
 // Local Flask = full edit rights (the dean's own machine); static site = read-only.
-// Admin flag — set via ?admin=1 in the URL (mirrors the student tracker).
-// Only admins can create / edit / reorder / delete TEAM views.
+// Admin flag — requires BOTH ?admin=1 in the URL AND running on the local
+// Flask app (never the static GitHub Pages site). Only admins can create /
+// edit / reorder / delete TEAM views.
 function _pvIsAdmin() {
+    if (window._staticMode) return false;   // public static site is never admin
     try { return new URLSearchParams(location.search).get('admin') === '1'; }
     catch (_) { return false; }
 }
