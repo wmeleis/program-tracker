@@ -5220,15 +5220,16 @@ function _renderPvFooter() {
         ? `<span class="pv-active-tag">${dirty ? '<span class="pv-dirty-dot" title="Unsaved changes"></span>' : ''}<b>${escapeHtml(loaded.name)}</b></span>`
         : `<span class="pv-active-tag">New view</span>`;
 
-    // Right: actions on the selected view + save/apply
+    // Right: actions on the selected view + save/apply. When a view is selected
+    // the full set is shown in a fixed order — exactly mirroring the student
+    // tracker — so the footer never looks "half populated". Reorder/Delete are
+    // safe no-ops on the built-in All/GTM views (guarded in their handlers).
     let acts = '';
     if (loaded) {
         acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStarLoaded()" title="${starred ? 'Remove from top tiles' : 'Show as a top tile'}">${starred ? '★ Unstar' : '☆ Star'}</button>`;
-        if (canEdit) {
-            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(-1)" title="Move up">↑</button>`;
-            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(1)" title="Move down">↓</button>`;
-            acts += `<button class="pv-btn pv-btn-ghost pv-btn-danger" onclick="pvDeleteLoaded()" title="Delete this view">Delete</button>`;
-        }
+        acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(-1)" title="Move up">↑</button>`;
+        acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(1)" title="Move down">↓</button>`;
+        acts += `<button class="pv-btn pv-btn-ghost pv-btn-danger" onclick="pvDeleteLoaded()" title="Delete this view">Delete</button>`;
     }
     acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')" title="Save as a new personal view">Save as My View</button>`;
     if (_pvIsAdmin()) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('team')" title="Save as a new team view">Save as Team View</button>`;
@@ -5322,6 +5323,10 @@ function pvLoadView(id) {
 
 function pvDeleteView(id, ev) {
     ev && ev.stopPropagation();
+    if (id === 'all' || id === 'gtm') {   // built-in views can't be deleted
+        alert('The built-in "' + (id === 'all' ? 'All' : 'GTM') + '" view can\'t be deleted.');
+        return;
+    }
     if (id.startsWith('team_')) {
         portfolioTeamViews = portfolioTeamViews.filter(v => v.id !== id);
         _persistTeamViews('delete', id);
