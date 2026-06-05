@@ -166,10 +166,12 @@ function switchView(view) {
     const smartActionsSection = document.querySelector('.smart-actions-section');
     const filtersSection    = document.querySelector('.filters-section');
 
-    const portfolioToolbar = document.getElementById('portfolio-table-toolbar');
+    const portfolioToolbar  = document.getElementById('portfolio-table-toolbar');
+    const portfolioViewBar  = document.getElementById('portfolio-view-bar');
     if (view === 'portfolio') {
         if (portfolioFilters)    portfolioFilters.style.display = 'flex';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'flex';
+        if (portfolioViewBar)    portfolioViewBar.style.display = 'flex';
         if (pipelineSection)     pipelineSection.style.display = 'none';
         if (smartViewsSection)   smartViewsSection.style.display = 'none';
         if (kindFilterRow)       kindFilterRow.style.display = 'none';
@@ -179,6 +181,7 @@ function switchView(view) {
     } else {
         if (portfolioFilters)    portfolioFilters.style.display = 'none';
         if (portfolioToolbar)    portfolioToolbar.style.display = 'none';
+        if (portfolioViewBar)    portfolioViewBar.style.display = 'none';
         if (pipelineSection)     pipelineSection.style.display = 'block';
         // Catalog view has neither type nor proposal buttons — hide the
         // whole row so the (now-tinted) band doesn't render as an empty
@@ -4745,6 +4748,234 @@ function _pc(key, content, cls, titleAttr) {
     return cls ? `<td class="${cls}"${t}>${content}</td>` : `<td${t}>${content}</td>`;
 }
 
+// ── Portfolio views (named presets) ────────────────────────────────────────
+// A view bundles column visibility + filter state into a named snapshot.
+// Built-in views are defined here; personal views are stored in localStorage.
+//
+// visibleCols: array of PORTFOLIO_COLUMNS keys to show, or null (= all)
+// gtmOnly: true → show identifying cols + every col whose key starts 'gtm'
+//          (auto-picks up GTM columns when they are added)
+// filters: snapshot of all filter state (empty = no restrictions)
+
+const PORTFOLIO_BUILT_IN_VIEWS = [
+    {
+        id: 'all', name: 'All', team: true,
+        state: { visibleCols: null, filters: {} },
+    },
+    {
+        id: 'gtm', name: 'GTM', team: true,
+        state: { gtmOnly: true, filters: {} },
+    },
+];
+
+const _PORTFOLIO_VIEWS_LS  = 'cim-portfolio-views-v1';
+const _PORTFOLIO_ACTIVE_LS = 'cim-portfolio-active-view';
+
+// State
+let portfolioActiveViewId = null;
+let portfolioActiveViewDirty = false;  // filters changed since view was applied
+
+function getPortfolioPersonalViews() {
+    try { return JSON.parse(localStorage.getItem(_PORTFOLIO_VIEWS_LS) || '[]'); }
+    catch(_) { return []; }
+}
+function setPortfolioPersonalViews(views) {
+    try { localStorage.setItem(_PORTFOLIO_VIEWS_LS, JSON.stringify(views)); } catch(_) {}
+}
+function getAllPortfolioViews() {
+    return [...PORTFOLIO_BUILT_IN_VIEWS, ...getPortfolioPersonalViews()];
+}
+function getPortfolioViewById(id) {
+    return getAllPortfolioViews().find(v => v.id === id) || null;
+}
+
+// Resolve which column keys are visible for a given view state.
+function _resolveViewCols(state) {
+    if (!state) return null;
+    if (state.gtmOnly) {
+        const identCols = ['degree', 'college', 'campus'];
+        const gtmCols   = PORTFOLIO_COLUMNS.filter(c => c.key.startsWith('gtm')).map(c => c.key);
+        return [...identCols, ...gtmCols];
+    }
+    return state.visibleCols || null;   // null = all
+}
+
+// Snapshot current filter state (all filter variables → plain JSON-safe object).
+function _snapshotPortfolioFilters() {
+    return {
+        levels:     [...portfolioLevelFilter],
+        degrees:    [...portfolioDegreeFilter],
+        statuses:   [...portfolioStatusFilter],
+        colleges:   [...portfolioCollegeFilter],
+        campuses:   [...portfolioCampusFilter],
+        otp:        [...portfolioOtpFilter],
+        ipd:        [...portfolioIpdFilter],
+        roster:     [...portfolioRosterFilter],
+        substatus:  [...portfolioSubStatusFilter],
+        speed:      [...portfolioSpeedFilter],
+        gls:        [...portfolioGlsFilter],
+        cim:        [...portfolioCimFilter],
+        cimchange:  [...portfolioCimChangeFilter],
+        inworkflow: [...portfolioInWorkflowFilter],
+        inactadmit: [...portfolioInactAdmitFilter],
+        inacttoday: portfolioInactTodayFilter,
+        search:     portfolioSearch,
+    };
+}
+
+function _snapshotEq(a, b) {
+    // Shallow equality check on two filter snapshots.
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// Apply a filter snapshot — resets all filters then restores the snapshot.
+function _applyPortfolioFilters(f) {
+    f = f || {};
+    portfolioLevelFilter    = new Set(f.levels    || []);
+    portfolioDegreeFilter   = new Set(f.degrees   || []);
+    portfolioStatusFilter   = new Set(f.statuses  || []);
+    portfolioCollegeFilter  = new Set(f.colleges  || []);
+    portfolioCampusFilter   = new Set(f.campuses  || []);
+    portfolioOtpFilter      = new Set(f.otp       || []);
+    portfolioIpdFilter      = new Set(f.ipd       || []);
+    portfolioRosterFilter   = new Set(f.roster    || []);
+    portfolioSubStatusFilter = new Set(f.substatus || []);
+    portfolioSpeedFilter    = new Set(f.speed     || []);
+    portfolioGlsFilter      = new Set(f.gls       || []);
+    portfolioCimFilter      = new Set(f.cim       || []);
+    portfolioCimChangeFilter = new Set(f.cimchange || []);
+    portfolioInWorkflowFilter = new Set(f.inworkflow || []);
+    portfolioInactAdmitFilter = new Set(f.inactadmit || []);
+    portfolioInactTodayFilter = f.inacttoday || '';
+    portfolioSearch           = f.search    || '';
+    // Sync all UI controls to the restored state
+    _syncPortfolioFilterUi();
+}
+
+// Sync all filter UI widgets to the current filter state variables.
+// Called after programmatically restoring filter state.
+function _syncPortfolioFilterUi() {
+    const multiIds = {
+        'portfolio-filter-college':   portfolioCollegeFilter,
+        'portfolio-filter-campus':    portfolioCampusFilter,
+        'portfolio-filter-otp':       portfolioOtpFilter,
+        'portfolio-filter-ipd':       portfolioIpdFilter,
+        'portfolio-filter-roster':    portfolioRosterFilter,
+        'portfolio-filter-substatus': portfolioSubStatusFilter,
+        'portfolio-filter-speed':     portfolioSpeedFilter,
+        'portfolio-filter-gls':       portfolioGlsFilter,
+        'portfolio-filter-cim':       portfolioCimFilter,
+        'portfolio-filter-cimchange': portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow':portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit':portfolioInactAdmitFilter,
+    };
+    Object.entries(multiIds).forEach(([id, set]) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        // Re-render the dropdown checkboxes to reflect the restored state.
+        // Use the existing renderPortfolioMultiFilterDropdown if available.
+        if (typeof renderPortfolioMultiFilterDropdown === 'function') {
+            renderPortfolioMultiFilterDropdown(id, set);
+        }
+    });
+    // Inact today select
+    const itSel = document.getElementById('portfolio-filter-inacttoday');
+    if (itSel) itSel.value = portfolioInactTodayFilter;
+    // Search box
+    const sb = document.getElementById('filter-search');
+    if (sb && currentView === 'portfolio') sb.value = portfolioSearch;
+    // Level / degree / status toggle buttons
+    document.querySelectorAll('.portfolio-lvl-btn').forEach(b =>
+        b.classList.toggle('active', portfolioLevelFilter.has(b.dataset.lvl)));
+    document.querySelectorAll('.portfolio-deg-btn').forEach(b =>
+        b.classList.toggle('active', portfolioDegreeFilter.has(b.dataset.deg)));
+    document.querySelectorAll('.portfolio-status-btn').forEach(b =>
+        b.classList.toggle('active', portfolioStatusFilter.has(b.dataset.status)));
+    document.querySelectorAll('.portfolio-incim-btn').forEach(b =>
+        b.classList.toggle('active', portfolioInWorkflowFilter.has(b.dataset.incim)));
+    document.querySelectorAll('.portfolio-cimchg-btn').forEach(b =>
+        b.classList.toggle('active', portfolioCimChangeFilter.has(b.dataset.cimchg)));
+    updateClearButtons();
+}
+
+// Apply a named view: restore column visibility + filters, mark active.
+function applyPortfolioView(id) {
+    const view = getPortfolioViewById(id);
+    if (!view) return;
+    portfolioActiveViewId    = id;
+    portfolioActiveViewDirty = false;
+    try { localStorage.setItem(_PORTFOLIO_ACTIVE_LS, id); } catch(_) {}
+    // Column visibility
+    const cols = _resolveViewCols(view.state);
+    if (cols === null) {
+        PORTFOLIO_COLUMNS.forEach(c => portfolioVisibleCols.add(c.key));
+    } else {
+        portfolioVisibleCols = new Set(cols);
+    }
+    try { localStorage.setItem('cim-portfolio-cols', JSON.stringify([...portfolioVisibleCols])); } catch(_) {}
+    // Filters
+    _applyPortfolioFilters(view.state.filters || {});
+    renderPortfolioViewTiles();
+    renderPortfolioTable();
+}
+
+// Save current state as a new personal view (prompts for name).
+function saveCurrentAsPortfolioView() {
+    const name = prompt('Name for this view:');
+    if (!name || !name.trim()) return;
+    const id = 'personal_' + Date.now();
+    const views = getPortfolioPersonalViews();
+    views.push({
+        id, name: name.trim(), team: false,
+        state: {
+            visibleCols: [...portfolioVisibleCols],
+            filters: _snapshotPortfolioFilters(),
+        },
+    });
+    setPortfolioPersonalViews(views);
+    portfolioActiveViewId    = id;
+    portfolioActiveViewDirty = false;
+    renderPortfolioViewTiles();
+}
+
+function deletePortfolioView(id, ev) {
+    ev && ev.stopPropagation();
+    const views = getPortfolioPersonalViews().filter(v => v.id !== id);
+    setPortfolioPersonalViews(views);
+    if (portfolioActiveViewId === id) portfolioActiveViewId = null;
+    renderPortfolioViewTiles();
+}
+
+// Mark active view as dirty whenever the user changes a filter.
+// Call this from filter-change handlers.
+function _portfolioViewTouch() {
+    if (!portfolioActiveViewId) return;
+    if (portfolioActiveViewDirty) return;
+    const view = getPortfolioViewById(portfolioActiveViewId);
+    if (!view) return;
+    const expected = _snapshotPortfolioFilters();
+    portfolioActiveViewDirty = !_snapshotEq(expected, view.state.filters || {});
+    renderPortfolioViewTiles();
+}
+
+// Render the view tiles bar.
+function renderPortfolioViewTiles() {
+    const bar = document.getElementById('portfolio-view-tiles');
+    if (!bar) return;
+    const views = getAllPortfolioViews();
+    bar.innerHTML = views.map(v => {
+        const active = v.id === portfolioActiveViewId;
+        const dirty  = active && portfolioActiveViewDirty;
+        const del    = !v.team
+            ? `<span class="pv-tile-del" onclick="deletePortfolioView('${v.id}',event)" title="Delete view">×</span>`
+            : '';
+        return `<span class="pv-tile${active ? ' active' : ''}" onclick="applyPortfolioView('${v.id}')">
+            ${escapeHtml(v.name)}${dirty ? '<span class="pv-dirty">●</span>' : ''}${del}
+        </span>`;
+    }).join('') +
+    `<button class="pv-save-btn header-secondary-btn" onclick="saveCurrentAsPortfolioView()" title="Save current columns + filters as a named view">+ Save view</button>`;
+}
+
 let allPortfolioPrograms   = [];
 let portfolioExpandedIds   = new Set();
 // IDs the user has explicitly collapsed. Used to override a search-driven
@@ -4789,6 +5020,7 @@ function setPortfolioInCim(btn, val) {
     _updateMultiFilterBtn('portfolio-filter-inworkflow', s);
     _syncPortfolioButtonRows();
     updateClearButtons();
+    _portfolioViewTouch();
     renderPortfolioTable();
 }
 function setPortfolioCimChange(btn, val) {
@@ -4797,6 +5029,7 @@ function setPortfolioCimChange(btn, val) {
     _updateMultiFilterBtn('portfolio-filter-cimchange', s);
     _syncPortfolioButtonRows();
     updateClearButtons();
+    _portfolioViewTouch();
     renderPortfolioTable();
 }
 function _syncPortfolioButtonRows() {
@@ -4848,6 +5081,7 @@ function setPortfolioStatus(val) {
     else portfolioStatusFilter.add(val);
     document.querySelectorAll('.portfolio-status-btn').forEach(b =>
         b.classList.toggle('active', portfolioStatusFilter.has(b.dataset.status)));
+    _portfolioViewTouch();
     renderPortfolioTable();
 }
 if (typeof window !== 'undefined') window.setPortfolioStatus = setPortfolioStatus;
@@ -4862,10 +5096,10 @@ let portfolioSearch        = '';
 // that getPortfolioFiltered() reads.
 function setPortfolioSearch(v) {
     portfolioSearch = v || '';
-    // Keep the (single) header search input in sync.
     const hdr = document.getElementById('filter-search');
     if (hdr && hdr.value !== portfolioSearch) hdr.value = portfolioSearch;
     if (typeof updateClearButtons === 'function') updateClearButtons();
+    _portfolioViewTouch();
     if (typeof renderPortfolioTable === 'function') renderPortfolioTable();
 }
 // Belt-and-suspenders: explicit window-level export so inline handlers
@@ -4989,6 +5223,7 @@ function setPortfolioLevel(btn, val) {
     else portfolioLevelFilter.add(val);
     document.querySelectorAll('.portfolio-lvl-btn').forEach(b =>
         b.classList.toggle('active', portfolioLevelFilter.has(b.dataset.lvl)));
+    _portfolioViewTouch();
     renderPortfolioTable();
 }
 
@@ -4997,6 +5232,7 @@ function setPortfolioDegree(btn, val) {
     else portfolioDegreeFilter.add(val);
     document.querySelectorAll('.portfolio-deg-btn').forEach(b =>
         b.classList.toggle('active', portfolioDegreeFilter.has(b.dataset.deg)));
+    _portfolioViewTouch();
     renderPortfolioTable();
 }
 
@@ -5041,7 +5277,15 @@ async function loadPortfolioDashboard() {
         portfolioExpandedIds = new Set();
         portfolioCollapsedIds = new Set();
         populatePortfolioFilters();
-        renderPortfolioTable();
+        // Restore the previously-active view (if any) — do this after
+        // populatePortfolioFilters so the filter dropdowns are built first.
+        const savedView = (() => { try { return localStorage.getItem(_PORTFOLIO_ACTIVE_LS); } catch(_) { return null; } })();
+        if (savedView && getPortfolioViewById(savedView)) {
+            applyPortfolioView(savedView);
+        } else {
+            renderPortfolioViewTiles();
+            renderPortfolioTable();
+        }
     } catch(e) {
         console.error('portfolio load failed', e);
     }
@@ -5155,14 +5399,13 @@ const _portfolioFilterVars = {
 };
 
 function clearPortfolioFilter(id) {
-    // Close any open dropdown for this filter
     const dd = document.getElementById('fmd-' + id);
     if (dd) dd.classList.remove('open');
-    // For single-select (inacttoday), reset the <select> value
     const sel = document.getElementById(id);
     if (sel && sel.tagName === 'SELECT') sel.value = '';
     if (_portfolioFilterVars[id]) _portfolioFilterVars[id]();
     updateClearButtons();
+    _portfolioViewTouch();
     renderPortfolioTable();
 }
 
@@ -5234,6 +5477,7 @@ function togglePortfolioMultiValue(id, value, checked) {
     _updateMultiFilterBtn(id, filterSet);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
     updateClearButtons();
+    _portfolioViewTouch();
     renderPortfolioTable();
 }
 

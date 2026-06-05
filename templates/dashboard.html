@@ -83,6 +83,12 @@
         </div>
     </div>
 
+    <!-- Portfolio view tiles (named presets — similar to student tracker flag bar) -->
+    <div id="portfolio-view-bar" class="portfolio-view-bar" style="display:none">
+        <span class="pv-bar-label">View:</span>
+        <span id="portfolio-view-tiles" class="portfolio-view-tiles"></span>
+    </div>
+
     <!-- Portfolio filter bar (visible only in portfolio view) -->
     <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
       <div class="portfolio-filter-block portfolio-filter-block-1">
@@ -137,7 +143,7 @@
         <div class="filter-group">
             <label>Admitting Today:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Whether the program is currently admitting students. Yes = active, no inactivation in progress. No = inactivation underway or complete.</span></span></label>
             <div class="filter-select-wrap">
-                <select id="portfolio-filter-inacttoday" onchange="portfolioInactTodayFilter=this.value; updateClearButtons(); renderPortfolioTable()"></select>
+                <select id="portfolio-filter-inacttoday" onchange="portfolioInactTodayFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()"></select>
                 <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inacttoday')" title="Clear">&times;</span>
             </div>
         </div>
