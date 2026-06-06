@@ -5119,17 +5119,16 @@ function _renderPvSidebar() {
         const sel    = v.id === _pvLoadedViewId;
         const isStar = stars.has(v.id);
         const editable = v.team ? _pvIsAdmin() : true;
-        // Star sits just to the right of the name (gold when starred). Move /
-        // delete are hover controls floated to the far right.
-        const star = `<button class="pv-side-star${isStar ? ' on' : ''}" title="${isStar ? 'Unstar' : 'Star — show as a top tile'}" onclick="pvStarById('${v.id}',event)">${isStar ? '★' : '☆'}</button>`;
-        let acts = '';
+        // All per-view controls live together as hover actions on the far right:
+        // star (everyone), then move up/down + delete (editable views only).
+        let acts = `<button class="pv-side-act pv-side-act-star${isStar ? ' on' : ''}" title="${isStar ? 'Unstar' : 'Star — show as a top tile'}" onclick="pvStarById('${v.id}',event)">${isStar ? '★' : '☆'}</button>`;
         if (editable) {
             acts += `<button class="pv-side-act" title="Move up" onclick="pvMoveById('${v.id}',-1,event)">↑</button>`;
             acts += `<button class="pv-side-act" title="Move down" onclick="pvMoveById('${v.id}',1,event)">↓</button>`;
             acts += `<button class="pv-side-act pv-side-act-del" title="Delete view" onclick="pvDeleteById('${v.id}',event)">✕</button>`;
         }
         return `<div class="pv-side-item${sel ? ' selected' : ''}" onclick="pvLoadView('${v.id}')">
-            <span class="pv-side-name">${escapeHtml(v.name)}</span>${star}
+            <span class="pv-side-name">${escapeHtml(v.name)}</span>
             <span class="pv-side-acts">${acts}</span></div>`;
     };
     let html = `<button class="pv-side-newbtn" onclick="pvNewView()">+ New view</button>`;
