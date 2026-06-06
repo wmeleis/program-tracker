@@ -2381,6 +2381,20 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 }
 .pv-side-item:hover { background: #eef2ff; }
 .pv-side-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Per-view hover controls (star / move / delete) on each sidebar row */
+.pv-side-acts {
+    display: flex; align-items: center; gap: 1px; flex-shrink: 0;
+    opacity: 0; transition: opacity .1s;
+}
+.pv-side-item:hover .pv-side-acts { opacity: 1; }
+.pv-side-act {
+    background: none; border: none; cursor: pointer; line-height: 1;
+    font-size: 12px; padding: 1px 3px; border-radius: 3px; color: #64748b;
+}
+.pv-side-act:hover { color: #2563eb; background: rgba(37,99,235,.1); }
+.pv-side-act-del:hover { color: #dc2626; background: rgba(220,38,38,.1); }
+.pv-side-item.selected .pv-side-act { color: #dbeafe; }
+.pv-side-item.selected .pv-side-act:hover { color: #fff; background: rgba(255,255,255,.2); }
 .pv-side-empty { font-size: 11.5px; color: #94a3b8; padding: 6px 8px; font-style: italic; }
 .pv-editing-tag {
     display: inline-block; margin-bottom: 10px; font-size: 13px;

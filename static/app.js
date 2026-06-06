@@ -5111,13 +5111,24 @@ function _renderPvSidebar() {
     const personal = getPortfolioPersonalViews();
     const team     = getPortfolioTeamViews();
     const stars    = getPortfolioStarredIds();
-    // Rows are name-only and SELECT (load into editor) on click; all actions
-    // live in the footer. A leading ★ marks views starred as a top tile.
+    // Clicking a row SELECTS it (loads into the editor). Per-view actions —
+    // star, move up/down, delete — appear as hover controls on the row itself.
+    // Star is available to everyone; move/delete only for editable views
+    // (own personal views, or any team view when admin).
     const item = (v) => {
-        const sel  = v.id === _pvLoadedViewId;
-        const mark = stars.has(v.id) ? '<span class="pv-side-starmark" title="Starred — shows as a top tile">★</span>' : '';
+        const sel    = v.id === _pvLoadedViewId;
+        const isStar = stars.has(v.id);
+        const mark   = isStar ? '<span class="pv-side-starmark" title="Starred — shows as a top tile">★</span>' : '';
+        const editable = v.team ? _pvIsAdmin() : true;
+        let acts = `<button class="pv-side-act" title="${isStar ? 'Unstar' : 'Star — show as a top tile'}" onclick="pvStarById('${v.id}',event)">${isStar ? '★' : '☆'}</button>`;
+        if (editable) {
+            acts += `<button class="pv-side-act" title="Move up" onclick="pvMoveById('${v.id}',-1,event)">↑</button>`;
+            acts += `<button class="pv-side-act" title="Move down" onclick="pvMoveById('${v.id}',1,event)">↓</button>`;
+            acts += `<button class="pv-side-act pv-side-act-del" title="Delete view" onclick="pvDeleteById('${v.id}',event)">✕</button>`;
+        }
         return `<div class="pv-side-item${sel ? ' selected' : ''}" onclick="pvLoadView('${v.id}')">
-            ${mark}<span class="pv-side-name">${escapeHtml(v.name)}</span></div>`;
+            ${mark}<span class="pv-side-name">${escapeHtml(v.name)}</span>
+            <span class="pv-side-acts">${acts}</span></div>`;
     };
     let html = `<button class="pv-side-newbtn" onclick="pvNewView()">+ New view</button>`;
     html += `<div class="pv-side-section">Team ${_pvIsAdmin() ? '<span class="pv-admin-pill">ADMIN</span>' : ''}</div>`;
@@ -5233,27 +5244,17 @@ function _renderPvFooter() {
         dirty = treeDirty || colsDirty || filtersDirty;
     }
 
-    // Left side of the footer is intentionally empty (no view name, no dot).
-    const left = '';
+    // Cancel sits at the far left. Per-view actions (star/move/delete) now live
+    // as hover controls on each sidebar row, so the footer only holds the
+    // save / apply actions.
+    const left = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Cancel</button>`;
 
-    // Right: actions on the selected view + save/apply, in the fixed student-
-    // tracker order. Star is available to anyone; ↑/↓/Delete only when the view
-    // is editable (own personal view, or any team view when you're an admin).
     let acts = '';
-    if (loaded) {
-        acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStarLoaded()" title="${starred ? 'Remove from top tiles' : 'Show as a top tile'}">${starred ? '★ Unstar' : '☆ Star'}</button>`;
-        if (canEdit) {
-            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(-1)" title="Move up">↑</button>`;
-            acts += `<button class="pv-btn pv-btn-ghost" onclick="pvMoveLoaded(1)" title="Move down">↓</button>`;
-            acts += `<button class="pv-btn pv-btn-ghost pv-btn-danger" onclick="pvDeleteLoaded()" title="Delete this view">Delete</button>`;
-        }
-    }
     acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')" title="Save as a new personal view">Save as My View</button>`;
     if (_pvIsAdmin()) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('team')" title="Save as a new team view">Save as Team View</button>`;
     // Update is offered for any editable view (not just when "dirty") so the
     // current columns + top-bar filters can be saved even if the tree is unchanged.
     if (canEdit) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvUpdateLoaded()" title="Save current columns, filters & rules to this view">↻ Update</button>`;
-    acts += `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Cancel</button>`;
     acts += `<button class="pv-btn pv-btn-primary" onclick="pvApplyDraft()" title="Apply to the table">Apply</button>`;
 
     host.innerHTML = `${left}<span style="flex:1"></span><span class="pv-footer-actions">${acts}</span>`;
@@ -5277,10 +5278,19 @@ function pvApplyDraft() {
 }
 
 // Footer actions on the selected view.
-function pvStarLoaded()  { if (!_pvLoadedViewId) return; togglePortfolioStar(_pvLoadedViewId); renderPvModal(); }
-function pvDeleteLoaded() { if (_pvLoadedViewId) pvDeleteView(_pvLoadedViewId); }
-function pvMoveLoaded(dir) {
-    const id = _pvLoadedViewId; if (!id) return;
+// Per-view hover-control handlers (operate on the given view id, not the
+// loaded one). Each stops propagation so it doesn't also select the row.
+function pvStarById(id, ev) {
+    if (ev) ev.stopPropagation();
+    togglePortfolioStar(id);
+    renderPvModal();
+}
+function pvDeleteById(id, ev) {
+    if (ev) ev.stopPropagation();
+    pvDeleteView(id);
+}
+function pvMoveById(id, dir, ev) {
+    if (ev) ev.stopPropagation();
     const view = getPortfolioViewById(id); if (!view) return;
     if (view.id === 'all' || view.id === 'gtm') return;   // built-ins are fixed
     if (view.team) {
