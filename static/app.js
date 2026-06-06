@@ -5233,10 +5233,10 @@ function _renderPvFooter() {
         dirty = treeDirty || colsDirty || filtersDirty;
     }
 
-    // Left: selected-view context label
-    const left = loaded
-        ? `<span class="pv-active-tag">${dirty ? '<span class="pv-dirty-dot" title="Unsaved changes"></span>' : ''}<b>${escapeHtml(loaded.name)}</b></span>`
-        : `<span class="pv-active-tag">New view</span>`;
+    // Left: optional unsaved-changes dot only (the view name is not shown here).
+    const left = (loaded && dirty)
+        ? `<span class="pv-active-tag"><span class="pv-dirty-dot" title="Unsaved changes"></span></span>`
+        : '';
 
     // Right: actions on the selected view + save/apply, in the fixed student-
     // tracker order. Star is available to anyone; ↑/↓/Delete only when the view
