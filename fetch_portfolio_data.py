@@ -35,6 +35,11 @@ TABLEAU_PAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dat
 SVT_SHEET_ID = 3889012330680196
 SVT_TOKEN_PATH = os.path.expanduser('~/.smartsheet_token')
 
+# GTM — "Go To Market Roster 2.0" sheet, fetched via the same Smartsheet API
+# token. Joined to CIM programs in portfolio_ingest by the CIM url ?key= id
+# (with Banner Code as a fallback).
+GTM_SHEET_ID = 3179388027752324
+
 # Sub-dashboard tokens extracted from the GLS hub config API
 _CAMPUS_DASHBOARDS = {
     'Arlington':     'd751f5548e794e70b2b531bdc84289af',
@@ -597,6 +602,46 @@ def fetch_svt_sheet():
         print(f"  ERROR: {e}")
 
 
+def fetch_gtm_sheet():
+    """Download the "Go To Market Roster 2.0" sheet as JSON via the Smartsheet
+    REST API. Same token as the SVT fetch (~/.smartsheet_token)."""
+    import urllib.request, urllib.error
+    print("\n--- GTM Roster 2.0 (Smartsheet API) ---")
+    if not os.path.exists(SVT_TOKEN_PATH):
+        print(f"  SKIP — no token at {SVT_TOKEN_PATH}")
+        return
+    try:
+        with open(SVT_TOKEN_PATH) as f:
+            token = f.read().strip()
+    except Exception as e:
+        print(f"  ERROR reading token: {e}")
+        return
+    if not token:
+        print("  SKIP — token file is empty")
+        return
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    out_path = os.path.join(OUTPUT_DIR, "gtm.json")
+    url = f"https://api.smartsheet.com/2.0/sheets/{GTM_SHEET_ID}"
+    req = urllib.request.Request(url, headers={
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/json',
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+        with open(out_path, 'wb') as f:
+            f.write(data)
+        import json as _json
+        d = _json.loads(data)
+        print(f"  Saved: {out_path}  ({d.get('totalRowCount', '?')} rows, "
+              f"{len(d.get('columns', []))} columns)")
+    except urllib.error.HTTPError as e:
+        print(f"  ERROR HTTP {e.code}: {e.reason}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Legacy GLS Roster scraper (REMOVED — replaced by fetch_svt_sheet() above).
 # Old _CAMPUS_DASHBOARDS / _COLLEGE_DASHBOARDS dicts and the publish-URL
@@ -852,5 +897,6 @@ if __name__ == "__main__":
     # 2026-05-22. portfolio_ingest's IPD overlay is also off; SVT is the
     # single source of program-status truth now.
     fetch_svt_sheet()         # was fetch_roster_dashboards() — now API-based
+    fetch_gtm_sheet()         # Go To Market Roster 2.0
     fetch_gls_tableau()
     print("\nDone.")

@@ -3729,7 +3729,8 @@ def compute_db_fingerprint():
         "svt_status, roster_sub_status, roster_proposal_type, roster_launch_date, "
         "speed_to_market, gls_status, "
         "market_2025, performance_2025, "
-        "market_score_2025, performance_score_2025, concentration_of "
+        "market_score_2025, performance_score_2025, concentration_of, "
+        "gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms "
         "FROM portfolio_programs ORDER BY id",
     ]
     with get_db() as conn:

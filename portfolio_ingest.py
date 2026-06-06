@@ -43,6 +43,7 @@ SCORING_2025_PATH = os.path.expanduser(
     "Graduate Program Scoring-Boston-for WM-9-16-25.xlsx"
 )
 OTP_SHEET   = "OTP Program Tracking"
+GTM_PATH    = os.path.join(_WORKTREE_DIR, 'data', 'portfolio_feeds', 'gtm.json')
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +515,60 @@ def parse_svt(path=None):
             'uip_program':        rec.get('UIP Program', ''),
         })
 
+    return out
+
+
+def parse_gtm(path=GTM_PATH):
+    """Parse the "Go To Market Roster 2.0" Smartsheet JSON produced by
+    fetch_portfolio_data.fetch_gtm_sheet().
+
+    Returns a list of dicts, one per row:
+      {cim_id (int|None), banner (str, upper), gtm_type, gtm_date,
+       gtm_first_term, gtm_last_term, gtm_intake_terms}
+    The CIM url ('.../programadmin/?key=N') yields cim_id (the primary join
+    key); Banner Code is the fallback join.
+    """
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return []
+
+    col_by_id = {c['id']: c['title'] for c in data.get('columns', [])}
+    KEEP = {
+        'Type', 'GTM Launch or Inactivation Date', 'First Effective Intake Term',
+        'Last Available Term', 'Available intake terms', 'CIM url', 'Banner Code',
+    }
+    out = []
+    for row in data.get('rows', []):
+        rec = {}
+        for cell in row.get('cells', []):
+            title = col_by_id.get(cell.get('columnId'))
+            if title not in KEEP:
+                continue
+            v = cell.get('displayValue')
+            if v is None:
+                v = cell.get('value')
+            rec[title] = '' if v is None else str(v).strip()
+        # Extract CIM program id from the CIM url's ?key= parameter
+        cim_id = None
+        m = re.search(r'[?&]key=(\d+)', rec.get('CIM url', ''))
+        if m:
+            cim_id = int(m.group(1))
+        banner = (rec.get('Banner Code', '') or '').strip().upper()
+        if cim_id is None and not banner:
+            continue   # nothing to join on
+        out.append({
+            'cim_id':           cim_id,
+            'banner':           banner,
+            'gtm_type':         rec.get('Type', ''),
+            'gtm_date':         rec.get('GTM Launch or Inactivation Date', ''),
+            'gtm_first_term':   rec.get('First Effective Intake Term', ''),
+            'gtm_last_term':    rec.get('Last Available Term', ''),
+            'gtm_intake_terms': rec.get('Available intake terms', ''),
+        })
     return out
 
 
@@ -3048,6 +3103,40 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # program name. If a deployment row has no concentrations_json of its
     # own (because there's no CIM curriculum yet), leave it blank rather
     # than borrowing from another campus's deployment.
+
+    # ── GTM overlay (Go To Market Roster 2.0) ─────────────────────────────────
+    # Join by CIM program id (from the sheet's CIM url ?key=), with Banner Code
+    # as a fallback (resolved to a CIM id via the programs table). Sets gtm_*
+    # fields on matching tracker rows; every row gets blank gtm_* defaults so
+    # the DB insert's named params are always satisfied.
+    _GTM_KEYS = ('gtm_type', 'gtm_date', 'gtm_first_term', 'gtm_last_term', 'gtm_intake_terms')
+    gtm_entries = parse_gtm()
+    gtm_by_cimid = {}
+    if gtm_entries:
+        # banner → cim id map (uppercase) for the fallback join
+        banner_to_pid = {}
+        try:
+            with get_db() as conn:
+                for r in conn.execute("SELECT id, banner_code FROM programs WHERE banner_code != ''"):
+                    bc = (r['banner_code'] or '').strip().upper()
+                    if bc:
+                        banner_to_pid.setdefault(bc, r['id'])
+        except Exception:
+            pass
+        for e in gtm_entries:
+            pid = e['cim_id'] if e['cim_id'] is not None else banner_to_pid.get(e['banner'])
+            if pid is None:
+                continue
+            gtm_by_cimid[pid] = {k: e[k] for k in _GTM_KEYS}
+    n_gtm_matched = 0
+    for r in tracker.values():
+        vals = gtm_by_cimid.get(r.get('cim_program_id'))
+        for k in _GTM_KEYS:
+            r[k] = (vals or {}).get(k, '') if vals else r.get(k, '')
+        if vals:
+            n_gtm_matched += 1
+    if gtm_entries:
+        print(f"  GTM overlay: {len(gtm_entries)} roster rows → {n_gtm_matched} matched to portfolio")
 
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())

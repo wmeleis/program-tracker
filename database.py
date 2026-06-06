@@ -1275,7 +1275,12 @@ def init_portfolio_tables(conn):
             performance_score_2025 TEXT DEFAULT '',
             cim_change_type TEXT DEFAULT '',
             inactivation_admission TEXT DEFAULT '',
-            proposal_stage TEXT DEFAULT ''
+            proposal_stage TEXT DEFAULT '',
+            gtm_type TEXT DEFAULT '',
+            gtm_date TEXT DEFAULT '',
+            gtm_first_term TEXT DEFAULT '',
+            gtm_last_term TEXT DEFAULT '',
+            gtm_intake_terms TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS portfolio_notes (
@@ -1298,7 +1303,8 @@ def init_portfolio_tables(conn):
                 'speed_to_market',
                 'gls_status', 'concentration_of', 'concentrations_json', 'market_2025', 'performance_2025',
                 'market_score_2025', 'performance_score_2025', 'cim_change_type',
-                'inactivation_admission', 'proposal_stage'):
+                'inactivation_admission', 'proposal_stage',
+                'gtm_type', 'gtm_date', 'gtm_first_term', 'gtm_last_term', 'gtm_intake_terms'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1325,7 +1331,8 @@ def upsert_portfolio_program(row):
                  concentration_of, concentrations_json,
                  market_2025, performance_2025,
                  market_score_2025, performance_score_2025,
-                 cim_change_type, inactivation_admission, proposal_stage)
+                 cim_change_type, inactivation_admission, proposal_stage,
+                 gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms)
             VALUES
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1338,7 +1345,8 @@ def upsert_portfolio_program(row):
                  :concentration_of, :concentrations_json,
                  :market_2025, :performance_2025,
                  :market_score_2025, :performance_score_2025,
-                 :cim_change_type, :inactivation_admission, :proposal_stage)
+                 :cim_change_type, :inactivation_admission, :proposal_stage,
+                 :gtm_type, :gtm_date, :gtm_first_term, :gtm_last_term, :gtm_intake_terms)
             ON CONFLICT(id) DO UPDATE SET
                 program_name=excluded.program_name,
                 college=excluded.college,
@@ -1371,7 +1379,12 @@ def upsert_portfolio_program(row):
                 performance_score_2025=excluded.performance_score_2025,
                 cim_change_type=excluded.cim_change_type,
                 inactivation_admission=excluded.inactivation_admission,
-                proposal_stage=excluded.proposal_stage
+                proposal_stage=excluded.proposal_stage,
+                gtm_type=excluded.gtm_type,
+                gtm_date=excluded.gtm_date,
+                gtm_first_term=excluded.gtm_first_term,
+                gtm_last_term=excluded.gtm_last_term,
+                gtm_intake_terms=excluded.gtm_intake_terms
         """, row)
 
 
@@ -1393,7 +1406,8 @@ def replace_all_portfolio_programs(rows):
                      concentration_of, concentrations_json,
                      market_2025, performance_2025,
                      market_score_2025, performance_score_2025,
-                     cim_change_type, inactivation_admission, proposal_stage)
+                     cim_change_type, inactivation_admission, proposal_stage,
+                     gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms)
                 VALUES
                     (:id, :program_name, :college, :campus,
                      :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1406,7 +1420,8 @@ def replace_all_portfolio_programs(rows):
                      :concentration_of, :concentrations_json,
                      :market_2025, :performance_2025,
                      :market_score_2025, :performance_score_2025,
-                     :cim_change_type, :inactivation_admission, :proposal_stage)
+                     :cim_change_type, :inactivation_admission, :proposal_stage,
+                     :gtm_type, :gtm_date, :gtm_first_term, :gtm_last_term, :gtm_intake_terms)
             """, row)
 
 

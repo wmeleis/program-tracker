@@ -4623,6 +4623,16 @@ const PORTFOLIO_COLUMNS = [
         help: 'Term beginning when the program will no longer admit new students (from CIM’s inactivation proposal fields).'},
     {key: 'inacttoday',  label: 'Admitting Today',
         help: 'Yes if the program is admitting students this term, No if its Inactivation of Admission term has already started.'},
+    {key: 'gtmtype',     label: 'GTM Type', defaultHidden: true,
+        help: 'Type from the Go To Market Roster 2.0 (Net new, Redeployment, Major Program Update, Inactivation, etc.). Joined to CIM by the roster’s CIM url + Banner Code.'},
+    {key: 'gtmdate',     label: 'GTM Date', defaultHidden: true,
+        help: 'GTM Launch or Inactivation Date from the Go To Market Roster 2.0.'},
+    {key: 'gtmfirst',    label: 'GTM First Intake', defaultHidden: true,
+        help: 'First Effective Intake Term from the Go To Market Roster 2.0.'},
+    {key: 'gtmlast',     label: 'GTM Last Term', defaultHidden: true,
+        help: 'Last Available Term from the Go To Market Roster 2.0.'},
+    {key: 'gtmintake',   label: 'GTM Intake Terms', defaultHidden: true,
+        help: 'Available intake terms from the Go To Market Roster 2.0.'},
     {key: 'notes',        label: 'Notes',
         help: 'Free-form notes from the source feeds (CIM justification, IPD comments, etc.).'},
 ];
@@ -4937,6 +4947,11 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'otp',         label: 'OTP Status',       type: 'select', value: p => p.otp_status || ''},
     {key: 'inact_admit', label: 'Inactivation of Admission', type: 'select', value: p => p.inactivation_admission || ''},
     {key: 'admit_today', label: 'Admitting Today',  type: 'boolean', value: p => { const v = _inactAdmittingToday(p); return v === 'Yes' ? 'Y' : v === 'No' ? 'N' : ''; }},
+    {key: 'gtm_type',    label: 'GTM Type',         type: 'select', value: p => p.gtm_type || ''},
+    {key: 'gtm_date',    label: 'GTM Date',         type: 'text',   value: p => p.gtm_date || ''},
+    {key: 'gtm_first',   label: 'GTM First Intake', type: 'select', value: p => p.gtm_first_term || ''},
+    {key: 'gtm_last',    label: 'GTM Last Term',    type: 'select', value: p => p.gtm_last_term || ''},
+    {key: 'gtm_intake',  label: 'GTM Intake Terms', type: 'text',   value: p => p.gtm_intake_terms || ''},
     {key: 'note',        label: 'Notes',            type: 'text',   value: p => p.note || ''},
 ];
 function _pvField(key) { return PORTFOLIO_FILTER_FIELDS.find(f => f.key === key); }
@@ -6209,6 +6224,11 @@ function renderPortfolioTable() {
             case 'inworkflow':  av = a.cim_program_id ? 'Yes' : 'No'; bv = b.cim_program_id ? 'Yes' : 'No'; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
             case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
+            case 'gtmtype':     av = a.gtm_type || '';        bv = b.gtm_type || '';        break;
+            case 'gtmdate':     av = a.gtm_date || '';        bv = b.gtm_date || '';        break;
+            case 'gtmfirst':    av = a.gtm_first_term || '';  bv = b.gtm_first_term || '';  break;
+            case 'gtmlast':     av = a.gtm_last_term || '';   bv = b.gtm_last_term || '';   break;
+            case 'gtmintake':   av = a.gtm_intake_terms || ''; bv = b.gtm_intake_terms || ''; break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
             case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
             case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
@@ -6504,6 +6524,11 @@ function renderPortfolioRow(p, opts = {}) {
             if (!v) return '';
             return `<span class="portfolio-badge ${v === 'Yes' ? 'badge-good' : 'badge-bad'}">${v}</span>`;
         })())}
+        ${_pc('gtmtype',   escapeHtml(p.gtm_type || ''))}
+        ${_pc('gtmdate',   escapeHtml(p.gtm_date || ''))}
+        ${_pc('gtmfirst',  escapeHtml(p.gtm_first_term || ''))}
+        ${_pc('gtmlast',   escapeHtml(p.gtm_last_term || ''))}
+        ${_pc('gtmintake', escapeHtml(p.gtm_intake_terms || ''))}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
     </tr>`;
 }
@@ -6549,6 +6574,11 @@ function exportPortfolioCsv() {
             case 'inworkflow':  return p.cim_program_id ? 'Yes' : 'No';
             case 'inactadmit':  return p.inactivation_admission || '';
             case 'inacttoday':  return _inactAdmittingToday(p) || '';
+            case 'gtmtype':     return p.gtm_type || '';
+            case 'gtmdate':     return p.gtm_date || '';
+            case 'gtmfirst':    return p.gtm_first_term || '';
+            case 'gtmlast':     return p.gtm_last_term || '';
+            case 'gtmintake':   return p.gtm_intake_terms || '';
             case 'market2025':      return p.market_2025 || '';
             case 'perf2025':        return p.performance_2025 || '';
             case 'marketscore2025': return p.market_score_2025 != null ? String(p.market_score_2025) : '';
