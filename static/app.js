@@ -5466,32 +5466,32 @@ function renderPortfolioViewTiles() {
 
     bar.style.display = 'flex';
 
-    // "All Programs" tile — always first, shows total visible count, resets all filters
-    const allCount = (allPortfolioPrograms || []).length;
-    const noFilters = !portfolioFilterTree && !portfolioActiveViewId;
-    const allTile = `<button class="pv-tile${noFilters ? ' active' : ''}"
-        onclick="applyPortfolioView('all'); renderPortfolioTable();"
-        title="Show all programs">
-        <span class="pv-tile-count">${allCount.toLocaleString()}</span>
-        <span class="pv-tile-label">All Programs</span>
-    </button>`;
-
-    // Count how many programs match each starred view's saved tree + filters.
-    // IMPORTANT: do NOT call applyPortfolioView here — it re-renders the tiles,
-    // which would recurse back into this function (infinite loop / page hang).
-    // Instead swap the filter globals in place, count, and restore.
+    // Count of TOP-LEVEL programs matching a view's saved tree + filters — same
+    // number the table header shows. Swaps the filter globals in place (never
+    // calls applyPortfolioView, which would re-render the tiles and recurse).
     function countForView(v) {
         try {
             const savedTree = portfolioFilterTree;
             const savedSnap = _snapshotPortfolioFilters();
-            _applyPortfolioFilters((v.state && v.state.filters) || {});
-            portfolioFilterTree = (v.state && v.state.tree) ? v.state.tree : null;
-            const n = getPortfolioFiltered().length;
+            _applyPortfolioFilters((v && v.state && v.state.filters) || {});
+            portfolioFilterTree = (v && v.state && v.state.tree) ? v.state.tree : null;
+            const n = _portfolioTopLevelCount(getPortfolioFiltered());
             _applyPortfolioFilters(savedSnap);     // restore filter globals + UI
             portfolioFilterTree = savedTree;
             return n;
         } catch(_) { return '—'; }
     }
+
+    // "All Programs" tile — first; active when the 'all' view (or nothing) is
+    // applied. Count is the top-level total (matches the header with no filters).
+    const allCount  = countForView(getPortfolioViewById('all'));
+    const allActive = portfolioActiveViewId === 'all' || !portfolioActiveViewId;
+    const allTile = `<button class="pv-tile${allActive ? ' active' : ''}"
+        onclick="applyPortfolioView('all'); renderPortfolioTable();"
+        title="Show all programs">
+        <span class="pv-tile-count">${typeof allCount === 'number' ? allCount.toLocaleString() : allCount}</span>
+        <span class="pv-tile-label">All Programs</span>
+    </button>`;
 
     const tiles = starred.map(v => {
         const cnt = countForView(v);
@@ -6091,6 +6091,34 @@ function getPortfolioFiltered() {
         );
     }
     return rows;
+}
+
+// Count of TOP-LEVEL programs in a filtered set — mirrors the row-splitting in
+// renderPortfolioTable (concentration sub-rows nest under a matching parent and
+// don't count; a sub-row whose parent fails the filter is promoted to top-level).
+// Used by the view tiles so their counts match the table header exactly.
+function _portfolioTopLevelCount(filtered) {
+    const allById = {};
+    allPortfolioPrograms.forEach(p => { allById[p.id] = p; });
+    const filteredIds = new Set(filtered.map(r => r.id));
+    const topLevelIds = new Set();
+    const concsByParent = {};
+    filtered.forEach(p => {
+        if (p.concentration_of && allById[p.concentration_of]) {
+            (concsByParent[p.concentration_of] = concsByParent[p.concentration_of] || []).push(p);
+        } else {
+            topLevelIds.add(p.id);
+        }
+    });
+    Object.keys(concsByParent).forEach(parentId => {
+        if (topLevelIds.has(parentId)) return;
+        if (filteredIds.has(parentId) && allById[parentId]) {
+            topLevelIds.add(parentId);                       // parent hosts the nesting
+        } else {
+            concsByParent[parentId].forEach(c => topLevelIds.add(c.id));  // promote orphans
+        }
+    });
+    return topLevelIds.size;
 }
 
 function renderPortfolioTable() {
