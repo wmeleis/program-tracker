@@ -2380,10 +2380,19 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     font-size: 12.5px; color: #1f2937; margin-bottom: 1px;
 }
 .pv-side-item:hover { background: #eef2ff; }
-.pv-side-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Per-view hover controls (star / move / delete) on each sidebar row */
+.pv-side-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Star sits just to the right of the name; gold when starred, faint otherwise */
+.pv-side-star {
+    background: none; border: none; cursor: pointer; line-height: 1; flex-shrink: 0;
+    font-size: 13px; padding: 0 2px; color: #cbd5e1;
+}
+.pv-side-star.on { color: #f59e0b; }
+.pv-side-star:hover { color: #f59e0b; }
+.pv-side-item.selected .pv-side-star { color: #bfdbfe; }
+.pv-side-item.selected .pv-side-star.on { color: #fde68a; }
+/* Move / delete hover controls, floated to the far right of the row */
 .pv-side-acts {
-    display: flex; align-items: center; gap: 1px; flex-shrink: 0;
+    display: flex; align-items: center; gap: 1px; flex-shrink: 0; margin-left: auto;
     opacity: 0; transition: opacity .1s;
 }
 .pv-side-item:hover .pv-side-acts { opacity: 1; }
