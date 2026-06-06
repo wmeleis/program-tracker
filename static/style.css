@@ -2314,7 +2314,10 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .pvb-bool { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
 
 /* ── Sidebar select state + star marks + ADMIN pill ──────────────── */
-.pv-side-item.selected { background: #2563eb; color: #fff; }
+/* selected:hover is more specific than :hover, so the dark highlight always
+   wins even while the cursor is on the just-clicked row */
+.pv-side-item.selected,
+.pv-side-item.selected:hover { background: #2563eb; color: #fff; }
 .pv-side-item.selected .pv-side-starmark { color: #fde68a; }
 .pv-side-item.selected .pv-side-name:hover { text-decoration: underline; }
 .pv-side-starmark { color: #f59e0b; font-size: 12px; line-height: 1; margin-right: 2px; }
