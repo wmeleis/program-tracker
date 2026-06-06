@@ -5476,16 +5476,19 @@ function renderPortfolioViewTiles() {
         <span class="pv-tile-label">All Programs</span>
     </button>`;
 
-    // Count how many programs match each starred view's saved tree + filters
+    // Count how many programs match each starred view's saved tree + filters.
+    // IMPORTANT: do NOT call applyPortfolioView here — it re-renders the tiles,
+    // which would recurse back into this function (infinite loop / page hang).
+    // Instead swap the filter globals in place, count, and restore.
     function countForView(v) {
         try {
-            const saved = portfolioFilterTree;
-            const savedId = portfolioActiveViewId;
-            applyPortfolioView(v.id);
+            const savedTree = portfolioFilterTree;
+            const savedSnap = _snapshotPortfolioFilters();
+            _applyPortfolioFilters((v.state && v.state.filters) || {});
+            portfolioFilterTree = (v.state && v.state.tree) ? v.state.tree : null;
             const n = getPortfolioFiltered().length;
-            // restore
-            portfolioFilterTree = saved;
-            portfolioActiveViewId = savedId;
+            _applyPortfolioFilters(savedSnap);     // restore filter globals + UI
+            portfolioFilterTree = savedTree;
             return n;
         } catch(_) { return '—'; }
     }
