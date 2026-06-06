@@ -5327,7 +5327,10 @@ function pvbRemove(path)   { const w = _pvWalk(path); if (w && w.parent) { w.par
 function pvbSetConj(path, conj) { const w = _pvWalk(path); if (w && w.node.type === 'group') { w.node.conj = conj === 'any' ? 'any' : 'all'; renderPvModal(); } }
 function pvbSetField(path, key) { const w = _pvWalk(path); if (w && w.node.type === 'rule' && w.node.field !== key) { Object.assign(w.node, _defaultPvRule(key)); renderPvModal(); } }
 function pvbSetOp(path, op)      { const w = _pvWalk(path); if (w && w.node.type === 'rule') { w.node.op = op; if (op === 'is_set' || op === 'is_empty') w.node.value = null; else if (!w.node.value) w.node.value = (_pvField(w.node.field) || {}).type === 'text' ? '' : []; renderPvModal(); } }
-function pvbSetValue(path, val) { const w = _pvWalk(path); if (w && w.node.type === 'rule') { w.node.value = val; renderPvModal(); } }
+// Text-input edits: update the model + live count ONLY. Do NOT re-render the
+// builder — rebuilding the DOM would destroy the <input> and drop focus after
+// each keystroke. The input already holds the value visually.
+function pvbSetValue(path, val) { const w = _pvWalk(path); if (w && w.node.type === 'rule') { w.node.value = val; _renderPvCount(); } }
 function pvbToggleMulti(path, v) { const w = _pvWalk(path); if (w && w.node.type === 'rule') { const a = Array.isArray(w.node.value) ? w.node.value.slice() : []; const i = a.indexOf(v); i === -1 ? a.push(v) : a.splice(i, 1); w.node.value = a; renderPvModal(); } }
 function pvbOpenMulti(path, ev) { ev && ev.stopPropagation(); _pvMultiOpen = (_pvMultiOpen === path ? null : path); _renderPvBuilder(); }
 document.addEventListener('click', e => {
