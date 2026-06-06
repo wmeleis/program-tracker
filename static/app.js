@@ -5248,7 +5248,9 @@ function _renderPvFooter() {
     // Cancel sits at the far left. Per-view actions (star/move/delete) now live
     // as hover controls on each sidebar row, so the footer only holds the
     // save / apply actions.
-    const left = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Cancel</button>`;
+    // "Close" (not "Cancel") — it just closes the window; it does not undo
+    // star/move/delete/save/update, which take effect immediately when clicked.
+    const left = `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Close</button>`;
 
     let acts = '';
     acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')" title="Save as a new personal view">Save as My View</button>`;
