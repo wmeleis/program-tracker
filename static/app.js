@@ -5220,9 +5220,20 @@ function _renderPvFooter() {
     // views are always editable by their owner. Drives ↑/↓/Delete/Update.
     const canEdit  = loaded && (loaded.team ? _pvIsAdmin() : true);
     const starred  = loaded && getPortfolioStarredIds().has(loaded.id);
+    // "Dirty" reflects ANY difference from the saved view — filter tree, the
+    // visible columns, or the top-bar filters — so the dot shows when only
+    // columns changed. (Update is always offered for editable views regardless.)
     const draftJson = JSON.stringify((_pvDraftTree && (_pvDraftTree.children || []).length) ? _pvDraftTree : null);
     const savedJson = loaded ? JSON.stringify((loaded.state && loaded.state.tree) || null) : null;
-    const dirty = loaded && draftJson !== savedJson;
+    let dirty = false;
+    if (loaded) {
+        const treeDirty = draftJson !== savedJson;
+        const curCols  = [...portfolioVisibleCols].sort();
+        const viewCols = (_resolveViewCols(loaded.state) || PORTFOLIO_COLUMNS.map(c => c.key)).slice().sort();
+        const colsDirty = JSON.stringify(curCols) !== JSON.stringify(viewCols);
+        const filtersDirty = !_snapshotEq(_snapshotPortfolioFilters(), (loaded.state && loaded.state.filters) || {});
+        dirty = treeDirty || colsDirty || filtersDirty;
+    }
 
     // Left: selected-view context label
     const left = loaded
@@ -5243,7 +5254,9 @@ function _renderPvFooter() {
     }
     acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('personal')" title="Save as a new personal view">Save as My View</button>`;
     if (_pvIsAdmin()) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvStartSave('team')" title="Save as a new team view">Save as Team View</button>`;
-    if (canEdit && dirty) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvUpdateLoaded()" title="Save changes to this view">↻ Update</button>`;
+    // Update is offered for any editable view (not just when "dirty") so the
+    // current columns + top-bar filters can be saved even if the tree is unchanged.
+    if (canEdit) acts += `<button class="pv-btn pv-btn-ghost" onclick="pvUpdateLoaded()" title="Save current columns, filters & rules to this view">↻ Update</button>`;
     acts += `<button class="pv-btn pv-btn-ghost" onclick="closePortfolioViewsModal()">Cancel</button>`;
     acts += `<button class="pv-btn pv-btn-primary" onclick="pvApplyDraft()" title="Apply to the table">Apply</button>`;
 
