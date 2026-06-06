@@ -5233,10 +5233,8 @@ function _renderPvFooter() {
         dirty = treeDirty || colsDirty || filtersDirty;
     }
 
-    // Left: optional unsaved-changes dot only (the view name is not shown here).
-    const left = (loaded && dirty)
-        ? `<span class="pv-active-tag"><span class="pv-dirty-dot" title="Unsaved changes"></span></span>`
-        : '';
+    // Left side of the footer is intentionally empty (no view name, no dot).
+    const left = '';
 
     // Right: actions on the selected view + save/apply, in the fixed student-
     // tracker order. Star is available to anyone; ↑/↓/Delete only when the view
