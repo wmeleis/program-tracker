@@ -4786,17 +4786,6 @@ function _pc(key, content, cls, titleAttr) {
 //          (auto-picks up GTM columns when they are added)
 // filters: snapshot of all filter state (empty = no restrictions)
 
-const PORTFOLIO_BUILT_IN_VIEWS = [
-    {
-        id: 'all', name: 'All', team: true,
-        state: { visibleCols: null, filters: {} },
-    },
-    {
-        id: 'gtm', name: 'GTM', team: true,
-        state: { gtmOnly: true, filters: {} },
-    },
-];
-
 const _PORTFOLIO_VIEWS_LS  = 'cim-portfolio-views-v1';
 const _PORTFOLIO_ACTIVE_LS = 'cim-portfolio-active-view';
 
@@ -4813,7 +4802,7 @@ function setPortfolioPersonalViews(views) {
     try { localStorage.setItem(_PORTFOLIO_VIEWS_LS, JSON.stringify(views)); } catch(_) {}
 }
 function getAllPortfolioViews() {
-    return [...PORTFOLIO_BUILT_IN_VIEWS, ...getPortfolioTeamViews(), ...getPortfolioPersonalViews()];
+    return [...getPortfolioTeamViews(), ...getPortfolioPersonalViews()];
 }
 function getPortfolioViewById(id) {
     return getAllPortfolioViews().find(v => v.id === id) || null;
@@ -5137,11 +5126,9 @@ function _renderPvSidebar() {
     const item = (v) => {
         const sel    = v.id === _pvLoadedViewId;
         const isStar = stars.has(v.id);
-        const isBuiltIn = (v.id === 'all' || v.id === 'gtm');
-        // Move/delete only for editable, non-built-in views (own personal views,
-        // or saved team views when admin). The built-in All/GTM can't be moved
-        // or deleted, so they show only the star control (no misleading ✕).
-        const canModify = !isBuiltIn && (v.team ? _pvIsAdmin() : true);
+        // Star is available to everyone; move/delete for editable views — your
+        // own personal views, or any team view when you're admin (local app).
+        const canModify = v.team ? _pvIsAdmin() : true;
         let acts = `<button class="pv-side-act pv-side-act-star${isStar ? ' on' : ''}" title="${isStar ? 'Unstar' : 'Star — show as a top tile'}" onclick="pvStarById('${v.id}',event)">${isStar ? '★' : '☆'}</button>`;
         if (canModify) {
             acts += `<button class="pv-side-act" title="Move up" onclick="pvMoveById('${v.id}',-1,event)">↑</button>`;
@@ -5154,8 +5141,7 @@ function _renderPvSidebar() {
     };
     let html = `<button class="pv-side-newbtn" onclick="pvNewView()">+ New view</button>`;
     html += `<div class="pv-side-section">Team ${_pvIsAdmin() ? '<span class="pv-admin-pill">ADMIN</span>' : ''}</div>`;
-    const teamAll = [...PORTFOLIO_BUILT_IN_VIEWS, ...team];
-    html += teamAll.length ? teamAll.map(item).join('') : '<div class="pv-side-empty">None</div>';
+    html += team.length ? team.map(item).join('') : '<div class="pv-side-empty">None saved yet</div>';
     html += `<div class="pv-side-section">Personal</div>`;
     html += personal.length ? personal.map(item).join('') : '<div class="pv-side-empty">None saved yet</div>';
     host.innerHTML = html;
@@ -5246,9 +5232,8 @@ function _renderPvFooter() {
     }
 
     const loaded   = _pvLoadedViewId ? getPortfolioViewById(_pvLoadedViewId) : null;
-    const builtIn  = loaded && (loaded.id === 'all' || loaded.id === 'gtm');
-    // Team views (incl. built-in All/GTM) are editable only by admins; personal
-    // views are always editable by their owner. Drives ↑/↓/Delete/Update.
+    // Team views are editable only by admins; personal views are always
+    // editable by their owner. Drives ↑/↓/Delete/Update.
     const canEdit  = loaded && (loaded.team ? _pvIsAdmin() : true);
     const starred  = loaded && getPortfolioStarredIds().has(loaded.id);
     // "Dirty" reflects ANY difference from the saved view — filter tree, the
@@ -5316,7 +5301,6 @@ function pvDeleteById(id, ev) {
 function pvMoveById(id, dir, ev) {
     if (ev) ev.stopPropagation();
     const view = getPortfolioViewById(id); if (!view) return;
-    if (view.id === 'all' || view.id === 'gtm') return;   // built-ins are fixed
     if (view.team) {
         if (!_pvIsAdmin()) return;
         const arr = portfolioTeamViews, i = arr.findIndex(v => v.id === id), j = i + dir;
@@ -5379,10 +5363,6 @@ function pvLoadView(id) {
 
 function pvDeleteView(id, ev) {
     ev && ev.stopPropagation();
-    if (id === 'all' || id === 'gtm') {   // built-in views can't be deleted
-        alert('The built-in "' + (id === 'all' ? 'All' : 'GTM') + '" view can\'t be deleted.');
-        return;
-    }
     if (id.startsWith('team_')) {
         portfolioTeamViews = portfolioTeamViews.filter(v => v.id !== id);
         _persistTeamViews('delete', id);
@@ -5486,13 +5466,7 @@ function renderPortfolioViewTiles() {
     if (currentView !== 'portfolio') { bar.style.display = 'none'; return; }
 
     const stars   = getPortfolioStarredIds();
-    const all     = getAllPortfolioViews();
-    // Any starred view becomes a tile — built-in (All/GTM), team, or personal.
-    // Order: built-ins first (All, GTM), then team, then personal.
-    const starred = all.filter(v => stars.has(v.id));
-
-    // No starred views → no tile bar.
-    if (!starred.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    const starred = getAllPortfolioViews().filter(v => stars.has(v.id));   // team/personal only
     bar.style.display = 'flex';
 
     // Count of TOP-LEVEL programs matching a view's saved tree + filters — same
@@ -5511,24 +5485,39 @@ function renderPortfolioViewTiles() {
         } catch(_) { return '—'; }
     }
 
-    // Every starred view (built-in All/GTM, team, or personal) becomes a tile.
-    // The built-in 'all' view shows the friendlier "All Programs" label and is
-    // also active when no specific view is applied.
+    // A permanent "All Programs" reset tile (clears the active view + all
+    // filters), followed by one tile per starred view.
+    const totalCount = _portfolioTopLevelCount(allPortfolioPrograms);
+    const allActive  = !portfolioActiveViewId && !portfolioFilterTree;
+    const resetTile = `<button class="pv-tile${allActive ? ' active' : ''}"
+        onclick="portfolioShowAll()" title="Show all programs (clear view + filters)">
+        <span class="pv-tile-count">${totalCount.toLocaleString()}</span>
+        <span class="pv-tile-label">All Programs</span>
+    </button>`;
+
     const tiles = starred.map(v => {
-        const cnt    = countForView(v);
-        const isAll  = v.id === 'all';
-        const active = isAll ? (portfolioActiveViewId === 'all' || !portfolioActiveViewId)
-                             : (v.id === portfolioActiveViewId);
-        const label  = isAll ? 'All Programs' : v.name;
+        const cnt = countForView(v);
+        const active = v.id === portfolioActiveViewId;
         return `<button class="pv-tile${active ? ' active' : ''}"
             onclick="applyPortfolioView('${v.id}'); renderPortfolioTable();"
-            title="${escapeHtml(label)}">
+            title="${escapeHtml(v.name)}">
             <span class="pv-tile-count">${typeof cnt === 'number' ? cnt.toLocaleString() : cnt}</span>
-            <span class="pv-tile-label">${escapeHtml(label)}</span>
+            <span class="pv-tile-label">${escapeHtml(v.name)}</span>
         </button>`;
     }).join('');
 
-    bar.innerHTML = tiles;
+    bar.innerHTML = resetTile + tiles;
+}
+
+// "All Programs" reset — clear the active view, advanced filter tree, and all
+// top-bar filters, then re-render. (Not a saved view; just a reset control.)
+function portfolioShowAll() {
+    portfolioActiveViewId = null;
+    portfolioFilterTree = null;
+    _applyPortfolioFilters({});
+    try { localStorage.setItem(_PORTFOLIO_ACTIVE_LS, ''); } catch (_) {}
+    renderPortfolioViewTiles();
+    renderPortfolioTable();
 }
 
 // Back-compat aliases
