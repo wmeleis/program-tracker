@@ -169,14 +169,18 @@ function switchView(view) {
     const portfolioToolbar  = document.getElementById('portfolio-table-toolbar');
     const portfolioHdrAct   = document.getElementById('portfolio-header-actions');
     // CIM-specific header buttons: hidden on portfolio view (replaced by
-    // Export / Views / Columns). Non-portfolio views restore them.
+    // Export / Views / Columns) — EXCEPT the "● CIM connected" status button
+    // (auth-btn), which stays visible everywhere since the connection status
+    // is useful on every view. Non-portfolio views restore them all.
     const cimHdrBtns = ['scan-btn','auth-btn','console-btn','refs-btn']
         .map(id => document.getElementById(id)).filter(Boolean);
+    const authBtn = document.getElementById('auth-btn');
     const lastUpdatedEl = document.getElementById('last-updated');
     const scanStatusEl  = document.getElementById('scan-status');
     const progressEl    = document.getElementById('progress-container');
     if (view === 'portfolio') {
         cimHdrBtns.forEach(b => b.style.display = 'none');
+        if (authBtn) authBtn.style.display = '';   // keep CIM connection status visible
         if (lastUpdatedEl) lastUpdatedEl.style.display = 'none';
         if (scanStatusEl)  scanStatusEl.style.display  = 'none';
         if (progressEl)    progressEl.style.display    = 'none';
