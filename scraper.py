@@ -3730,7 +3730,8 @@ def compute_db_fingerprint():
         "speed_to_market, gls_status, "
         "market_2025, performance_2025, "
         "market_score_2025, performance_score_2025, concentration_of, "
-        "gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms "
+        "gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms, "
+        "exit_masters "
         "FROM portfolio_programs ORDER BY id",
     ]
     with get_db() as conn:

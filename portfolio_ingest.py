@@ -45,6 +45,12 @@ SCORING_2025_PATH = os.path.expanduser(
 OTP_SHEET   = "OTP Program Tracking"
 GTM_PATH    = os.path.join(_WORKTREE_DIR, 'data', 'portfolio_feeds', 'gtm.json')
 
+# Curated banner codes for the "Exit master's" flag (uppercase). Programs whose
+# CIM banner_code is in this set get exit_masters='Yes'; all others 'No'.
+EXIT_MASTERS_BANNERS = {
+    'MS-POHE', 'MS-APNR', 'MS-BIOL', 'MS-MRES', 'MS-PSYC', 'MA-SOCI',
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -3137,6 +3143,29 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             n_gtm_matched += 1
     if gtm_entries:
         print(f"  GTM overlay: {len(gtm_entries)} roster rows → {n_gtm_matched} matched to portfolio")
+
+    # ── Exit master's overlay ─────────────────────────────────────────────────
+    # A curated set of banner codes flags "exit master's" programs. Resolve the
+    # codes to CIM program ids via the programs table, then mark matching rows
+    # 'Yes' and everything else 'No'.
+    exit_pids = set()
+    try:
+        with get_db() as conn:
+            ph = ','.join('?' for _ in EXIT_MASTERS_BANNERS)
+            for r in conn.execute(
+                    f"SELECT id FROM programs WHERE UPPER(banner_code) IN ({ph})",
+                    tuple(EXIT_MASTERS_BANNERS)):
+                exit_pids.add(r['id'])
+    except Exception:
+        pass
+    n_exit = 0
+    for r in tracker.values():
+        is_exit = r.get('cim_program_id') in exit_pids
+        r['exit_masters'] = 'Yes' if is_exit else 'No'
+        if is_exit:
+            n_exit += 1
+    print(f"  Exit master's: {n_exit} programs flagged Yes "
+          f"({len(EXIT_MASTERS_BANNERS)} banner codes, {len(exit_pids)} matched in CIM)")
 
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())

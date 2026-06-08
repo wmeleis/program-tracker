@@ -4637,6 +4637,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Last Available Term from the Go To Market Roster 2.0.'},
     {key: 'gtmintake',   label: 'GTM Intake Terms', defaultHidden: true,
         help: 'Available intake terms from the Go To Market Roster 2.0.'},
+    {key: 'exitmasters', label: "Exit Master's", defaultHidden: true,
+        help: "Whether the program is a designated exit master's (curated by banner code)."},
     {key: 'notes',        label: 'Notes',
         help: 'Free-form notes from the source feeds (CIM justification, IPD comments, etc.).'},
 ];
@@ -4952,6 +4954,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'gtm_first',   label: 'GTM First Intake', type: 'select', value: p => p.gtm_first_term || ''},
     {key: 'gtm_last',    label: 'GTM Last Term',    type: 'select', value: p => p.gtm_last_term || ''},
     {key: 'gtm_intake',  label: 'GTM Intake Terms', type: 'text',   value: p => p.gtm_intake_terms || ''},
+    {key: 'exit_masters',label: "Exit Master's",    type: 'select', value: p => p.exit_masters || ''},
     {key: 'note',        label: 'Notes',            type: 'text',   value: p => p.note || ''},
 ];
 function _pvField(key) { return PORTFOLIO_FILTER_FIELDS.find(f => f.key === key); }
@@ -6228,6 +6231,7 @@ function renderPortfolioTable() {
             case 'gtmfirst':    av = a.gtm_first_term || '';  bv = b.gtm_first_term || '';  break;
             case 'gtmlast':     av = a.gtm_last_term || '';   bv = b.gtm_last_term || '';   break;
             case 'gtmintake':   av = a.gtm_intake_terms || ''; bv = b.gtm_intake_terms || ''; break;
+            case 'exitmasters': av = a.exit_masters || '';     bv = b.exit_masters || '';     break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
             case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
             case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
@@ -6528,6 +6532,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('gtmfirst',  escapeHtml(p.gtm_first_term || ''))}
         ${_pc('gtmlast',   escapeHtml(p.gtm_last_term || ''))}
         ${_pc('gtmintake', escapeHtml(p.gtm_intake_terms || ''))}
+        ${_pc('exitmasters', escapeHtml(p.exit_masters || ''))}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
     </tr>`;
 }
@@ -6578,6 +6583,7 @@ function exportPortfolioCsv() {
             case 'gtmfirst':    return p.gtm_first_term || '';
             case 'gtmlast':     return p.gtm_last_term || '';
             case 'gtmintake':   return p.gtm_intake_terms || '';
+            case 'exitmasters': return p.exit_masters || '';
             case 'market2025':      return p.market_2025 || '';
             case 'perf2025':        return p.performance_2025 || '';
             case 'marketscore2025': return p.market_score_2025 != null ? String(p.market_score_2025) : '';
