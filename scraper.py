@@ -3743,6 +3743,19 @@ def compute_db_fingerprint():
                 # error message into the hash so a schema change forces a
                 # re-export, but don't crash the scan.
                 h.update(f"ERR:{q[:40]}:{e}".encode('utf-8'))
+
+    # Team (shared) portfolio views live in a JSON file, not the DB, but they're
+    # baked into the static export's data.json. Fold the file into the hash so a
+    # team-view edit triggers a re-export + push on the next scan.
+    try:
+        import os
+        _pv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                'data', 'portfolio_views.json')
+        with open(_pv_path, 'rb') as _f:
+            h.update(b'TEAMVIEWS:')
+            h.update(_f.read())
+    except Exception:
+        h.update(b'TEAMVIEWS:none')
     return h.hexdigest()
 
 
