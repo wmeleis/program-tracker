@@ -5143,15 +5143,17 @@ function _renderPvSidebar() {
                 <span class="pv-side-name">${escapeHtml(v.name)}</span>
                 <span class="pv-side-acts"><span class="pv-side-star on" title="Always shown">★</span></span></div>`;
         }
-        // Star is available to everyone; move/delete for editable views — your
-        // own personal views, or any team view when you're admin (local app).
+        // Move/delete (hover-only, editable views) come first; the star is the
+        // LAST action so it's pinned to the row's right edge — aligning with the
+        // permanent All Programs row's star above.
         const canModify = v.team ? _pvIsAdmin() : true;
-        let acts = `<button class="pv-side-act pv-side-act-star${isStar ? ' on' : ''}" title="${isStar ? 'Unstar' : 'Star — show as a top tile'}" onclick="pvStarById('${v.id}',event)">${isStar ? '★' : '☆'}</button>`;
+        let acts = '';
         if (canModify) {
             acts += `<button class="pv-side-act" title="Move up" onclick="pvMoveById('${v.id}',-1,event)">↑</button>`;
             acts += `<button class="pv-side-act" title="Move down" onclick="pvMoveById('${v.id}',1,event)">↓</button>`;
             acts += `<button class="pv-side-act pv-side-act-del" title="Delete view" onclick="pvDeleteById('${v.id}',event)">✕</button>`;
         }
+        acts += `<button class="pv-side-act pv-side-act-star${isStar ? ' on' : ''}" title="${isStar ? 'Unstar' : 'Star — show as a top tile'}" onclick="pvStarById('${v.id}',event)">${isStar ? '★' : '☆'}</button>`;
         return `<div class="pv-side-item${sel ? ' selected' : ''}" onclick="pvLoadView('${v.id}')">
             <span class="pv-side-name">${escapeHtml(v.name)}</span>
             <span class="pv-side-acts">${acts}</span></div>`;
