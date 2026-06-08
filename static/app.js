@@ -5487,8 +5487,9 @@ function renderPortfolioViewTiles() {
 
     const stars   = getPortfolioStarredIds();
     const all     = getAllPortfolioViews();
-    const starred = [...getPortfolioTeamViews(), ...getPortfolioPersonalViews()]
-                      .filter(v => stars.has(v.id));
+    // Any starred view becomes a tile — built-in (e.g. GTM), team, or personal.
+    // 'all' is excluded since the always-present "All Programs" tile covers it.
+    const starred = all.filter(v => v.id !== 'all' && stars.has(v.id));
 
     bar.style.display = 'flex';
 
