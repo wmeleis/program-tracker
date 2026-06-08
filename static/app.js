@@ -5006,9 +5006,9 @@ function evalPortfolioRule(p, rule) {
 }
 
 function _opsForPvType(t) {
-    if (t === 'text')    return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is set'],['is_empty','is empty']];
-    if (t === 'boolean') return [['in','is'],['is_set','is set'],['is_empty','is empty']];
-    return [['in','is one of'],['not_in','is not one of'],['is_set','is set'],['is_empty','is empty']];
+    if (t === 'text')    return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is not empty'],['is_empty','is empty']];
+    if (t === 'boolean') return [['in','is'],['is_set','is not empty'],['is_empty','is empty']];
+    return [['in','is one of'],['not_in','is not one of'],['is_set','is not empty'],['is_empty','is empty']];
 }
 function _defaultPvRule(key) {
     const f = _pvField(key) || PORTFOLIO_FILTER_FIELDS[0];
