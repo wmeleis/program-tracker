@@ -5053,6 +5053,9 @@ function _pvIsAdmin() {
     return !window._staticMode;
 }
 
+// Stars are LOCAL ONLY (per browser) — intentionally not synced to the server
+// or the published site. Only the team-view order syncs (it lives in the
+// server's portfolio_views.json array and is baked into the export in order).
 function getPortfolioStarredIds() {
     try { return new Set(JSON.parse(localStorage.getItem(_PORTFOLIO_STARS_LS) || '[]')); }
     catch (_) { return new Set(); }
