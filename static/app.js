@@ -5006,9 +5006,9 @@ function evalPortfolioRule(p, rule) {
 }
 
 function _opsForPvType(t) {
-    if (t === 'text')    return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is not empty'],['is_empty','is empty']];
-    if (t === 'boolean') return [['in','is'],['is_set','is not empty'],['is_empty','is empty']];
-    return [['in','is one of'],['not_in','is not one of'],['is_set','is not empty'],['is_empty','is empty']];
+    if (t === 'text')    return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is set'],['is_empty','is not set']];
+    if (t === 'boolean') return [['in','is'],['is_set','is set'],['is_empty','is not set']];
+    return [['in','is one of'],['not_in','is not one of'],['is_set','is set'],['is_empty','is not set']];
 }
 function _defaultPvRule(key) {
     const f = _pvField(key) || PORTFOLIO_FILTER_FIELDS[0];
@@ -5137,11 +5137,13 @@ function _renderPvSidebar() {
     const item = (v) => {
         const sel    = v.id === _pvLoadedViewId;
         const isStar = stars.has(v.id);
-        const editable = v.team ? _pvIsAdmin() : true;
-        // All per-view controls live together as hover actions on the far right:
-        // star (everyone), then move up/down + delete (editable views only).
+        const isBuiltIn = (v.id === 'all' || v.id === 'gtm');
+        // Move/delete only for editable, non-built-in views (own personal views,
+        // or saved team views when admin). The built-in All/GTM can't be moved
+        // or deleted, so they show only the star control (no misleading ✕).
+        const canModify = !isBuiltIn && (v.team ? _pvIsAdmin() : true);
         let acts = `<button class="pv-side-act pv-side-act-star${isStar ? ' on' : ''}" title="${isStar ? 'Unstar' : 'Star — show as a top tile'}" onclick="pvStarById('${v.id}',event)">${isStar ? '★' : '☆'}</button>`;
-        if (editable) {
+        if (canModify) {
             acts += `<button class="pv-side-act" title="Move up" onclick="pvMoveById('${v.id}',-1,event)">↑</button>`;
             acts += `<button class="pv-side-act" title="Move down" onclick="pvMoveById('${v.id}',1,event)">↓</button>`;
             acts += `<button class="pv-side-act pv-side-act-del" title="Delete view" onclick="pvDeleteById('${v.id}',event)">✕</button>`;
