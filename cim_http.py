@@ -379,12 +379,21 @@ class CIMSession:
         """POST form-encoded `data` to a CIM-relative path. Returns the body
         text, or None on HTTP error / login redirect (sets logged_out). This
         is the ONLY write primitive — all approve/comment/send-back actions
-        funnel through it so there's a single audited choke point."""
+        funnel through it so there's a single audited choke point.
+
+        Headers mirror what jQuery $.ajax sends from CIM's own Approve Pages
+        JS (X-Requested-With + Accept + charset on Content-Type). Without
+        them, CourseLeaf appears to drop the comment portion of approve
+        POSTs even though the action itself goes through — see investigation
+        in action_audit.jsonl entries around 2026-06-08.
+        """
         url = path if path.startswith('http') else (CIM_BASE + path)
         body_bytes = urllib.parse.urlencode(data).encode('utf-8')
         req = urllib.request.Request(url, data=body_bytes, headers={
             'User-Agent': 'Mozilla/5.0 (program-tracker cim_http)',
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Accept': '*/*',
+            'X-Requested-With': 'XMLHttpRequest',
             'Cache-Control': 'no-store',
         })
         try:
@@ -436,6 +445,11 @@ class CIMSession:
         if not revision_id:
             return False, "Could not read current revision id (preview fetch failed)."
         why = (comment or '').replace('\n', ' ').strip()
+        # Capture raw response bodies so the post-action audit can show
+        # exactly what CIM returned — used to diagnose silent
+        # comment-drops (see action_audit.jsonl 2026-06-08).
+        self.last_comment_response = None
+        self.last_approve_response = None
 
         # Step 1: log the comment first (mirrors approveCurrent's wfrejectcomments
         # pre-post). command=nosave stages the note without saving a draft.
@@ -443,6 +457,7 @@ class CIMSession:
             r = self.post(
                 f"/courseleaf/courseleaf.cgi?page={path}&step=wfrejectcomments&output=xml",
                 {'attr_newrejectcomments': why, 'command': 'nosave'}, timeout=timeout)
+            self.last_comment_response = r
             if self.logged_out:
                 return False, "CIM session expired (comment step)."
             if r is None:
@@ -456,6 +471,7 @@ class CIMSession:
         r = self.post(
             f"/courseleaf/courseleaf.cgi?page={path}&step=approvelist&output=xml",
             data, timeout=timeout)
+        self.last_approve_response = r
         if self.logged_out:
             return False, "CIM session expired (approve step)."
         if r is None:

@@ -843,10 +843,12 @@ def api_program_action(pid):
         return jsonify({'ok': False, 'detail': msg, 'moved': True, 'live_role': live_role}), 409
 
     # Perform the action.
+    standalone_comment_resp = None
     if action == 'comment':
         # Standalone note — post the comment step only (no workflow advance).
         r = sess.post(f"/courseleaf/courseleaf.cgi?page={path}&step=wfrejectcomments&output=xml",
                       {'attr_newrejectcomments': comment.replace('\n', ' '), 'command': 'nosave'})
+        standalone_comment_resp = r
         ok_act = (r is not None and not sess.logged_out)
         detail_act = "Comment logged" if ok_act else "Comment submission failed"
     else:
@@ -854,9 +856,23 @@ def api_program_action(pid):
         ok_act, detail_act = sess.approve_item(
             path, role=live_role, action=cim_action, rejectto=rejectto, comment=comment)
 
-    audit = _append_action_audit({'program_id': pid, 'name': prog_name, 'action': action,
-                                  'role': live_role, 'comment': comment, 'rejectto': rejectto,
-                                  'ok': ok_act, 'detail': detail_act})
+    # Capture raw CIM response bodies so we can diagnose silent comment
+    # drops post-hoc. Truncated to keep the audit file small. Removed once
+    # the comment-transmission bug is confirmed fixed.
+    audit_entry = {'program_id': pid, 'name': prog_name, 'action': action,
+                   'role': live_role, 'comment': comment, 'rejectto': rejectto,
+                   'ok': ok_act, 'detail': detail_act}
+    if action == 'comment':
+        if standalone_comment_resp is not None:
+            audit_entry['cim_resp_comment'] = standalone_comment_resp[:1000]
+    else:
+        cr = getattr(sess, 'last_comment_response', None)
+        ar = getattr(sess, 'last_approve_response', None)
+        if cr is not None:
+            audit_entry['cim_resp_comment'] = cr[:1000]
+        if ar is not None:
+            audit_entry['cim_resp_approve'] = ar[:1000]
+    audit = _append_action_audit(audit_entry)
 
     new_step = live_role
     if ok_act and action != 'comment':
