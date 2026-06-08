@@ -5487,10 +5487,12 @@ function renderPortfolioViewTiles() {
 
     const stars   = getPortfolioStarredIds();
     const all     = getAllPortfolioViews();
-    // Any starred view becomes a tile — built-in (e.g. GTM), team, or personal.
-    // 'all' is excluded since the always-present "All Programs" tile covers it.
-    const starred = all.filter(v => v.id !== 'all' && stars.has(v.id));
+    // Any starred view becomes a tile — built-in (All/GTM), team, or personal.
+    // Order: built-ins first (All, GTM), then team, then personal.
+    const starred = all.filter(v => stars.has(v.id));
 
+    // No starred views → no tile bar.
+    if (!starred.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
     bar.style.display = 'flex';
 
     // Count of TOP-LEVEL programs matching a view's saved tree + filters — same
@@ -5509,29 +5511,24 @@ function renderPortfolioViewTiles() {
         } catch(_) { return '—'; }
     }
 
-    // "All Programs" tile — first; active when the 'all' view (or nothing) is
-    // applied. Count is the top-level total (matches the header with no filters).
-    const allCount  = countForView(getPortfolioViewById('all'));
-    const allActive = portfolioActiveViewId === 'all' || !portfolioActiveViewId;
-    const allTile = `<button class="pv-tile${allActive ? ' active' : ''}"
-        onclick="applyPortfolioView('all'); renderPortfolioTable();"
-        title="Show all programs">
-        <span class="pv-tile-count">${typeof allCount === 'number' ? allCount.toLocaleString() : allCount}</span>
-        <span class="pv-tile-label">All Programs</span>
-    </button>`;
-
+    // Every starred view (built-in All/GTM, team, or personal) becomes a tile.
+    // The built-in 'all' view shows the friendlier "All Programs" label and is
+    // also active when no specific view is applied.
     const tiles = starred.map(v => {
-        const cnt = countForView(v);
-        const active = v.id === portfolioActiveViewId;
+        const cnt    = countForView(v);
+        const isAll  = v.id === 'all';
+        const active = isAll ? (portfolioActiveViewId === 'all' || !portfolioActiveViewId)
+                             : (v.id === portfolioActiveViewId);
+        const label  = isAll ? 'All Programs' : v.name;
         return `<button class="pv-tile${active ? ' active' : ''}"
             onclick="applyPortfolioView('${v.id}'); renderPortfolioTable();"
-            title="${escapeHtml(v.name)}">
+            title="${escapeHtml(label)}">
             <span class="pv-tile-count">${typeof cnt === 'number' ? cnt.toLocaleString() : cnt}</span>
-            <span class="pv-tile-label">${escapeHtml(v.name)}</span>
+            <span class="pv-tile-label">${escapeHtml(label)}</span>
         </button>`;
     }).join('');
 
-    bar.innerHTML = allTile + tiles;
+    bar.innerHTML = tiles;
 }
 
 // Back-compat aliases
