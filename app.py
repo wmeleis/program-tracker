@@ -1684,27 +1684,72 @@ def _load_portfolio_team_views():
         return []
 
 
+def _save_portfolio_team_views(views):
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    with open(_PORTFOLIO_VIEWS_PATH, 'w') as f:
+        _json.dump({"views": views}, f, indent=2)
+
+
 @app.route('/api/portfolio/views', methods=['GET', 'POST'])
 def api_portfolio_views():
     """Shared (team) portfolio views, persisted to data/portfolio_views.json.
 
     GET  -> {views: [...]}
-    POST -> body {action: 'save'|'delete', id, views: [...]} replaces the
-            stored list with the client's full list (client is source of truth).
+    POST -> body {action, id, views: [...]}. The server MERGES the change into
+            its own stored list by id rather than blindly replacing it with the
+            client's list — so a client holding a stale/empty list can only
+            affect the one view it's acting on, never wipe everyone else's:
+              - action 'save'/'update': upsert the view with `id` (taken from the
+                client's `views`) into the stored list.
+              - action 'delete': remove the view with `id`.
+              - action 'reorder': reorder stored views to match the client's
+                order; any stored view the client doesn't know about is appended
+                (never dropped).
+            A POST with no recognized action and a non-empty list falls back to a
+            full replace (legacy clients); an empty list with no action is
+            rejected so it can't clobber the store.
     """
     if request.method == 'GET':
         return jsonify({'views': _load_portfolio_team_views()})
+
     data = request.get_json(force=True) or {}
-    views = data.get('views', [])
-    if not isinstance(views, list):
+    action = (data.get('action') or '').lower()
+    vid = data.get('id')
+    client_views = data.get('views', [])
+    if not isinstance(client_views, list):
         return jsonify({'error': 'views must be a list'}), 400
+
+    stored = _load_portfolio_team_views()
+    by_id = {v.get('id'): v for v in stored}
+
+    if action in ('save', 'update', 'reorder') and not vid and action != 'reorder':
+        return jsonify({'error': 'missing id'}), 400
+
+    if action == 'delete' and vid:
+        result = [v for v in stored if v.get('id') != vid]
+    elif action in ('save', 'update') and vid:
+        cv = next((v for v in client_views if v.get('id') == vid), None)
+        if cv is None:
+            return jsonify({'error': 'view not in payload'}), 400
+        if vid in by_id:
+            result = [cv if v.get('id') == vid else v for v in stored]
+        else:
+            result = stored + [cv]
+    elif action == 'reorder':
+        order = [v.get('id') for v in client_views]
+        result = [by_id[i] for i in order if i in by_id]
+        result += [v for v in stored if v.get('id') not in set(order)]
+    elif action in ('', None) and client_views:
+        result = client_views          # legacy full-replace (no action given)
+    else:
+        # Unknown action or empty list with no action — refuse to clobber.
+        return jsonify({'error': 'no-op (unrecognized action / empty payload)', 'views': stored}), 200
+
     try:
-        os.makedirs(_DATA_DIR, exist_ok=True)
-        with open(_PORTFOLIO_VIEWS_PATH, 'w') as f:
-            _json.dump({"views": views}, f, indent=2)
+        _save_portfolio_team_views(result)
     except Exception as e:
         return jsonify({'error': f'save failed: {e}'}), 500
-    return jsonify({'ok': True, 'views': views})
+    return jsonify({'ok': True, 'views': result})
 
 
 @app.route('/api/portfolio/note/<path:program_id>', methods=['POST'])
