@@ -2398,6 +2398,9 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .pv-side-act:hover { color: #2563eb; background: rgba(37,99,235,.1); }
 .pv-side-act-del:hover { color: #dc2626; background: rgba(220,38,38,.1); }
 .pv-side-act-star { font-size: 13px; }
+/* Permanent "All Programs" view: always-on star, no toggle/move/delete */
+.pv-side-star { color: #f59e0b; font-size: 13px; cursor: default; padding: 0 2px; }
+.pv-side-item.selected .pv-side-star { color: #fde68a; }
 .pv-side-act-star.on { color: #f59e0b; opacity: 1; }   /* starred = always visible */
 .pv-side-act-star:hover { color: #f59e0b; }
 .pv-side-item.selected .pv-side-act { color: #dbeafe; }

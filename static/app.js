@@ -4789,6 +4789,13 @@ function _pc(key, content, cls, titleAttr) {
 const _PORTFOLIO_VIEWS_LS  = 'cim-portfolio-views-v1';
 const _PORTFOLIO_ACTIVE_LS = 'cim-portfolio-active-view';
 
+// The one permanent, system view: always present for everyone, always shown as
+// a tile, and can't be deleted or unstarred. Shows all programs, all columns.
+const ALL_PROGRAMS_VIEW = {
+    id: 'all', name: 'All Programs', team: true, system: true,
+    state: { visibleCols: null, filters: {}, tree: null },
+};
+
 // State
 let portfolioActiveViewId = null;
 let portfolioActiveViewDirty = false;  // filters changed since view was applied
@@ -4802,7 +4809,7 @@ function setPortfolioPersonalViews(views) {
     try { localStorage.setItem(_PORTFOLIO_VIEWS_LS, JSON.stringify(views)); } catch(_) {}
 }
 function getAllPortfolioViews() {
-    return [...getPortfolioTeamViews(), ...getPortfolioPersonalViews()];
+    return [ALL_PROGRAMS_VIEW, ...getPortfolioTeamViews(), ...getPortfolioPersonalViews()];
 }
 function getPortfolioViewById(id) {
     return getAllPortfolioViews().find(v => v.id === id) || null;
@@ -5129,6 +5136,13 @@ function _renderPvSidebar() {
     const item = (v) => {
         const sel    = v.id === _pvLoadedViewId;
         const isStar = stars.has(v.id);
+        // The permanent "All Programs" view shows no controls (always present,
+        // always a tile, can't be starred/unstarred, moved, or deleted).
+        if (v.system) {
+            return `<div class="pv-side-item pv-side-system${sel ? ' selected' : ''}" onclick="pvLoadView('${v.id}')">
+                <span class="pv-side-name">${escapeHtml(v.name)}</span>
+                <span class="pv-side-acts"><span class="pv-side-star on" title="Always shown">★</span></span></div>`;
+        }
         // Star is available to everyone; move/delete for editable views — your
         // own personal views, or any team view when you're admin (local app).
         const canModify = v.team ? _pvIsAdmin() : true;
@@ -5144,7 +5158,8 @@ function _renderPvSidebar() {
     };
     let html = `<button class="pv-side-newbtn" onclick="pvNewView()">+ New view</button>`;
     html += `<div class="pv-side-section">Team ${_pvIsAdmin() ? '<span class="pv-admin-pill">ADMIN</span>' : ''}</div>`;
-    html += team.length ? team.map(item).join('') : '<div class="pv-side-empty">None saved yet</div>';
+    html += item(ALL_PROGRAMS_VIEW);
+    html += team.length ? team.map(item).join('') : '';
     html += `<div class="pv-side-section">Personal</div>`;
     html += personal.length ? personal.map(item).join('') : '<div class="pv-side-empty">None saved yet</div>';
     host.innerHTML = html;
@@ -5237,7 +5252,7 @@ function _renderPvFooter() {
     const loaded   = _pvLoadedViewId ? getPortfolioViewById(_pvLoadedViewId) : null;
     // Team views are editable only by admins; personal views are always
     // editable by their owner. Drives ↑/↓/Delete/Update.
-    const canEdit  = loaded && (loaded.team ? _pvIsAdmin() : true);
+    const canEdit  = loaded && !loaded.system && (loaded.team ? _pvIsAdmin() : true);
     const starred  = loaded && getPortfolioStarredIds().has(loaded.id);
     // "Dirty" reflects ANY difference from the saved view — filter tree, the
     // visible columns, or the top-bar filters — so the dot shows when only
@@ -5294,15 +5309,18 @@ function pvApplyDraft() {
 // loaded one). Each stops propagation so it doesn't also select the row.
 function pvStarById(id, ev) {
     if (ev) ev.stopPropagation();
+    if (id === 'all') return;            // permanent view — always shown, can't toggle
     togglePortfolioStar(id);
     renderPvModal();
 }
 function pvDeleteById(id, ev) {
     if (ev) ev.stopPropagation();
+    if (id === 'all') return;            // permanent view — can't delete
     pvDeleteView(id);
 }
 function pvMoveById(id, dir, ev) {
     if (ev) ev.stopPropagation();
+    if (id === 'all') return;            // permanent view — fixed position
     const view = getPortfolioViewById(id); if (!view) return;
     if (view.team) {
         if (!_pvIsAdmin()) return;
@@ -5469,10 +5487,11 @@ function renderPortfolioViewTiles() {
     if (currentView !== 'portfolio') { bar.style.display = 'none'; return; }
 
     const stars   = getPortfolioStarredIds();
-    const starred = getAllPortfolioViews().filter(v => stars.has(v.id));   // team/personal only
-
-    // Tiles correspond 1:1 to starred views. No starred views → no tile bar.
-    if (!starred.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    // The permanent "All Programs" view is always first; then starred team/
+    // personal views. The bar is therefore always visible.
+    const starredViews = [...getPortfolioTeamViews(), ...getPortfolioPersonalViews()]
+                            .filter(v => stars.has(v.id));
+    const tileViews = [ALL_PROGRAMS_VIEW, ...starredViews];
     bar.style.display = 'flex';
 
     // Count of TOP-LEVEL programs matching a view's saved tree + filters — same
@@ -5491,9 +5510,11 @@ function renderPortfolioViewTiles() {
         } catch(_) { return '—'; }
     }
 
-    bar.innerHTML = starred.map(v => {
+    bar.innerHTML = tileViews.map(v => {
         const cnt = countForView(v);
-        const active = v.id === portfolioActiveViewId;
+        const active = (v.id === 'all')
+            ? (!portfolioActiveViewId || portfolioActiveViewId === 'all')
+            : (v.id === portfolioActiveViewId);
         return `<button class="pv-tile${active ? ' active' : ''}"
             onclick="applyPortfolioView('${v.id}'); renderPortfolioTable();"
             title="${escapeHtml(v.name)}">
