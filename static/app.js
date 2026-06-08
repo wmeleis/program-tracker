@@ -5467,6 +5467,9 @@ function renderPortfolioViewTiles() {
 
     const stars   = getPortfolioStarredIds();
     const starred = getAllPortfolioViews().filter(v => stars.has(v.id));   // team/personal only
+
+    // Tiles correspond 1:1 to starred views. No starred views → no tile bar.
+    if (!starred.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
     bar.style.display = 'flex';
 
     // Count of TOP-LEVEL programs matching a view's saved tree + filters — same
@@ -5485,17 +5488,7 @@ function renderPortfolioViewTiles() {
         } catch(_) { return '—'; }
     }
 
-    // A permanent "All Programs" reset tile (clears the active view + all
-    // filters), followed by one tile per starred view.
-    const totalCount = _portfolioTopLevelCount(allPortfolioPrograms);
-    const allActive  = !portfolioActiveViewId && !portfolioFilterTree;
-    const resetTile = `<button class="pv-tile${allActive ? ' active' : ''}"
-        onclick="portfolioShowAll()" title="Show all programs (clear view + filters)">
-        <span class="pv-tile-count">${totalCount.toLocaleString()}</span>
-        <span class="pv-tile-label">All Programs</span>
-    </button>`;
-
-    const tiles = starred.map(v => {
+    bar.innerHTML = starred.map(v => {
         const cnt = countForView(v);
         const active = v.id === portfolioActiveViewId;
         return `<button class="pv-tile${active ? ' active' : ''}"
@@ -5505,19 +5498,6 @@ function renderPortfolioViewTiles() {
             <span class="pv-tile-label">${escapeHtml(v.name)}</span>
         </button>`;
     }).join('');
-
-    bar.innerHTML = resetTile + tiles;
-}
-
-// "All Programs" reset — clear the active view, advanced filter tree, and all
-// top-bar filters, then re-render. (Not a saved view; just a reset control.)
-function portfolioShowAll() {
-    portfolioActiveViewId = null;
-    portfolioFilterTree = null;
-    _applyPortfolioFilters({});
-    try { localStorage.setItem(_PORTFOLIO_ACTIVE_LS, ''); } catch (_) {}
-    renderPortfolioViewTiles();
-    renderPortfolioTable();
 }
 
 // Back-compat aliases
