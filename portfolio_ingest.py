@@ -2395,6 +2395,22 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 })
             continue
 
+        # Concentration-proposal entries (e.g. "MS in AI (New COE Concentration
+        # in Human-AI Collaboration)") become a sub-row UNDER the parent program
+        # rather than overwriting the parent's status. This must run BEFORE the
+        # banner-code match, because a proposed concentration carries its
+        # parent's Program Code (so the banner match would otherwise absorb it
+        # into the parent and discard the concentration). Map SVT's raw status
+        # fields to the names _create_conc_subrow expects.
+        _conc_src = dict(p)
+        _conc_src['svt_status']           = p.get('status', '')
+        _conc_src['roster_sub_status']    = p.get('sub_status', '')
+        _conc_src['roster_proposal_type'] = (_SVT_HCWHY_TO_TYPE.get(p.get('hcwhy', ''), p.get('hcwhy', '')) if p.get('hcwhy') else '')
+        _conc_src['roster_launch_date']   = p.get('actual_launch_date', '')
+        if _try_concentration_preprocess(_conc_src):
+            n_svt_matched += 1
+            continue
+
         camp_norm = _normalize_campus(p.get('campus', '')) if p.get('campus') else ''
 
         # Path A: match by Program Code → CIM banner_code.
