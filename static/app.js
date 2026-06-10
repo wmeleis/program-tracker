@@ -5821,7 +5821,15 @@ function togglePortfolioConcentrations(id) {
 
 async function loadPortfolioDashboard() {
     const container = document.getElementById('programs-table-container');
-    if (container) container.innerHTML = '';
+    // On a periodic refresh (data already loaded) we must NOT reset the view the
+    // user is looking at — snapshot the current applied view + filter tree +
+    // top-bar filters and restore them after reloading, instead of re-deriving
+    // from localStorage (which would drop an unsaved/ad-hoc filter).
+    const isRefresh   = (allPortfolioPrograms && allPortfolioPrograms.length > 0);
+    const _prevActive = portfolioActiveViewId;
+    const _prevTree   = portfolioFilterTree ? JSON.parse(JSON.stringify(portfolioFilterTree)) : null;
+    const _prevFilters = _snapshotPortfolioFilters();
+    if (container && !isRefresh) container.innerHTML = '';
     try {
         const [res] = await Promise.all([
             fetch('/api/portfolio'),
@@ -5836,14 +5844,22 @@ async function loadPortfolioDashboard() {
         portfolioExpandedIds = new Set();
         portfolioCollapsedIds = new Set();
         populatePortfolioFilters();
-        // Restore the previously-active view (if any) — do this after
-        // populatePortfolioFilters so the filter dropdowns are built first.
-        const savedView = (() => { try { return localStorage.getItem(_PORTFOLIO_ACTIVE_LS); } catch(_) { return null; } })();
-        if (savedView && getPortfolioViewById(savedView)) {
-            applyPortfolioView(savedView);
-        } else {
+        if (isRefresh) {
+            // Restore exactly what was on screen before the refresh.
+            portfolioActiveViewId = _prevActive;
+            portfolioFilterTree   = _prevTree;
+            _applyPortfolioFilters(_prevFilters);
             renderPortfolioViewTiles();
             renderPortfolioTable();
+        } else {
+            // First load: restore the previously-active view from localStorage.
+            const savedView = (() => { try { return localStorage.getItem(_PORTFOLIO_ACTIVE_LS); } catch(_) { return null; } })();
+            if (savedView && getPortfolioViewById(savedView)) {
+                applyPortfolioView(savedView);
+            } else {
+                renderPortfolioViewTiles();
+                renderPortfolioTable();
+            }
         }
     } catch(e) {
         console.error('portfolio load failed', e);

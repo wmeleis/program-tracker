@@ -882,31 +882,39 @@ function __staticInit() {
 
     // Portfolio dashboard: read from embedded data; disable refresh + notes.
     window.loadPortfolioDashboard = async function() {
+        const _isRefresh   = (allPortfolioPrograms && allPortfolioPrograms.length > 0);
+        const _prevActive  = (typeof portfolioActiveViewId !== 'undefined') ? portfolioActiveViewId : null;
+        const _prevTree    = (typeof portfolioFilterTree !== 'undefined' && portfolioFilterTree) ? JSON.parse(JSON.stringify(portfolioFilterTree)) : null;
+        const _prevFilters = (typeof _snapshotPortfolioFilters === 'function') ? _snapshotPortfolioFilters() : null;
         const D = await _getData();
         _setLastUpdated(D);
         allPortfolioPrograms = D.portfolio_programs || [];
-        // Match the Flask loadPortfolioDashboard: parse concentrations_json
-        // so renderPortfolioRow's hasConcentrations check can fire and the
-        // expand-arrow appears next to programs with concentrations.
         allPortfolioPrograms.forEach(p => {
             try {
                 p.concentrations = p.concentrations_json
                     ? JSON.parse(p.concentrations_json) : [];
             } catch (e) { p.concentrations = []; }
         });
-        // Hydrate baked team views (read-only on the static site).
         if (typeof portfolioTeamViews !== 'undefined') {
             portfolioTeamViews = D.team_views || [];
         }
         if (typeof populatePortfolioFilters === 'function') populatePortfolioFilters();
-        // Restore the previously-active view, mirroring the Flask version.
-        let _sv = null;
-        try { _sv = localStorage.getItem('cim-portfolio-active-view'); } catch (e) {}
-        if (_sv && typeof getPortfolioViewById === 'function' && getPortfolioViewById(_sv)) {
-            applyPortfolioView(_sv);
-        } else {
+        if (_isRefresh) {
+            // Preserve the on-screen view/filter across a refresh (don't reset it).
+            portfolioActiveViewId = _prevActive;
+            portfolioFilterTree   = _prevTree;
+            if (_prevFilters && typeof _applyPortfolioFilters === 'function') _applyPortfolioFilters(_prevFilters);
             if (typeof renderPortfolioViewTiles === 'function') renderPortfolioViewTiles();
             renderPortfolioTable();
+        } else {
+            let _sv = null;
+            try { _sv = localStorage.getItem('cim-portfolio-active-view'); } catch (e) {}
+            if (_sv && typeof getPortfolioViewById === 'function' && getPortfolioViewById(_sv)) {
+                applyPortfolioView(_sv);
+            } else {
+                if (typeof renderPortfolioViewTiles === 'function') renderPortfolioViewTiles();
+                renderPortfolioTable();
+            }
         }
     };
     window.refreshPortfolio = function() {
