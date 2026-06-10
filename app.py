@@ -52,6 +52,56 @@ _SCAN_LOG_PATH = os.path.join(_DATA_DIR, 'scan_log.json')
 _MISMATCHES_PATH = os.path.join(_DATA_DIR, 'portfolio_mismatches.json')
 _MAX_SCAN_LOG = 50
 
+
+def _publish_docs_pages(cwd, timeout=180):
+    """Publish docs/ to the gh-pages branch as a single squashed commit.
+
+    The static site is served by GitHub Pages from the `gh-pages` branch. We
+    build it into a throwaway temp repo and force-push, so:
+      - `main` is NEVER touched (docs/ is gitignored there), and
+      - gh-pages always holds exactly ONE commit (no history accumulation).
+    This is the fix for the repo bloating to ~94 GB from committing the large
+    encrypted docs/*.enc files into main's history on every scan.
+    """
+    import subprocess, tempfile, shutil
+    docs = os.path.join(cwd, 'docs')
+    if not os.path.isdir(docs):
+        return
+    try:
+        remote = subprocess.run(['git', 'config', '--get', 'remote.origin.url'],
+                                 cwd=cwd, capture_output=True, text=True).stdout.strip()
+    except Exception:
+        remote = ''
+    if not remote:
+        print(">>> gh-pages publish skipped: no origin remote", flush=True)
+        return
+    tmp = tempfile.mkdtemp(prefix='ghpages_')
+    try:
+        subprocess.run(['git', 'init', '-q', tmp], check=True)
+        for item in os.listdir(docs):
+            src = os.path.join(docs, item)
+            dst = os.path.join(tmp, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+        open(os.path.join(tmp, '.nojekyll'), 'w').close()  # serve files as-is
+        env = dict(os.environ,
+                   GIT_AUTHOR_NAME='tracker', GIT_AUTHOR_EMAIL='bot@local',
+                   GIT_COMMITTER_NAME='tracker', GIT_COMMITTER_EMAIL='bot@local')
+        subprocess.run(['git', '-C', tmp, 'add', '-A'], check=True)
+        subprocess.run(['git', '-C', tmp, 'commit', '-q', '-m',
+                        f'Publish {datetime.now().strftime("%Y-%m-%d %H:%M")}'],
+                       check=True, env=env)
+        subprocess.run(['git', '-C', tmp, 'branch', '-M', 'gh-pages'], check=True)
+        subprocess.run(['git', '-C', tmp, 'push', '-q', '--force', remote, 'gh-pages'],
+                       check=True, timeout=timeout)
+        print(">>> published docs/ to gh-pages (squashed)", flush=True)
+    except Exception as e:
+        print(f">>> gh-pages publish failed: {e}", flush=True)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 def _load_scan_log():
     try:
         with open(_SCAN_LOG_PATH) as f:
@@ -731,10 +781,7 @@ def api_heal():
                 import subprocess
                 cwd = os.path.dirname(os.path.abspath(__file__))
                 subprocess.run(['python3', 'export_static.py'], cwd=cwd)
-                subprocess.run(['git', 'add', 'docs/'], cwd=cwd)
-                subprocess.run(['git', 'commit', '-m',
-                                f'Quick update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd)
-                subprocess.run(['git', 'push'], cwd=cwd)
+                _publish_docs_pages(cwd)
                 scan_status['progress'] = 100
 
             scan_status['last_result'] = result
@@ -993,14 +1040,10 @@ def _publish_if_changed(label):
         return False
     try:
         subprocess.run(['python3', 'export_static.py'], cwd=cwd, timeout=300)
-        subprocess.run(['git', 'add', 'docs/'], cwd=cwd, timeout=30)
-        subprocess.run(['git', 'commit', '-m',
-                        f'{label} {datetime.now().strftime("%Y-%m-%d %H:%M")}'],
-                       cwd=cwd, timeout=30)
-        subprocess.run(['git', 'push'], cwd=cwd, timeout=180)
+        _publish_docs_pages(cwd)
         with open(fp_path, 'w') as f:
             f.write(current_fp)
-        print(f">>> {label.upper()} pushed (fp {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)", flush=True)
+        print(f">>> {label.upper()} published (fp {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)", flush=True)
         return True
     except Exception as e:
         print(f">>> {label} publish error: {e}", flush=True)
@@ -1134,10 +1177,7 @@ def api_scan_trigger():
                 # scan. Empirically a normal export takes ~10s, git
                 # push <10s; 180s is well above noise.
                 subprocess.run(['python3', 'export_static.py'], cwd=cwd, timeout=300)
-                subprocess.run(['git', 'add', 'docs/'], cwd=cwd, timeout=30)
-                subprocess.run(['git', 'commit', '-m',
-                                f'Quick role update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd, timeout=30)
-                subprocess.run(['git', 'push'], cwd=cwd, timeout=180)
+                _publish_docs_pages(cwd)
                 with open(fp_path, 'w') as f:
                     f.write(current_fp)
                 # Record a scan row so the dashboard's "Updated" timestamp
@@ -1416,10 +1456,8 @@ def api_scan_trigger():
                     scan_status['progress'] = 100
                 else:
                     subprocess.run(['python3', 'export_static.py'], cwd=cwd, timeout=300)
-                    subprocess.run(['git', 'add', 'docs/'], cwd=cwd, timeout=30)
-                    subprocess.run(['git', 'commit', '-m', f'Auto-update {datetime.now().strftime("%Y-%m-%d %H:%M")}'], cwd=cwd, timeout=30)
-                    subprocess.run(['git', 'push'], cwd=cwd, timeout=180)
-                    print(f"Exported and pushed (fingerprint {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)")
+                    _publish_docs_pages(cwd)
+                    print(f"Exported and published to gh-pages (fingerprint {prev_fp[:12] or '(none)'}... → {current_fp[:12]}...)")
                     # Persist new fingerprint after successful export+push.
                     with open(fp_path, 'w') as f:
                         f.write(current_fp)

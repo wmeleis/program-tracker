@@ -638,3 +638,6 @@ Parallel dashboard view for `/courseadmin/` proposals, alongside programs. Toggl
 - **Approver filter isolation:** separate `/api/course_approvers` + `/api/course_approver/<email>` endpoints. The programs version was keyed by `program.id`, which collided numerically with course IDs, causing false-positive matches across views.
 - **Row coloring:** same CSS classes (`row-added`, `row-edited`, `row-deactivated`) drive the colored left border for courses as for programs.
 - **Static site:** `export_static.py` includes `courses`, `course_workflows`, `course_approvers` in `data.json`. `loadCoursesDashboard` and the approver filter are overridden to read from embedded data.
+
+### Static-site publishing (gh-pages) — repo-size fix (2026-06-10)
+GitHub Pages now serves from the **`gh-pages`** branch (source: `gh-pages` /), NOT `main /docs`. `app.py:_publish_docs_pages(cwd)` builds `docs/` into a throwaway temp repo and **force-pushes a single squashed commit** to `gh-pages` — so `main` never carries `docs/` and `gh-pages` never accumulates history. `docs/` is gitignored on `main`. This replaced the old `git add docs/ && commit && push` to `main`, which had bloated the repo to ~94 GB (every scan committed ~75 MB of `docs/*.enc`). History was purged of `docs/` via `git filter-repo`.
