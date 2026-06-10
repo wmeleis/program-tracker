@@ -48,7 +48,7 @@ GTM_PATH    = os.path.join(_WORKTREE_DIR, 'data', 'portfolio_feeds', 'gtm.json')
 # Curated banner codes for the "Exit master's" flag (uppercase). Programs whose
 # CIM banner_code is in this set get exit_masters='Yes'; all others 'No'.
 EXIT_MASTERS_BANNERS = {
-    'MS-POPU', 'MS-APNR', 'MS-BIOL', 'MS-MRES', 'MS-PSYC', 'MA-SOCI',
+    'MS-POPU', 'MS-APNR', 'MS-BIOL', 'MS-MRES', 'MS-PSYC', 'MA-SOCI', 'MS-NETS',
 }
 
 

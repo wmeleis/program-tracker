@@ -4637,8 +4637,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Last Available Term from the Go To Market Roster 2.0.'},
     {key: 'gtmintake',   label: 'GTM Intake Terms', defaultHidden: true,
         help: 'Available intake terms from the Go To Market Roster 2.0.'},
-    {key: 'exitmasters', label: "Exit Master's", defaultHidden: true,
-        help: "Whether the program is a designated exit master's (curated by banner code)."},
+    {key: 'exitmasters', label: "Exit master's only", defaultHidden: true,
+        help: "Whether the program is a designated exit-master's-only program (curated by banner code)."},
     {key: 'notes',        label: 'Notes',
         help: 'Free-form notes from the source feeds (CIM justification, IPD comments, etc.).'},
 ];
@@ -4954,7 +4954,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'gtm_first',   label: 'GTM First Intake', type: 'select', value: p => p.gtm_first_term || ''},
     {key: 'gtm_last',    label: 'GTM Last Term',    type: 'select', value: p => p.gtm_last_term || ''},
     {key: 'gtm_intake',  label: 'GTM Intake Terms', type: 'text',   value: p => p.gtm_intake_terms || ''},
-    {key: 'exit_masters',label: "Exit Master's",    type: 'select', value: p => p.exit_masters || ''},
+    {key: 'exit_masters',label: "Exit master's only", type: 'select', value: p => p.exit_masters || ''},
     {key: 'note',        label: 'Notes',            type: 'text',   value: p => p.note || ''},
 ];
 function _pvField(key) { return PORTFOLIO_FILTER_FIELDS.find(f => f.key === key); }
