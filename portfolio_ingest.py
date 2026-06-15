@@ -1429,6 +1429,34 @@ def _extract_concentrations_from_html(html):
         if h and h.lower() not in seen:
             seen.add(h.lower())
             results.append({'name': h, 'college': conc_college})
+
+    # Some programs list concentrations as a "Concentration Options" link menu —
+    # <li><a href="#…">Name</a> — College of Y</li> — rather than as h2/h3/h4
+    # section headings (which the walk above misses entirely). Parse each <li>
+    # in the menu: the visible <a> text is the concentration name, the trailing
+    # text after the link is the college. (Hrefs are inconsistent — some include
+    # "Concentration", some don't — so we use the visible text, not the href.)
+    _anchor_skip = {
+        'optional', 'required', 'elective', 'electives', 'core',
+        'core requirements', 'requirements', 'general electives',
+        'restricted electives', 'professional electives', 'free electives',
+    }
+    for ul in re.findall(r'Concentration\s+Options.*?(<ul\b.*?</ul>)', html, re.I | re.S):
+        for li in re.findall(r'<li\b[^>]*>(.*?)</li>', ul, re.S):
+            am = re.search(r'<a\b[^>]*>(.*?)</a>(.*)$', li, re.S)
+            if not am:
+                continue
+            name = re.sub(r'<[^>]+>', '', am.group(1)).replace('\xa0', ' ')
+            name = re.sub(r'\s+', ' ', name).strip().rstrip('*† ').strip()
+            trailing = re.sub(r'<[^>]+>', '', am.group(2)).replace('\xa0', ' ')
+            trailing = re.sub(r'\s+', ' ', trailing).strip()
+            trailing = re.sub(r'^[\s—–-]+', '', trailing).strip()  # drop leading dash/em-dash
+            if not name or name.lower() in seen or name.lower() in _anchor_skip:
+                continue
+            if name.lower().endswith('options'):
+                continue
+            seen.add(name.lower())
+            results.append({'name': name, 'college': _normalize_college(trailing)})
     return results
 
 
