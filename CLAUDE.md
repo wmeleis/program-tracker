@@ -158,23 +158,22 @@ On a typical no-change scan this drops the JS-history loop from 1669 fetches to 
 - **Program Management tab:** Matched by URL containing `programadmin`
 - Both tabs must be open in window 1 of whichever browser `BROWSER_APP` points at
 
-### The 14 Pipeline Display Stages (in order)
+### The 13 Pipeline Display Stages (in order)
 1. PR Graduate Dean's Office
 2. Provost Initial Review
 3. Review 2
-4. UIP College Approval
-5. Graduate Provost Review
-6. GRA Regulatory
-7. Graduate Curriculum Committee
-8. Undergraduate Curriculum Committee - Tabled Proposals
-9. Provost Administrative and Budgetary Review
-10. Provost Approval
-11. Faculty Senate
-12. University Board of Trustees
-13. **Setup** (merged — see folding below)
-14. Teach-Out
+4. Graduate Provost Review
+5. GRA Regulatory
+6. Graduate Curriculum Committee
+7. Undergraduate Curriculum Committee - Tabled Proposals
+8. Provost Administrative and Budgetary Review
+9. Provost Approval
+10. Faculty Senate
+11. University Board of Trustees
+12. **Setup** (merged — see folding below)
+13. Teach-Out
 
-Plus "College" as a virtual first stage in the pipeline bar (aggregates all college-level roles).
+Plus "College" as a virtual first stage in the pipeline bar (aggregates all college-level roles, including the interdisciplinary `Program UIP College Approval` sign-off gate).
 
 **Two role lists, deliberately decoupled (`scraper.py`):**
 - `TRACKED_ROLES` — the 14 **canonical display stages** above. Used only for pipeline-bar tile rendering / counts (app.py `/api/pipeline`, export_static.py).
@@ -186,7 +185,7 @@ Plus "College" as a virtual first stage in the pipeline bar (aggregates all coll
 
 `get_pipeline_counts(TRACKED_ROLES, canonical_program_step)` applies the fold when tallying tile counts (app.py `/api/pipeline` and export_static.py both pass the canonicalizer); the client's table filter and tile-count logic call `canonicalStep()` so the rendered table agrees with the tile counts. Keep the Python and JS versions in sync.
 
-**Department / committee Chair roles** (any step containing "Chair") fold into the virtual **College** stage via `isCollegeStep`. A handful of narrow Provost/Registrar roles (Provost Network Academics, REGISTRAR Continuing Education Level Discussion, Global Launch Services Review, Undergraduate Provost Review, Provost CE Module Oversight Group Hold) remain unbucketed by design — they show in the default table but aren't tile-filterable.
+**Department / committee Chair roles** (any step containing "Chair") and **`Program UIP College Approval`** (the interdisciplinary college sign-off, run out of the Office of the Provost — not privileged with its own tile) fold into the virtual **College** stage via `isCollegeStep`. A handful of narrow Provost/Registrar roles (Provost Network Academics, REGISTRAR Continuing Education Level Discussion, Global Launch Services Review, Undergraduate Provost Review, Provost CE Module Oversight Group Hold) remain unbucketed by design — they show in the default table but aren't tile-filterable.
 
 ### College Roles (32 total)
 Department chairs, college deans, program directors. Identified by regex pattern: `^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )`.

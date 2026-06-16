@@ -569,7 +569,6 @@ const PIPELINE_STEPS = new Set([
     "Program PR Graduate Dean's Office",
     "Provost Initial Review",
     "Program Review 2",
-    "Program UIP College Approval",
     "Program Graduate Provost Review",
     "Program GRA Regulatory",
     "Program Graduate Curriculum Committee",
@@ -597,6 +596,8 @@ function canonicalStep(step) {
 function isCollegeStep(step) {
     if (!step) return false;
     if (PIPELINE_STEPS.has(canonicalStep(step))) return false;
+    // UIP College Approval is the interdisciplinary college sign-off gate → College.
+    if (step === "Program UIP College Approval") return true;
     // Department / college committee Chair roles go to the virtual College stage.
     if (step.indexOf("Chair") !== -1) return true;
     // College steps have department codes like EN, SC, SH, AM, BA, etc.
