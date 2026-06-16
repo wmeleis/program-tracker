@@ -1441,7 +1441,17 @@ def _extract_concentrations_from_html(html):
         'core requirements', 'requirements', 'general electives',
         'restricted electives', 'professional electives', 'free electives',
     }
-    for ul in re.findall(r'Concentration\s+Options.*?(<ul\b.*?</ul>)', html, re.I | re.S):
+    # The menu can sit under literal "Concentration Options" text OR under a
+    # plain "<h2>Concentrations</h2>" heading (CIM authors are inconsistent).
+    # Matching both also rescues concentrations whose individual section heading
+    # omits the word "Concentration" — e.g. AI MS's "Human-AI Collaboration
+    # Systems - College of Engineering" — since the menu still lists them.
+    _conc_menus = re.findall(
+        r'(?:Concentration\s+Options'
+        r'|<h[1-6][^>]*>[^<]*\bConcentrations?\b[^<]*</h[1-6]>)'
+        r'.*?(<ul\b.*?</ul>)',
+        html, re.I | re.S)
+    for ul in _conc_menus:
         for li in re.findall(r'<li\b[^>]*>(.*?)</li>', ul, re.S):
             am = re.search(r'<a\b[^>]*>(.*?)</a>(.*)$', li, re.S)
             if not am:
