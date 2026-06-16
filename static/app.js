@@ -564,7 +564,7 @@ function updateClearButtons() {
     }
 }
 
-// The main tracked pipeline steps (canonical stages)
+// The main tracked pipeline steps (canonical display stages)
 const PIPELINE_STEPS = new Set([
     "Program PR Graduate Dean's Office",
     "Provost Initial Review",
@@ -578,9 +578,7 @@ const PIPELINE_STEPS = new Set([
     "Program Provost Approval",
     "Program Faculty Senate",
     "Program University Board of Trustees",
-    "Program Banner Setup",
-    "Program Editor",
-    "Program Catalog Setup",
+    "Program Setup",
     "Program Teach-Out",
 ]);
 
@@ -588,17 +586,19 @@ const PIPELINE_STEPS = new Set([
 // the canonical pipeline stage shown in the bar. Keep in sync with scraper.py.
 function canonicalStep(step) {
     if (!step) return step;
-    if (step.indexOf("Program Catalog Setup") === 0) return "Program Catalog Setup";
     if (step.indexOf("Program GRA Regulatory") === 0) return "Program GRA Regulatory";
-    if (step === "Program CIP Code Committee") return "Program Banner Setup";
+    if (step === "Program Banner Setup" || step === "Program Editor" ||
+        step === "Program Workflow Setup" || step === "Program CIP Code Committee" ||
+        step.indexOf("Program Catalog Setup") === 0 ||
+        step.indexOf("Degree Audit") !== -1) return "Program Setup";
     return step;
 }
 
 function isCollegeStep(step) {
     if (!step) return false;
     if (PIPELINE_STEPS.has(canonicalStep(step))) return false;
-    // College-level Degree Audit roles that name a college code go to College.
-    if (step.match(/^Program (?:Graduate|Undergraduate) (?:PS|BV|SC|LW|BA|AM|CS|EN|SH) Degree Audit/)) return true;
+    // Department / college committee Chair roles go to the virtual College stage.
+    if (step.indexOf("Chair") !== -1) return true;
     // College steps have department codes like EN, SC, SH, AM, BA, etc.
     return step.match(/^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )/);
 }

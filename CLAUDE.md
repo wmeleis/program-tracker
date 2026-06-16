@@ -158,7 +158,7 @@ On a typical no-change scan this drops the JS-history loop from 1669 fetches to 
 - **Program Management tab:** Matched by URL containing `programadmin`
 - Both tabs must be open in window 1 of whichever browser `BROWSER_APP` points at
 
-### The 16 Pipeline Roles (in order)
+### The 14 Pipeline Display Stages (in order)
 1. PR Graduate Dean's Office
 2. Provost Initial Review
 3. Review 2
@@ -171,21 +171,22 @@ On a typical no-change scan this drops the JS-history loop from 1669 fetches to 
 10. Provost Approval
 11. Faculty Senate
 12. University Board of Trustees
-13. Banner Setup
-14. Editor
-15. Catalog Setup
-16. Teach-Out
+13. **Setup** (merged — see folding below)
+14. Teach-Out
 
-Plus "College" as a virtual first step in the pipeline bar (aggregates all 32 college-level roles).
+Plus "College" as a virtual first stage in the pipeline bar (aggregates all college-level roles).
 
-**Canonical stage folding (`scraper.canonical_program_step`, mirrored in JS `canonicalStep`).** Several CIM workflow-role variants fold into the canonical stage above before counting/filtering:
-- `Program Catalog Setup 2` / `Catalog Setup 3` / `Catalog Setup for 2027-2028` → **Catalog Setup**
-- `Program GRA Regulatory Application Submitted` / `GRA Regulatory Modifications Submitted` → **GRA Regulatory**
-- `Program CIP Code Committee` → **Banner Setup** (CIP code is assigned just ahead of Banner setup, which needs it)
+**Two role lists, deliberately decoupled (`scraper.py`):**
+- `TRACKED_ROLES` — the 14 **canonical display stages** above. Used only for pipeline-bar tile rendering / counts (app.py `/api/pipeline`, export_static.py).
+- `PIPELINE_SCAN_ROLES` — the **real CIM workflow role names** (Banner Setup, Editor, Catalog Setup, etc.) used for Approve Pages discovery (A1) and obscure-role detection (A2). `ALL_ROLES = PIPELINE_SCAN_ROLES + COLLEGE_ROLES`. Discovery needs the actual role names CourseLeaf knows; the dashboard merges several of them into one display stage.
+
+**Canonical stage folding (`scraper.canonical_program_step`, mirrored in JS `canonicalStep`).** Raw CIM workflow roles fold into a display stage before counting/filtering:
+- `Program GRA Regulatory Application Submitted` / `… Modifications Submitted` → **GRA Regulatory**
+- `Program Banner Setup`, `Program Editor`, `Program Catalog Setup` (any variant — 2/3/for-YYYY), `Program Workflow Setup`, `Program CIP Code Committee`, and any `* Degree Audit` role → **Setup** (the post-approval, build-it-into-the-systems stage)
 
 `get_pipeline_counts(TRACKED_ROLES, canonical_program_step)` applies the fold when tallying tile counts (app.py `/api/pipeline` and export_static.py both pass the canonicalizer); the client's table filter and tile-count logic call `canonicalStep()` so the rendered table agrees with the tile counts. Keep the Python and JS versions in sync.
 
-**Degree-audit roles that name a college** (`Program {Graduate|Undergraduate} {PS|BV|SC|LW|BA|AM|CS|EN|SH} Degree Audit`) fold into the virtual **College** bucket via `isCollegeStep`. `PR` (Provost office) is deliberately excluded — `Program Graduate PR Degree Audit` stays unbucketed.
+**Department / committee Chair roles** (any step containing "Chair") fold into the virtual **College** stage via `isCollegeStep`. A handful of narrow Provost/Registrar roles (Provost Network Academics, REGISTRAR Continuing Education Level Discussion, Global Launch Services Review, Undergraduate Provost Review, Provost CE Module Oversight Group Hold) remain unbucketed by design — they show in the default table but aren't tile-filterable.
 
 ### College Roles (32 total)
 Department chairs, college deans, program directors. Identified by regex pattern: `^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )`.

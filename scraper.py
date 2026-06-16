@@ -24,7 +24,11 @@ from database import (
     record_course_change, record_course_scan, get_all_courses
 )
 
-# The 14 tracked workflow roles (from user's bookmarks)
+# Display pipeline stages shown in the dashboard's pipeline bar. These are the
+# CANONICAL stages; canonical_program_step() folds the many raw CIM workflow
+# roles into one of these. The post-approval implementation roles (Banner,
+# Editor, Catalog Setup, Degree Audit, Workflow Setup, CIP Code) all collapse
+# into a single "Program Setup" stage.
 TRACKED_ROLES = [
     "Program PR Graduate Dean's Office",
     "Provost Initial Review",
@@ -32,6 +36,26 @@ TRACKED_ROLES = [
     "Program UIP College Approval",
     "Program Graduate Provost Review",
     "Program GRA Regulatory",
+    "Program Graduate Curriculum Committee",
+    "Program Undergraduate Curriculum Committee - Tabled Proposals",
+    "Program Provost Administrative and Budgetary Review",
+    "Program Provost Approval",
+    "Program Faculty Senate",
+    "Program University Board of Trustees",
+    "Program Setup",
+    "Program Teach-Out",
+]
+
+# Real CIM workflow role names used for Approve Pages discovery (A1) and
+# obscure-role detection (A2). Kept distinct from TRACKED_ROLES because the
+# dashboard merges several of these into single display stages — discovery
+# still needs the actual role names CourseLeaf knows about.
+PIPELINE_SCAN_ROLES = [
+    "Program PR Graduate Dean's Office",
+    "Provost Initial Review",
+    "Program Review 2",
+    "Program UIP College Approval",
+    "Program Graduate Provost Review",
     "Program Graduate Curriculum Committee",
     "Program Undergraduate Curriculum Committee - Tabled Proposals",
     "Program Provost Administrative and Budgetary Review",
@@ -46,24 +70,24 @@ TRACKED_ROLES = [
 
 
 def canonical_program_step(step):
-    """Map a raw CIM current_step to its canonical pipeline stage.
+    """Map a raw CIM current_step to its canonical pipeline display stage.
 
     Folds workflow-role variants into the stage shown in the pipeline bar:
-      - "Program Catalog Setup 2/3/for 2027-2028" → "Program Catalog Setup"
-      - "Program GRA Regulatory Application/Modifications Submitted" → "Program GRA Regulatory"
-      - "Program CIP Code Committee" → "Program Banner Setup" (CIP code is
-        assigned ahead of Banner setup, which needs it)
-    Everything else is returned unchanged (college-level Degree Audit roles are
-    handled separately by the client's isCollegeStep).
+      - GRA Regulatory Application/Modifications Submitted → "Program GRA Regulatory"
+      - Banner Setup / Editor / Catalog Setup (any variant) / Workflow Setup /
+        CIP Code Committee / any "* Degree Audit" role → "Program Setup"
+    Everything else is returned unchanged. Department/college Chair roles are
+    handled separately by the client's isCollegeStep (→ virtual College stage).
     """
     if not step:
         return step
-    if step.startswith("Program Catalog Setup"):
-        return "Program Catalog Setup"
     if step.startswith("Program GRA Regulatory"):
         return "Program GRA Regulatory"
-    if step == "Program CIP Code Committee":
-        return "Program Banner Setup"
+    if (step in ("Program Banner Setup", "Program Editor",
+                 "Program Workflow Setup", "Program CIP Code Committee")
+            or step.startswith("Program Catalog Setup")
+            or "Degree Audit" in step):
+        return "Program Setup"
     return step
 
 # College-level roles (department chairs, college deans, program directors)
@@ -102,8 +126,8 @@ COLLEGE_ROLES = [
     "Program SH Undergraduate SOCL Curriculum Committee Chair",
 ]
 
-# All roles to scan
-ALL_ROLES = TRACKED_ROLES + COLLEGE_ROLES
+# All roles to scan (real CIM role names, not the merged display stages)
+ALL_ROLES = PIPELINE_SCAN_ROLES + COLLEGE_ROLES
 
 # Map CourseLeaf 2-letter college codes to full names (used by programs and courses).
 COLLEGE_NAMES = {
@@ -196,9 +220,7 @@ ROLE_SHORT_NAMES = {
     "Program Provost Approval": "Provost Appr",
     "Program Faculty Senate": "Faculty Sen",
     "Program University Board of Trustees": "Trustees",
-    "Program Banner Setup": "Banner",
-    "Program Editor": "Editor",
-    "Program Catalog Setup": "Catalog",
+    "Program Setup": "Setup",
     "Program Teach-Out": "Teach-Out",
 }
 
