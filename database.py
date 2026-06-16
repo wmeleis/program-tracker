@@ -503,16 +503,33 @@ def get_program_workflow(program_id):
         """, (program_id,)).fetchall()]
 
 
-def get_pipeline_counts(tracked_roles):
-    """Get count of programs at each tracked workflow step."""
+def get_pipeline_counts(tracked_roles, canonicalize=None):
+    """Get count of programs at each tracked workflow step.
+
+    When `canonicalize` is provided it's applied to each program's raw
+    current_step before counting, so role variants (e.g. "Program Catalog
+    Setup 2/3", "Program GRA Regulatory Application Submitted", "Program CIP
+    Code Committee") fold into the canonical tracked stage they belong to.
+    """
     with get_db() as conn:
-        counts = {}
-        for role in tracked_roles:
-            result = conn.execute("""
-                SELECT COUNT(*) as cnt FROM programs
-                WHERE current_step = ? AND current_step != ''
-            """, (role,)).fetchone()
-            counts[role] = result['cnt']
+        counts = {role: 0 for role in tracked_roles}
+        if canonicalize is None:
+            for role in tracked_roles:
+                result = conn.execute("""
+                    SELECT COUNT(*) as cnt FROM programs
+                    WHERE current_step = ? AND current_step != ''
+                """, (role,)).fetchone()
+                counts[role] = result['cnt']
+            return counts
+        tracked_set = set(tracked_roles)
+        rows = conn.execute("""
+            SELECT current_step FROM programs
+            WHERE current_step IS NOT NULL AND current_step != ''
+        """).fetchall()
+        for row in rows:
+            canon = canonicalize(row['current_step'])
+            if canon in tracked_set:
+                counts[canon] += 1
         return counts
 
 

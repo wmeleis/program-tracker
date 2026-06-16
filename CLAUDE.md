@@ -158,23 +158,34 @@ On a typical no-change scan this drops the JS-history loop from 1669 fetches to 
 - **Program Management tab:** Matched by URL containing `programadmin`
 - Both tabs must be open in window 1 of whichever browser `BROWSER_APP` points at
 
-### The 14 Pipeline Roles (in order)
+### The 16 Pipeline Roles (in order)
 1. PR Graduate Dean's Office
 2. Provost Initial Review
 3. Review 2
 4. UIP College Approval
 5. Graduate Provost Review
-6. Graduate Curriculum Committee
-7. Undergraduate Curriculum Committee - Tabled Proposals
-8. Provost Administrative and Budgetary Review
-9. Provost Approval
-10. Faculty Senate
-11. University Board of Trustees
-12. Banner Setup
-13. Editor
-14. Catalog Setup
+6. GRA Regulatory
+7. Graduate Curriculum Committee
+8. Undergraduate Curriculum Committee - Tabled Proposals
+9. Provost Administrative and Budgetary Review
+10. Provost Approval
+11. Faculty Senate
+12. University Board of Trustees
+13. Banner Setup
+14. Editor
+15. Catalog Setup
+16. Teach-Out
 
 Plus "College" as a virtual first step in the pipeline bar (aggregates all 32 college-level roles).
+
+**Canonical stage folding (`scraper.canonical_program_step`, mirrored in JS `canonicalStep`).** Several CIM workflow-role variants fold into the canonical stage above before counting/filtering:
+- `Program Catalog Setup 2` / `Catalog Setup 3` / `Catalog Setup for 2027-2028` → **Catalog Setup**
+- `Program GRA Regulatory Application Submitted` / `GRA Regulatory Modifications Submitted` → **GRA Regulatory**
+- `Program CIP Code Committee` → **Banner Setup** (CIP code is assigned just ahead of Banner setup, which needs it)
+
+`get_pipeline_counts(TRACKED_ROLES, canonical_program_step)` applies the fold when tallying tile counts (app.py `/api/pipeline` and export_static.py both pass the canonicalizer); the client's table filter and tile-count logic call `canonicalStep()` so the rendered table agrees with the tile counts. Keep the Python and JS versions in sync.
+
+**Degree-audit roles that name a college** (`Program {Graduate|Undergraduate} {PS|BV|SC|LW|BA|AM|CS|EN|SH} Degree Audit`) fold into the virtual **College** bucket via `isCollegeStep`. `PR` (Provost office) is deliberately excluded — `Program Graduate PR Degree Audit` stays unbucketed.
 
 ### College Roles (32 total)
 Department chairs, college deans, program directors. Identified by regex pattern: `^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )`.

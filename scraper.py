@@ -31,6 +31,7 @@ TRACKED_ROLES = [
     "Program Review 2",
     "Program UIP College Approval",
     "Program Graduate Provost Review",
+    "Program GRA Regulatory",
     "Program Graduate Curriculum Committee",
     "Program Undergraduate Curriculum Committee - Tabled Proposals",
     "Program Provost Administrative and Budgetary Review",
@@ -40,7 +41,30 @@ TRACKED_ROLES = [
     "Program Banner Setup",
     "Program Editor",
     "Program Catalog Setup",
+    "Program Teach-Out",
 ]
+
+
+def canonical_program_step(step):
+    """Map a raw CIM current_step to its canonical pipeline stage.
+
+    Folds workflow-role variants into the stage shown in the pipeline bar:
+      - "Program Catalog Setup 2/3/for 2027-2028" → "Program Catalog Setup"
+      - "Program GRA Regulatory Application/Modifications Submitted" → "Program GRA Regulatory"
+      - "Program CIP Code Committee" → "Program Banner Setup" (CIP code is
+        assigned ahead of Banner setup, which needs it)
+    Everything else is returned unchanged (college-level Degree Audit roles are
+    handled separately by the client's isCollegeStep).
+    """
+    if not step:
+        return step
+    if step.startswith("Program Catalog Setup"):
+        return "Program Catalog Setup"
+    if step.startswith("Program GRA Regulatory"):
+        return "Program GRA Regulatory"
+    if step == "Program CIP Code Committee":
+        return "Program Banner Setup"
+    return step
 
 # College-level roles (department chairs, college deans, program directors)
 COLLEGE_ROLES = [
@@ -165,6 +189,7 @@ ROLE_SHORT_NAMES = {
     "Program Review 2": "Review 2",
     "Program UIP College Approval": "UIP College",
     "Program Graduate Provost Review": "Grad Provost",
+    "Program GRA Regulatory": "GRA",
     "Program Graduate Curriculum Committee": "Grad Curric",
     "Program Undergraduate Curriculum Committee - Tabled Proposals": "Tabled",
     "Program Provost Administrative and Budgetary Review": "Provost A&B",
@@ -174,6 +199,7 @@ ROLE_SHORT_NAMES = {
     "Program Banner Setup": "Banner",
     "Program Editor": "Editor",
     "Program Catalog Setup": "Catalog",
+    "Program Teach-Out": "Teach-Out",
 }
 
 

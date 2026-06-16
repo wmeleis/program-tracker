@@ -21,6 +21,7 @@ from database import (
 from scraper import (
     TRACKED_ROLES, ROLE_SHORT_NAMES,
     COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES,
+    canonical_program_step,
 )
 
 SITE_PASSWORD = 'husky26'
@@ -131,7 +132,7 @@ def export_data():
         has_reg = {row['program_id'] for row in rows}
     for p in programs:
         p['has_regulatory'] = p['id'] in has_reg
-    pipeline_counts = get_pipeline_counts(TRACKED_ROLES)
+    pipeline_counts = get_pipeline_counts(TRACKED_ROLES, canonical_program_step)
     changes = get_recent_changes(limit=100)
     last_scan = get_last_scan()
     # Attach server-local TZ to the naive stored scan_time so browsers parse

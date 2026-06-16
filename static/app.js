@@ -564,13 +564,14 @@ function updateClearButtons() {
     }
 }
 
-// The 14 main tracked pipeline steps
+// The main tracked pipeline steps (canonical stages)
 const PIPELINE_STEPS = new Set([
     "Program PR Graduate Dean's Office",
     "Provost Initial Review",
     "Program Review 2",
     "Program UIP College Approval",
     "Program Graduate Provost Review",
+    "Program GRA Regulatory",
     "Program Graduate Curriculum Committee",
     "Program Undergraduate Curriculum Committee - Tabled Proposals",
     "Program Provost Administrative and Budgetary Review",
@@ -580,11 +581,24 @@ const PIPELINE_STEPS = new Set([
     "Program Banner Setup",
     "Program Editor",
     "Program Catalog Setup",
+    "Program Teach-Out",
 ]);
+
+// Mirror of scraper.canonical_program_step: fold workflow-role variants into
+// the canonical pipeline stage shown in the bar. Keep in sync with scraper.py.
+function canonicalStep(step) {
+    if (!step) return step;
+    if (step.indexOf("Program Catalog Setup") === 0) return "Program Catalog Setup";
+    if (step.indexOf("Program GRA Regulatory") === 0) return "Program GRA Regulatory";
+    if (step === "Program CIP Code Committee") return "Program Banner Setup";
+    return step;
+}
 
 function isCollegeStep(step) {
     if (!step) return false;
-    if (PIPELINE_STEPS.has(step)) return false;
+    if (PIPELINE_STEPS.has(canonicalStep(step))) return false;
+    // College-level Degree Audit roles that name a college code go to College.
+    if (step.match(/^Program (?:Graduate|Undergraduate) (?:PS|BV|SC|LW|BA|AM|CS|EN|SH) Degree Audit/)) return true;
     // College steps have department codes like EN, SC, SH, AM, BA, etc.
     return step.match(/^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )/);
 }
@@ -1038,7 +1052,7 @@ function updateProgramKindCounts() {
         baseExclKind = baseExclKind.filter(p => {
             if (pipelineFilter === '__college__') return isCollegeStep(p.current_step);
             if (pipelineFilter === '__complete__') return !!p.completion_date;
-            return p.current_step === pipelineFilter;
+            return canonicalStep(p.current_step) === pipelineFilter;
         });
     }
     const counts = { '': baseExclKind.length };
@@ -1400,8 +1414,9 @@ async function applyFilters() {
         if (currentView === 'courses') {
             const bd = COURSE_BUCKETS.find(b => b.role === pipelineFilter);
             if (bd) return bd.match(p.current_step);
+            return p.current_step === pipelineFilter;
         }
-        return p.current_step === pipelineFilter;
+        return canonicalStep(p.current_step) === pipelineFilter;
     }) : collegeBase;
     updateCollegeOptions(collegeBaseAfterPipeline);
 
@@ -1414,8 +1429,9 @@ async function applyFilters() {
             if (currentView === 'courses') {
                 const bd = COURSE_BUCKETS.find(b => b.role === pipelineFilter);
                 if (bd) return bd.match(p.current_step);
+                return p.current_step === pipelineFilter;
             }
-            return p.current_step === pipelineFilter;
+            return canonicalStep(p.current_step) === pipelineFilter;
         });
     }
     updateTypeCounts(applyPipelineTo(getBaseFiltered(approverProgramIds, {type: true})));
@@ -1436,7 +1452,10 @@ async function applyFilters() {
         if (pipelineFilter && pipelineFilter !== '__college__') {
             if (bucketDef) {
                 if (!bucketDef.match(p.current_step)) return false;
-            } else if (p.current_step !== pipelineFilter) return false;
+            } else {
+                const cmp = isCoursesView ? p.current_step : canonicalStep(p.current_step);
+                if (cmp !== pipelineFilter) return false;
+            }
         }
         // Note: completed programs are hidden by default in getBaseFiltered.
         return true;

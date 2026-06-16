@@ -30,7 +30,7 @@ try:
     _PDF_AVAILABLE = True
 except ImportError:
     _PDF_AVAILABLE = False
-from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan, check_courseleaf_session
+from scraper import TRACKED_ROLES, ROLE_SHORT_NAMES, COURSE_TRACKED_ROLES, COURSE_ROLE_SHORT_NAMES, run_full_scan, fetch_reference_curricula, run_course_scan, check_courseleaf_session, canonical_program_step
 from export_static import build_campus_groups
 
 app = Flask(__name__)
@@ -628,7 +628,7 @@ def api_campus_groups():
 @app.route('/api/pipeline')
 def api_pipeline():
     """Get pipeline summary counts."""
-    counts = get_pipeline_counts(TRACKED_ROLES)
+    counts = get_pipeline_counts(TRACKED_ROLES, canonical_program_step)
     pipeline = []
     for role in TRACKED_ROLES:
         pipeline.append({
