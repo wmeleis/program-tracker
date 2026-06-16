@@ -1227,10 +1227,13 @@ function renderPipeline(pipeline, baseFiltered) {
     html += pipeline.map(step => {
         const hasItems = step.count > 0;
         const activeClass = pipelineFilter === step.role ? ' active' : '';
+        // Escape backslashes/quotes so role names with apostrophes
+        // (e.g. "Program PR Graduate Dean's Office") don't break the inline handler.
+        const roleArg = step.role.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         return `
             <div class="pipeline-step ${hasItems ? 'has-items' : 'empty'}${activeClass}"
-                 onclick="togglePipelineFilter('${step.role}')"
-                 title="${step.role}: ${step.count} programs">
+                 onclick="togglePipelineFilter('${roleArg}')"
+                 title="${escapeHtml(step.role)}: ${step.count} programs">
                 <span class="step-count">${step.count}</span>
                 <span class="step-name">${step.short_name}</span>
             </div>
