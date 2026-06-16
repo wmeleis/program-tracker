@@ -233,6 +233,8 @@ def api_program_reference(program_id):
                 'source_filename': custom.get('source_filename'),
                 'version_date': f"Custom reference: {custom.get('name', '')}",
                 'curriculum_html': clean_curriculum_html(custom.get('curriculum_html', '')),
+                'ugcc_approved': custom.get('ugcc_approved', ''),
+                'ugcc_date': custom.get('ugcc_date', ''),
             })
         # Override points to a deleted ref — fall through
 
@@ -553,6 +555,18 @@ def api_get_custom_reference(ref_id):
 def api_delete_custom_reference(ref_id):
     cleared = delete_custom_reference(ref_id)
     return jsonify({'deleted': True, 'overrides_cleared': cleared})
+
+
+@app.route('/api/custom_references/<int:ref_id>/ugcc', methods=['POST'])
+def api_set_custom_reference_ugcc(ref_id):
+    """Set the UGCC-approved flag (+ optional date) on an uploaded reference.
+
+    Body: {"approved": true|false, "date": "YYYY-MM-DD"}
+    """
+    from database import set_custom_reference_ugcc
+    data = request.get_json(force=True) or {}
+    set_custom_reference_ugcc(ref_id, bool(data.get('approved')), (data.get('date') or '').strip())
+    return jsonify({'ok': True})
 
 
 @app.route('/api/program/<int:program_id>/reference_override', methods=['POST'])

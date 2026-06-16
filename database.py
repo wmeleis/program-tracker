@@ -120,7 +120,9 @@ def init_db():
                 curriculum_html TEXT,
                 sections_json TEXT,         -- structured preview data
                 notes TEXT,
-                created_at TIMESTAMP
+                created_at TIMESTAMP,
+                ugcc_approved TEXT DEFAULT '',  -- 'Yes' when UGCC has approved this reference
+                ugcc_date TEXT DEFAULT ''       -- approval date (YYYY-MM-DD)
             );
 
             CREATE TABLE IF NOT EXISTS regulatory_approved_courses (
@@ -758,11 +760,21 @@ def list_custom_references():
     with get_db() as conn:
         rows = conn.execute("""
             SELECT id, name, source_type, source_filename, title, notes, created_at,
+                   ugcc_approved, ugcc_date,
                    length(curriculum_html) as html_size
             FROM custom_references
             ORDER BY created_at DESC
         """).fetchall()
         return [dict(r) for r in rows]
+
+
+def set_custom_reference_ugcc(ref_id, approved, date=''):
+    """Set the UGCC-approved flag (+ optional date) on a custom reference."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE custom_references SET ugcc_approved = ?, ugcc_date = ? WHERE id = ?",
+            ('Yes' if approved else '', date or '', ref_id),
+        )
 
 
 def get_custom_reference(ref_id):
@@ -1532,6 +1544,14 @@ def migrate_db():
             try:
                 conn.execute("ALTER TABLE programs ADD COLUMN reference_program_id INTEGER")
                 print("  Added column: reference_program_id")
+            except sqlite3.OperationalError:
+                pass
+
+        # UGCC-approval tracking on uploaded custom references
+        for _col in ('ugcc_approved', 'ugcc_date'):
+            try:
+                conn.execute(f"ALTER TABLE custom_references ADD COLUMN {_col} TEXT DEFAULT ''")
+                print(f"  Added column: custom_references.{_col}")
             except sqlite3.OperationalError:
                 pass
 

@@ -2103,10 +2103,19 @@ async function renderRefsList() {
             r.notes ? `Notes: ${escapeHtml(r.notes)}` : '',
             r.created_at ? new Date(r.created_at).toLocaleString() : ''
         ].filter(Boolean).join(' · ');
+        const approved = r.ugcc_approved === 'Yes';
+        const badge = approved
+            ? `<span class="ugcc-badge ugcc-yes">UGCC approved${r.ugcc_date ? ' · ' + escapeHtml(r.ugcc_date) : ''}</span>`
+            : `<span class="ugcc-badge ugcc-no">UGCC: not yet</span>`;
         return `<div class="refs-list-item">
             <div class="refs-list-item-info">
-                <div class="refs-list-item-name">${escapeHtml(r.name)}</div>
+                <div class="refs-list-item-name">${escapeHtml(r.name)} ${badge}</div>
                 <div class="refs-list-item-meta">${meta}</div>
+                <div class="refs-ugcc-edit">
+                    <label><input type="checkbox" id="ugcc-chk-${r.id}" ${approved ? 'checked' : ''}> UGCC approved</label>
+                    <input type="date" id="ugcc-date-${r.id}" value="${escapeHtml(r.ugcc_date || '')}">
+                    <button class="ugcc-save-btn" onclick="saveRefUgcc(${r.id})">Save</button>
+                </div>
             </div>
             <button class="refs-list-item-delete" onclick="deleteCustomRef(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Delete</button>
         </div>`;
@@ -2170,6 +2179,21 @@ async function deleteCustomRef(refId, name) {
         // If any currently-expanded row was using this ref, it'll reload on next tab click
     } catch (e) {
         alert('Delete failed: ' + e.message);
+    }
+}
+
+async function saveRefUgcc(refId) {
+    const approved = document.getElementById('ugcc-chk-' + refId).checked;
+    const date = document.getElementById('ugcc-date-' + refId).value || '';
+    try {
+        await fetch('/api/custom_references/' + refId + '/ugcc', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approved, date }),
+        });
+        _customRefsCache = null;   // invalidate so the badge refreshes
+        renderRefsList();
+    } catch (e) {
+        alert('Could not save UGCC status: ' + (e.message || e));
     }
 }
 
@@ -2354,8 +2378,15 @@ async function loadReferenceDetail(programId) {
         const displayDate = data.source === 'auto'
             ? formatReferenceVersionLabel(data.version_date)
             : data.version_date;
-        const header = displayDate
-            ? `<div class="reference-header">${label}: ${escapeHtml(displayDate)}</div>`
+        // For uploaded custom references, show whether UGCC has approved it.
+        let ugccBadge = '';
+        if (data.source === 'custom') {
+            ugccBadge = (data.ugcc_approved === 'Yes')
+                ? ` <span class="ugcc-badge ugcc-yes">UGCC approved${data.ugcc_date ? ' · ' + escapeHtml(data.ugcc_date) : ''}</span>`
+                : ` <span class="ugcc-badge ugcc-no">UGCC: not yet</span>`;
+        }
+        const header = (displayDate || ugccBadge)
+            ? `<div class="reference-header">${label}${displayDate ? ': ' + escapeHtml(displayDate) : ''}${ugccBadge}</div>`
             : '';
         contentEl.innerHTML = `${banner}${picker}${header}<div class="curriculum-content">${cleaned}</div>`;
     } catch (e) {

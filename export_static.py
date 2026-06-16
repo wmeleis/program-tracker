@@ -364,6 +364,8 @@ def build_static_site():
                     'version_date': f"Custom reference: {custom.get('name', '')}",
                     'html': custom.get('curriculum_html', ''),
                     'source': 'custom',
+                    'ugcc_approved': custom.get('ugcc_approved', ''),
+                    'ugcc_date': custom.get('ugcc_date', ''),
                 }
         elif ov.get('reference_program_id'):
             other_id   = ov['reference_program_id']
@@ -1058,8 +1060,14 @@ function __staticInit() {
             let label = 'Reference version';
             if (ref.source === 'custom')       label = 'Custom reference';
             else if (ref.source === 'program') label = 'Reference program';
-            const header = displayDate
-                ? `<div class="reference-header">${label}: ${displayDate}</div>`
+            let ugccBadge = '';
+            if (ref.source === 'custom') {
+                ugccBadge = (ref.ugcc_approved === 'Yes')
+                    ? ` <span class="ugcc-badge ugcc-yes">UGCC approved${ref.ugcc_date ? ' · ' + ref.ugcc_date : ''}</span>`
+                    : ` <span class="ugcc-badge ugcc-no">UGCC: not yet</span>`;
+            }
+            const header = (displayDate || ugccBadge)
+                ? `<div class="reference-header">${label}${displayDate ? ': ' + displayDate : ''}${ugccBadge}</div>`
                 : '';
             contentEl.innerHTML = `${banner}${header}<div class="curriculum-content">${cleaned}</div>`;
         } else {
