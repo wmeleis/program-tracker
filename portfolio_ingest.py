@@ -2881,6 +2881,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     if cim_ids_needed:
         with get_db() as conn:
             curriculum_map = {}
+            reference_map = {}
             for i in range(0, len(cim_ids_needed), 500):
                 chunk = cim_ids_needed[i:i + 500]
                 placeholders = ','.join('?' * len(chunk))
@@ -2891,14 +2892,63 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 for r in db_rows:
                     if r['curriculum_html']:
                         curriculum_map[r['id']] = r['curriculum_html']
+                ref_rows = conn.execute(
+                    f'SELECT program_id, curriculum_html FROM reference_curriculum '
+                    f'WHERE program_id IN ({placeholders})',
+                    chunk
+                ).fetchall()
+                for r in ref_rows:
+                    if r['curriculum_html']:
+                        reference_map[r['program_id']] = r['curriculum_html']
+
+        def _conc_norm(s):
+            # Loose key for matching the same concentration across the current
+            # curriculum, the last-approved reference, and the SVT roster.
+            s = re.sub(r'\bconcentrations?\b', '', (s or '').lower())
+            s = re.sub(r'\bsystems?\b', '', s)        # "Human-AI Collaboration" ↔ "… Systems"
+            return re.sub(r'[^a-z0-9]+', ' ', s).strip()
+
+        # SVT/IPD development sub-rows keyed by parent → {conc_key: status}. Used
+        # to overlay a development status onto the matching curriculum concentration
+        # and (in the frontend) suppress the duplicate standalone sub-row.
+        svt_by_parent = {}
+        for sub in tracker.values():
+            pid = sub.get('concentration_of')
+            if not pid:
+                continue
+            status = (sub.get('svt_status') or sub.get('ipd_status') or '').strip()
+            svt_by_parent.setdefault(pid, {})[_conc_norm(sub.get('program_name', ''))] = status
+
         n_with_concs = 0
         for row in tracker.values():
             cim_id = row.get('cim_program_id')
-            if cim_id and cim_id in curriculum_map:
-                concs = _extract_concentrations_from_html(curriculum_map[cim_id])
-                if concs:
-                    row['concentrations_json'] = json.dumps(concs)
-                    n_with_concs += 1
+            if not (cim_id and cim_id in curriculum_map):
+                continue
+            concs = _extract_concentrations_from_html(curriculum_map[cim_id])
+            if not concs:
+                continue
+            # Classify each concentration: present in the last-approved
+            # reference curriculum ⇒ "existing"; only in the current proposed
+            # curriculum ⇒ "new" (going through the workflow). With no reference
+            # on file, fall back to the parent's own workflow state.
+            ref_html = reference_map.get(cim_id)
+            if ref_html:
+                ref_keys = {_conc_norm(c['name'])
+                            for c in _extract_concentrations_from_html(ref_html)}
+            else:
+                ref_keys = None
+            parent_complete = bool(row.get('cim_completion_date')) or not row.get('cim_step')
+            svt_map = svt_by_parent.get(row.get('id'), {})
+            for c in concs:
+                key = _conc_norm(c['name'])
+                if ref_keys is not None:
+                    c['status'] = 'existing' if key in ref_keys else 'new'
+                else:
+                    c['status'] = 'existing' if parent_complete else 'new'
+                if key in svt_map and svt_map[key]:
+                    c['svt_status'] = svt_map[key]
+            row['concentrations_json'] = json.dumps(concs)
+            n_with_concs += 1
         print(f"  Curriculum concentrations: {n_with_concs} programs have named concentrations")
 
     # ── Step 5.6: Portfolio data-quality overrides ───────────────────────────

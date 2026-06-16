@@ -2207,6 +2207,21 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .auth-dot.ok { color: var(--success); }
 .auth-dot.bad { color: var(--danger); }
 
+/* Concentration status badges (Portfolio expand rows): "Existing" vs
+   "In workflow" — distinguishes approved concentrations from ones being
+   added through the current CIM proposal. */
+.conc-status {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+.conc-status.conc-existing { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.conc-status.conc-workflow { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
 /* Portfolio toolbar right group (Export | Views | Columns) */
 #portfolio-table-toolbar { justify-content: space-between; }
 .portfolio-toolbar-right { display: flex; align-items: center; gap: 8px; }

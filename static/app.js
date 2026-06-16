@@ -6378,18 +6378,28 @@ function renderPortfolioTable() {
             // concentrations live in subject-specific colleges) and the
             // parent's campus (always — concentrations are bound to the
             // parent's deployment).
+            const curriculumConcKeys = new Set();
             curriculumConcs.forEach(c => {
                 const name    = (typeof c === 'string') ? c : (c && c.name)    || '';
                 const college = (typeof c === 'string') ? ''  : (c && c.college) || '';
+                const status  = (typeof c === 'string') ? ''  : (c && c.status) || '';
+                const svtStatus = (typeof c === 'string') ? '' : (c && c.svt_status) || '';
+                curriculumConcKeys.add(_concNorm(name));
                 rowHtml.push(renderPortfolioConcRow(
                     name, portfolioSearch, college,
-                    p.college || '', p.campus || ''));
+                    p.college || '', p.campus || '', status, svtStatus));
             });
             // Linked portfolio sub-rows — pass the parent so the sub-row
             // can inherit college/campus the same way and force the
-            // credential cell to "Concentration".
-            portfolioConcs.forEach(c => rowHtml.push(renderPortfolioRow(
-                c, {isPortfolioConc: true, parent: p})));
+            // credential cell to "Concentration". Suppress any whose name
+            // matches a curriculum concentration already shown above (its
+            // development status is overlaid on that row) so it isn't listed
+            // twice; the survivors are SVT/IPD-only (in development, not yet
+            // in the catalog).
+            portfolioConcs
+                .filter(c => !curriculumConcKeys.has(_concNorm(c.program_name || '')))
+                .forEach(c => rowHtml.push(renderPortfolioRow(
+                    c, {isPortfolioConc: true, parent: p})));
         }
     });
 
@@ -6433,7 +6443,14 @@ function renderPortfolioTable() {
         </table>`;
 }
 
-function renderPortfolioConcRow(name, search, college, parentCollege, parentCampus) {
+// Loose key for matching a concentration across the curriculum, the
+// last-approved reference, and the SVT roster. Mirror of portfolio_ingest._conc_norm.
+function _concNorm(s) {
+    s = (s || '').toLowerCase().replace(/\bconcentrations?\b/g, '').replace(/\bsystems?\b/g, '');
+    return s.replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function renderPortfolioConcRow(name, search, college, parentCollege, parentCampus, status, svtStatus) {
     const hl = search
         ? escapeHtml(name).replace(new RegExp(`(${escapeHtml(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
             '<mark>$1</mark>')
@@ -6457,8 +6474,20 @@ function renderPortfolioConcRow(name, search, college, parentCollege, parentCamp
             return '<td>—</td>';
         })
         .join('');
+    // Status badge: "Existing" (in the last-approved curriculum) vs
+    // "In workflow" (added in the current proposal), with the SVT development
+    // status appended when we have one for this concentration.
+    let badge = '';
+    if (status === 'existing') {
+        badge = ' <span class="conc-status conc-existing">Existing</span>';
+    } else if (status === 'new') {
+        const svt = svtStatus ? ` · SVT: ${escapeHtml(svtStatus)}` : '';
+        badge = ` <span class="conc-status conc-workflow">In workflow${svt}</span>`;
+    } else if (svtStatus) {
+        badge = ` <span class="conc-status conc-workflow">SVT: ${escapeHtml(svtStatus)}</span>`;
+    }
     return `<tr class="portfolio-row portfolio-curriculum-conc-row">
-        <td class="program-name-cell">${hl}</td>
+        <td class="program-name-cell">${hl}${badge}</td>
         ${cellHtml}
     </tr>`;
 }
