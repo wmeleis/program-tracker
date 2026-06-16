@@ -2106,7 +2106,7 @@ async function renderRefsList() {
         const approved = r.ugcc_approved === 'Yes';
         const badge = approved
             ? `<span class="ugcc-badge ugcc-yes">UGCC approved${r.ugcc_date ? ' · ' + escapeHtml(r.ugcc_date) : ''}</span>`
-            : `<span class="ugcc-badge ugcc-no">UGCC: not yet</span>`;
+            : `<span class="ugcc-badge ugcc-no">UGCC: not approved</span>`;
         return `<div class="refs-list-item">
             <div class="refs-list-item-info">
                 <div class="refs-list-item-name">${escapeHtml(r.name)} ${badge}</div>
@@ -2383,7 +2383,7 @@ async function loadReferenceDetail(programId) {
         if (data.source === 'custom') {
             ugccBadge = (data.ugcc_approved === 'Yes')
                 ? ` <span class="ugcc-badge ugcc-yes">UGCC approved${data.ugcc_date ? ' · ' + escapeHtml(data.ugcc_date) : ''}</span>`
-                : ` <span class="ugcc-badge ugcc-no">UGCC: not yet</span>`;
+                : ` <span class="ugcc-badge ugcc-no">UGCC: not approved</span>`;
         }
         const header = (displayDate || ugccBadge)
             ? `<div class="reference-header">${label}${displayDate ? ': ' + escapeHtml(displayDate) : ''}${ugccBadge}</div>`

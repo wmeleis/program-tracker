@@ -1064,7 +1064,7 @@ function __staticInit() {
             if (ref.source === 'custom') {
                 ugccBadge = (ref.ugcc_approved === 'Yes')
                     ? ` <span class="ugcc-badge ugcc-yes">UGCC approved${ref.ugcc_date ? ' · ' + ref.ugcc_date : ''}</span>`
-                    : ` <span class="ugcc-badge ugcc-no">UGCC: not yet</span>`;
+                    : ` <span class="ugcc-badge ugcc-no">UGCC: not approved</span>`;
             }
             const header = (displayDate || ugccBadge)
                 ? `<div class="reference-header">${label}${displayDate ? ': ' + displayDate : ''}${ugccBadge}</div>`
