@@ -551,6 +551,36 @@ def api_get_custom_reference(ref_id):
     return jsonify(ref)
 
 
+@app.route('/api/custom_references/<int:ref_id>/download', methods=['GET'])
+def api_download_custom_reference(ref_id):
+    """Download an uploaded reference as a standardized Word (.docx).
+
+    Regenerated from the stored parsed content (sections_json) — the original
+    uploaded file bytes are not retained — so every reference comes out in the
+    same clean title → sections → course-table layout.
+    """
+    ref = get_custom_reference(ref_id)
+    if not ref:
+        return jsonify({'error': 'not_found'}), 404
+    try:
+        sections = _json.loads(ref.get('sections_json') or '[]')
+    except Exception:
+        sections = []
+    import re
+    from reference_docx import build_reference_docx
+    data = build_reference_docx(
+        ref.get('name', ''), sections,
+        ref.get('notes', '') or '', ref.get('title', '') or '')
+    # Filename: prefer the program title/name, sanitized.
+    base = (ref.get('title') or ref.get('name') or f'reference_{ref_id}').strip()
+    base = re.sub(r'[^\w\s.-]', '', base).strip() or f'reference_{ref_id}'
+    resp = make_response(data)
+    resp.headers['Content-Type'] = (
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    resp.headers['Content-Disposition'] = f'attachment; filename="{base}.docx"'
+    return resp
+
+
 @app.route('/api/custom_references/<int:ref_id>', methods=['DELETE'])
 def api_delete_custom_reference(ref_id):
     cleared = delete_custom_reference(ref_id)

@@ -2140,9 +2140,18 @@ async function renderRefsList() {
                     <button class="ugcc-save-btn" onclick="saveRefUgcc(${r.id})">Save</button>
                 </div>
             </div>
-            <button class="refs-list-item-delete" onclick="deleteCustomRef(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Delete</button>
+            <div class="refs-list-item-actions">
+                <button class="refs-list-item-download" onclick="downloadCustomRef(${r.id})">Download .docx</button>
+                <button class="refs-list-item-delete" onclick="deleteCustomRef(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Delete</button>
+            </div>
         </div>`;
     }).join('');
+}
+
+function downloadCustomRef(refId) {
+    // Hits the local Flask server, which regenerates a standardized .docx from
+    // the stored parsed curriculum and streams it as a file download.
+    window.open('http://localhost:5001/api/custom_references/' + refId + '/download', '_blank');
 }
 
 async function uploadCustomReference(event) {

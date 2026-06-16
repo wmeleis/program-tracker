@@ -284,7 +284,7 @@ After a full scan completes (`do_scan` in `app.py`) AND after every "Update Now"
 
 ## Dependencies
 - Python 3.9+ (macOS system Python works)
-- Flask, flask-cors, cryptography (`pip install flask flask-cors cryptography`)
+- Flask, flask-cors, cryptography, python-docx (`pip install flask flask-cors cryptography python-docx`). `python-docx` powers the standardized reference `.docx` download (`reference_docx.py`); `pdfplumber` is needed only for PDF reference uploads.
 - Microsoft Edge or Google Chrome with CourseLeaf session (selected by `BROWSER_APP`; launchd default Edge)
 - macOS (AppleScript)
 - Git configured with push access to the repo
@@ -388,6 +388,7 @@ Programs may override the auto-derived reference with a user-uploaded document.
   - `GET /api/custom_references` — list
   - `POST /api/custom_references` — multipart upload (`file`, optional `name`, `notes`) → parses → stores → returns preview (sections + course counts + warnings)
   - `GET /api/custom_references/<id>` — full record incl. HTML
+  - `GET /api/custom_references/<id>/download` — regenerates a standardized **Word (.docx)** from the stored `sections_json` and streams it as a file attachment. The original uploaded bytes are NOT retained, so this is a re-render (`reference_docx.build_reference_docx`): document title → one Heading per section → a 3-column course table (Course / Title / Hours), with parsed sub-headers as bold full-width rows. Output is uniform across all references regardless of how messy the source upload was. The References-modal "Download .docx" button (`downloadCustomRef`) opens this endpoint on `http://localhost:5001` (local Flask only — the modal is stripped from the static site).
   - `DELETE /api/custom_references/<id>` — removes; automatically clears any program overrides pointing to it
   - `POST /api/program/<id>/reference_override` body `{custom_reference_id: N|null}` — set or clear a program's override
   - `GET /api/program/<id>/reference` — now returns `{source: 'custom', custom_reference_id, name, ...}` when overridden, else the auto reference with `source: 'auto'`

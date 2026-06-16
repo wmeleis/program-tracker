@@ -1143,6 +1143,19 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     cursor: pointer;
 }
 .refs-list-item-delete:hover { background: #fee2e2; }
+.refs-list-item-actions { display: flex; flex-direction: column; gap: 6px; }
+.refs-list-item-download {
+    padding: 6px 12px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid #bfdbfe;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.refs-list-item-download:hover { background: #eff6ff; }
 
 /* Reference-source selector inside the Reference tab */
 .ref-source-picker {
