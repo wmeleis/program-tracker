@@ -23,7 +23,7 @@ from database import (
     get_program_reference_override_id, get_program_reference_override,
     get_referenced_by,
 )
-from docx_parser import parse_docx
+from docx_parser import parse_docx, parse_docx_programs
 from html_cleaner import clean_curriculum_html
 try:
     from pdf_parser import parse_pdf
@@ -504,37 +504,58 @@ def api_upload_custom_reference():
     try:
         if ext == 'pdf':
             parsed = parse_pdf(data)
+            programs = [{
+                'title': parsed.get('title', ''), 'modality': '',
+                'curriculum_html': parsed.get('curriculum_html', ''),
+                'sections': parsed.get('sections', []),
+                'warnings': parsed.get('warnings', []),
+            }]
         else:
-            parsed = parse_docx(data)
+            # Umbrella docs with per-modality tables (In person / Primarily
+            # online / Online) split into one program per modality.
+            programs = parse_docx_programs(data)
     except Exception as e:
         return jsonify({'error': 'parse_failed', 'detail': str(e)}), 400
 
-    if not parsed.get('curriculum_html'):
+    programs = [p for p in programs if p.get('curriculum_html')]
+    if not programs:
         return jsonify({
             'error': 'empty_content',
-            'detail': 'No course content could be extracted from this file. '
-                      'Warnings: ' + '; '.join(parsed.get('warnings', []))
+            'detail': 'No course content could be extracted from this file.'
         }), 400
 
-    name = request.form.get('name', '').strip() or parsed.get('title') or filename.rsplit('.', 1)[0]
+    base_name = request.form.get('name', '').strip() \
+        or programs[0].get('title') or filename.rsplit('.', 1)[0]
     notes = request.form.get('notes', '').strip()
 
-    ref_id = create_custom_reference(
-        name=name,
-        source_type=ext,
-        source_filename=filename,
-        title=parsed.get('title', ''),
-        curriculum_html=parsed.get('curriculum_html', ''),
-        sections_json=_json.dumps(parsed.get('sections', [])),
-        notes=notes,
-    )
-    # Return the preview so the UI can confirm the parse looked reasonable
+    created = []
+    for prog in programs:
+        modality = prog.get('modality', '')
+        nm = f'{base_name} — {modality}' if modality else base_name
+        title = prog.get('title', '')
+        if modality and title:
+            title = f'{title} — {modality}'
+        rid = create_custom_reference(
+            name=nm,
+            source_type=ext,
+            source_filename=filename,
+            title=title,
+            curriculum_html=prog.get('curriculum_html', ''),
+            sections_json=_json.dumps(prog.get('sections', [])),
+            notes=notes,
+        )
+        created.append({'id': rid, 'name': nm, 'modality': modality})
+
+    # Return the first program's preview (+ count) so the UI can confirm the
+    # parse looked reasonable and report how many references were created.
     return jsonify({
-        'id': ref_id,
-        'name': name,
-        'title': parsed.get('title', ''),
-        'sections': parsed.get('sections', []),
-        'warnings': parsed.get('warnings', []),
+        'id': created[0]['id'],
+        'name': created[0]['name'],
+        'count': len(created),
+        'created': created,
+        'title': programs[0].get('title', ''),
+        'sections': programs[0].get('sections', []),
+        'warnings': programs[0].get('warnings', []),
     })
 
 

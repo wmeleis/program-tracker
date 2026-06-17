@@ -2184,7 +2184,12 @@ async function uploadCustomReference(event) {
         const nSections = (data.sections || []).length;
         const warn = (data.warnings && data.warnings.length)
             ? ` (warnings: ${data.warnings.join('; ')})` : '';
-        status.textContent = `Saved "${data.name}" — ${nSections} sections, ${nCourses} courses${warn}.`;
+        if (data.count && data.count > 1) {
+            const names = (data.created || []).map(c => c.modality || c.name).join(', ');
+            status.textContent = `Saved ${data.count} references (split by modality: ${names}).`;
+        } else {
+            status.textContent = `Saved "${data.name}" — ${nSections} sections, ${nCourses} courses${warn}.`;
+        }
         status.className = 'ok';
         document.getElementById('ref-upload-form').reset();
         _customRefsCache = null;  // invalidate

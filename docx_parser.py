@@ -396,6 +396,128 @@ def _promote_program_pathway_section(sections):
     return sections[:concentration_idx] + insertion + sections[concentration_idx:]
 
 
+def _build_sections(body):
+    """Walk a <w:body> and return the list of section dicts.
+
+    Each section: {'heading', 'courses', 'has_courses', 'modality'}.
+    `modality` is set when the table is preceded (under a "Modalities:" marker)
+    by a List-Paragraph label like "In person" / "Primarily online" / "Online".
+    These mark per-modality variants of the same umbrella program.
+    """
+    PROMOTED_HEADINGS_RE = re.compile(
+        r'^(project pathway|program pathway|plan of study|sample plan of study)\b', re.I
+    )
+    # A standalone "Modalities:" paragraph opens a region where each
+    # List-Paragraph label names a delivery modality for the table beneath it.
+    MODALITY_MARKER_RE = re.compile(r'^modalities:?\s*$', re.I)
+    sections = []
+    current_heading = None
+    in_modalities = False
+    pending_modality = None
+
+    def emit_table(tbl, override_heading=None, modality=''):
+        nonlocal current_heading
+        rows = _parse_table(tbl)
+        has_courses = any(not r.get('is_header') for r in rows)
+        if rows:
+            sections.append({
+                'heading': override_heading or (current_heading or ''),
+                'courses': rows,
+                'has_courses': has_courses,
+                'modality': modality,
+            })
+
+        nested_tables = []
+        for cell in tbl.findall('.//{%s}tc' % NS['w']):
+            for nested in cell.findall('w:tbl', NS):
+                nested_tables.append(nested)
+        if not nested_tables:
+            return
+        parent_text = ' '.join((t.text or '') for t in tbl.iter(f'{W}t'))
+        is_pathway_options = (
+            re.search(r'\bpathway options\b', parent_text, re.I) and
+            re.search(r'\bprogram pathway\b', parent_text, re.I)
+        )
+        for nested in nested_tables:
+            if is_pathway_options:
+                emit_table(nested, override_heading='Program Pathway')
+            else:
+                emit_table(nested)
+
+    for child in body:
+        tag = child.tag.split('}')[-1]
+        if tag == 'p':
+            style, text = _paragraph_text_and_style(child)
+            if style in ('Heading2', 'Heading3') and text:
+                current_heading = text
+                in_modalities = False      # a new heading ends a modality region
+                pending_modality = None
+            elif text and MODALITY_MARKER_RE.match(text.strip()):
+                in_modalities = True
+            elif in_modalities and style == 'ListParagraph' and text:
+                pending_modality = text.strip()
+            elif text and PROMOTED_HEADINGS_RE.match(text.strip()):
+                current_heading = text.strip()
+        elif tag == 'tbl':
+            mod = pending_modality or ''
+            pending_modality = None
+            emit_table(child, modality=mod)
+
+    sections = _strip_campus_metadata_rows(sections)
+    sections = _promote_program_pathway_section(sections)
+    return sections
+
+
+def parse_docx_programs(data):
+    """Parse a .docx and split per-modality umbrella programs into separate
+    program dicts.
+
+    Returns a list of {'title', 'modality', 'curriculum_html', 'sections',
+    'warnings'}. When the document has ≥2 modality-labeled tables (In person /
+    Primarily online / Online), each becomes its own program (so they can be
+    saved as distinct reference records). Otherwise returns a single-element
+    list equivalent to parse_docx().
+    """
+    if isinstance(data, (bytes, bytearray)):
+        z = zipfile.ZipFile(io.BytesIO(data))
+    else:
+        z = zipfile.ZipFile(data)
+    try:
+        with z.open('word/document.xml') as f:
+            tree = ET.parse(f)
+    finally:
+        z.close()
+    body = tree.getroot().find('w:body', NS)
+    if body is None:
+        return [{'title': '', 'modality': '', 'curriculum_html': '',
+                 'sections': [], 'warnings': ['No document body found']}]
+
+    title = _detect_title(body)
+    sections = _build_sections(body)
+
+    def _to_program(secs, modality):
+        html = '\n'.join(_render_section_html(s['heading'], s['courses']) for s in secs)
+        return {
+            'title': title,
+            'modality': modality,
+            'curriculum_html': html,
+            'sections': [{'heading': s['heading'], 'courses': s['courses']} for s in secs],
+            'warnings': [],
+        }
+
+    # Distinct modalities, in first-appearance order.
+    mod_order = []
+    for s in sections:
+        m = s.get('modality')
+        if m and m not in mod_order:
+            mod_order.append(m)
+
+    if len(mod_order) >= 2:
+        return [_to_program([s for s in sections if s.get('modality') == m], m)
+                for m in mod_order]
+    return [_to_program(sections, '')]
+
+
 def parse_docx(data):
     """Parse a .docx into structured curriculum data.
 
@@ -422,97 +544,7 @@ def parse_docx(data):
         return {'title': '', 'curriculum_html': '', 'sections': [], 'warnings': ['No document body found']}
 
     title = _detect_title(body)
-
-    # Walk the body in order. Track the most recent Heading2/Heading3 text; when we
-    # hit a table, bind it to that heading. Tables produce sections in the output.
-    # Also: certain structurally-significant plain paragraphs (like "Project Pathway",
-    # "Program Pathway") act as section boundaries even without a heading style —
-    # some umbrella docs leave them unstyled but they separate meaningful curriculum
-    # chunks.
-    PROMOTED_HEADINGS_RE = re.compile(
-        r'^(project pathway|program pathway|plan of study|sample plan of study)\b', re.I
-    )
-    sections = []
-    current_heading = None
-
-    def emit_table(tbl, override_heading=None):
-        """Emit this table as a section, then recurse into any nested
-        <w:tbl> elements inside its cells so they appear in reading order.
-        CourseLeaf umbrella docs sometimes nest a course-list table inside
-        a form table (Pathway Options → Program Pathway's own electives table).
-        """
-        nonlocal current_heading
-        rows = _parse_table(tbl)
-        has_courses = any(not r.get('is_header') for r in rows)
-        if rows:
-            sections.append({
-                'heading': override_heading or (current_heading or ''),
-                'courses': rows,
-                'has_courses': has_courses,
-            })
-
-        # Decide whether any nested tables should get their own heading:
-        # If this table contains "Program Pathway" text in its rows (and is the
-        # Pathway Options form), any nested tables are Program Pathway's own
-        # curriculum and should be labeled as such.
-        nested_tables = []
-        for cell in tbl.findall('.//{%s}tc' % NS['w']):
-            for nested in cell.findall('w:tbl', NS):
-                nested_tables.append(nested)
-
-        if not nested_tables:
-            return
-
-        parent_text = ' '.join(
-            (t.text or '') for t in tbl.iter(f'{W}t')
-        )
-        is_pathway_options = (
-            re.search(r'\bpathway options\b', parent_text, re.I) and
-            re.search(r'\bprogram pathway\b', parent_text, re.I)
-        )
-
-        # If this IS the Pathway Options form, give nested tables the
-        # "Program Pathway" heading; also update current_heading so later
-        # siblings (like concentration sections) start fresh.
-        for nested in nested_tables:
-            if is_pathway_options:
-                emit_table(nested, override_heading='Program Pathway')
-            else:
-                emit_table(nested)
-
-    for child in body:
-        tag = child.tag.split('}')[-1]
-        if tag == 'p':
-            style, text = _paragraph_text_and_style(child)
-            if style in ('Heading2', 'Heading3') and text:
-                current_heading = text
-            elif text and PROMOTED_HEADINGS_RE.match(text.strip()):
-                current_heading = text.strip()
-        elif tag == 'tbl':
-            # Use emit_table helper which also descends into nested tables
-            emit_table(child)
-            continue
-            # (legacy path no longer used)
-            rows = _parse_table(child)
-            # Skip tables that have no course-code rows AND no meaningful header rows
-            has_courses = any(not r.get('is_header') for r in rows)
-            if not rows:
-                continue
-            sections.append({
-                'heading': current_heading or '',
-                'courses': rows,
-                'has_courses': has_courses,
-            })
-
-    # --- Post-processing passes ---
-    sections = _strip_campus_metadata_rows(sections)
-    # Insert a "Program Pathway" section heading before the concentrations so
-    # the document shows both pathways as distinct sections. Concentrations +
-    # Electives Option are technically shared between pathways, but because
-    # Program Pathway has no other distinct content of its own, placing the
-    # heading here gives the reader a clear two-pathway view parallel to the
-    # explicit "Project Pathway" heading below.
-    sections = _promote_program_pathway_section(sections)
+    sections = _build_sections(body)
 
     # Generate combined HTML
     html_parts = []
