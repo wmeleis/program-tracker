@@ -555,8 +555,16 @@ def parse_docx_programs(data):
             mod_order.append(m)
 
     if len(mod_order) >= 2:
-        return [_to_program([s for s in sections if s.get('modality') == m], m)
-                for m in mod_order]
+        # Each modality program = all SHARED (non-modality) sections — the
+        # overall required courses + electives at the top of the doc — plus
+        # that modality's own table, kept in document order. Without the
+        # shared sections each program would be missing the overall curriculum.
+        programs = []
+        for m in mod_order:
+            secs = [s for s in sections
+                    if not s.get('modality') or s.get('modality') == m]
+            programs.append(_to_program(secs, m))
+        return programs
     return [_to_program(sections, '')]
 
 
