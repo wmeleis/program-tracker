@@ -6485,6 +6485,24 @@ function _syncLayoutButtons() {
     // filter). Hide it in matrix mode so it isn't a dead control.
     const colPicker = document.getElementById('portfolio-col-picker');
     if (colPicker) colPicker.style.display = (portfolioLayout === 'matrix') ? 'none' : '';
+
+    // In matrix mode, hide the per-deployment status filters — they're
+    // redundant with what the cells already show and they fragment the grid
+    // (a status that varies by campus blanks out cells rather than pruning
+    // rows cleanly). Keep the CIM scope buttons and Admitting Today, which
+    // narrow the program set without that problem. Left structural filters
+    // (Level / Degree / College / Campus) always stay.
+    const matrix = portfolioLayout === 'matrix';
+    const hideIds = ['portfolio-filter-inactadmit', 'portfolio-filter-roster',
+        'portfolio-filter-substatus', 'portfolio-filter-speed',
+        'portfolio-filter-gls', 'portfolio-filter-otp'];
+    hideIds.forEach(id => {
+        const el = document.getElementById(id);
+        const grp = el && el.closest('.filter-group');
+        if (grp) grp.style.display = matrix ? 'none' : '';
+    });
+    const statusBreak = document.getElementById('pf-status-break');
+    if (statusBreak) statusBreak.style.display = matrix ? 'none' : '';
 }
 
 function renderPortfolioTable() {
