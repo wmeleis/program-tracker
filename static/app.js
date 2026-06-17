@@ -6330,7 +6330,8 @@ function renderPortfolioMatrix() {
         if (!base) return;
         const camp = campusOf(p);
         campusSet.add(camp);
-        const g = groups[base] || (groups[base] = { name: base, deployments: {}, concs: {} });
+        const g = groups[base] || (groups[base] = { name: base, deployments: {}, concs: {}, college: '', concCollege: {} });
+        if (!g.college && p.college) g.college = p.college;
         // If two records map to the same base+campus, prefer one in active workflow.
         const existing = g.deployments[camp];
         if (!existing || (!existing.cim_step && p.cim_step)) g.deployments[camp] = p;
@@ -6342,6 +6343,9 @@ function renderPortfolioMatrix() {
                 status: (typeof c === 'object' && c.status) || 'existing',
                 svt_status: (typeof c === 'object' && c.svt_status) || '',
             };
+            // Concentration's own college (subject-specific), if declared.
+            const cc = (typeof c === 'object' && c.college) || '';
+            if (cc && !g.concCollege[cn]) g.concCollege[cn] = cc;
         });
     });
 
@@ -6376,17 +6380,23 @@ function renderPortfolioMatrix() {
             : '<span class="mx-caret-spacer"></span>';
         const nameClick = hasConcs ? ` onclick="togglePortfolioMatrixRow('${escapeHtml(base).replace(/'/g, "\\'")}')"` : '';
         const progCells = campuses.map(c => _matrixProgramCell(g.deployments[c])).join('');
+        const progCollege = g.college
+            ? `<span class="mx-college" title="${escapeHtml(g.college)}">${escapeHtml(abbreviateCollege(g.college))}</span>` : '';
         bodyRows.push(
             `<tr class="mx-prog-row">
-                <th class="mx-rowhead${hasConcs ? ' mx-clickable' : ''}"${nameClick}>${caret}${escapeHtml(base)}</th>
+                <th class="mx-rowhead${hasConcs ? ' mx-clickable' : ''}"${nameClick}>${caret}<span class="mx-name">${escapeHtml(base)}</span>${progCollege}</th>
                 ${progCells}
             </tr>`);
         if (hasConcs && expanded) {
             concNames.forEach(cn => {
                 const cells = campuses.map(c => _matrixConcCell(g.concs[cn][c])).join('');
+                // Concentration's own college, falling back to the program's.
+                const col = g.concCollege[cn] || g.college || '';
+                const concCollege = col
+                    ? `<span class="mx-college" title="${escapeHtml(col)}">${escapeHtml(abbreviateCollege(col))}</span>` : '';
                 bodyRows.push(
                     `<tr class="mx-conc-row">
-                        <th class="mx-rowhead mx-conc-name">${escapeHtml(cn)}</th>
+                        <th class="mx-rowhead mx-conc-name"><span class="mx-name">${escapeHtml(cn)}</span>${concCollege}</th>
                         ${cells}
                     </tr>`);
             });
