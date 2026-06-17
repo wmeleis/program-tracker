@@ -6480,6 +6480,11 @@ function _syncLayoutButtons() {
     document.querySelectorAll('.portfolio-layout-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.layout === portfolioLayout);
     });
+    // The ⊞ Columns picker governs the TABLE's data columns, which don't apply
+    // to the matrix (whose columns are campuses, controlled by the Campus
+    // filter). Hide it in matrix mode so it isn't a dead control.
+    const colPicker = document.getElementById('portfolio-col-picker');
+    if (colPicker) colPicker.style.display = (portfolioLayout === 'matrix') ? 'none' : '';
 }
 
 function renderPortfolioTable() {
