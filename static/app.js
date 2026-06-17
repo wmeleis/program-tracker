@@ -6369,6 +6369,9 @@ function renderPortfolioMatrix() {
 
     const headCells = campuses.map(c =>
         `<th class="mx-campus-col">${escapeHtml(abbreviateCampus(c))}</th>`).join('');
+    const _collegeCell = (col) => col
+        ? `<td class="mx-college-cell" title="${escapeHtml(col)}">${escapeHtml(abbreviateCollege(col))}</td>`
+        : '<td class="mx-college-cell"></td>';
     const bodyRows = [];
     baseNames.forEach(base => {
         const g = groups[base];
@@ -6380,11 +6383,10 @@ function renderPortfolioMatrix() {
             : '<span class="mx-caret-spacer"></span>';
         const nameClick = hasConcs ? ` onclick="togglePortfolioMatrixRow('${escapeHtml(base).replace(/'/g, "\\'")}')"` : '';
         const progCells = campuses.map(c => _matrixProgramCell(g.deployments[c])).join('');
-        const progCollege = g.college
-            ? `<span class="mx-college" title="${escapeHtml(g.college)}">${escapeHtml(abbreviateCollege(g.college))}</span>` : '';
         bodyRows.push(
             `<tr class="mx-prog-row">
-                <th class="mx-rowhead${hasConcs ? ' mx-clickable' : ''}"${nameClick}>${caret}<span class="mx-name">${escapeHtml(base)}</span>${progCollege}</th>
+                <th class="mx-rowhead${hasConcs ? ' mx-clickable' : ''}"${nameClick}>${caret}<span class="mx-name">${escapeHtml(base)}</span></th>
+                ${_collegeCell(g.college)}
                 ${progCells}
             </tr>`);
         if (hasConcs && expanded) {
@@ -6392,11 +6394,10 @@ function renderPortfolioMatrix() {
                 const cells = campuses.map(c => _matrixConcCell(g.concs[cn][c])).join('');
                 // Concentration's own college, falling back to the program's.
                 const col = g.concCollege[cn] || g.college || '';
-                const concCollege = col
-                    ? `<span class="mx-college" title="${escapeHtml(col)}">${escapeHtml(abbreviateCollege(col))}</span>` : '';
                 bodyRows.push(
                     `<tr class="mx-conc-row">
-                        <th class="mx-rowhead mx-conc-name"><span class="mx-name">${escapeHtml(cn)}</span>${concCollege}</th>
+                        <th class="mx-rowhead mx-conc-name"><span class="mx-name">${escapeHtml(cn)}</span></th>
+                        ${_collegeCell(col)}
                         ${cells}
                     </tr>`);
             });
@@ -6406,7 +6407,7 @@ function renderPortfolioMatrix() {
     container.innerHTML = `
         <div class="mx-scroll">
         <table class="program-table matrix-table">
-            <thead><tr><th class="mx-corner">Program</th>${headCells}</tr></thead>
+            <thead><tr><th class="mx-corner">Program</th><th class="mx-corner2">College</th>${headCells}</tr></thead>
             <tbody>${bodyRows.join('')}</tbody>
         </table>
         </div>`;
