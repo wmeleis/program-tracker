@@ -2220,6 +2220,49 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .auth-dot.ok { color: var(--success); }
 .auth-dot.bad { color: var(--danger); }
 
+/* Portfolio layout toggle (Table | Matrix) */
+#portfolio-table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.portfolio-layout-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.portfolio-layout-btn {
+    padding: 5px 14px; border: none; background: #fff; color: var(--text-secondary);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.portfolio-layout-btn + .portfolio-layout-btn { border-left: 1px solid var(--border); }
+.portfolio-layout-btn.active { background: #eff6ff; color: var(--accent); }
+
+/* Portfolio Matrix (program × campus grid) */
+.mx-scroll { overflow-x: auto; }
+table.matrix-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+table.matrix-table th, table.matrix-table td {
+    border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+    padding: 6px 10px; font-size: 12px; vertical-align: top;
+}
+table.matrix-table thead th {
+    position: sticky; top: 0; z-index: 2; background: #f8fafc;
+    font-weight: 700; color: var(--text-secondary); white-space: nowrap;
+}
+.mx-corner, .mx-rowhead {
+    position: sticky; left: 0; z-index: 1; background: #fff; text-align: left;
+    min-width: 240px; max-width: 360px; font-weight: 600;
+}
+.mx-corner { z-index: 3; background: #f8fafc; }
+.mx-campus-col { text-align: center; min-width: 92px; }
+.mx-clickable { cursor: pointer; }
+.mx-clickable:hover { background: #f8fafc; }
+.mx-caret { display: inline-block; width: 14px; color: var(--text-secondary); }
+.mx-caret-spacer { display: inline-block; width: 14px; }
+.mx-conc-row .mx-conc-name { padding-left: 28px; font-weight: 400; color: var(--text-secondary); background: #fcfcfd; }
+.mx-cell { text-align: center; }
+.mx-cell.mx-empty { background: #fafafa; }
+.mx-stage { display: block; font-weight: 600; }
+.mx-sub { display: block; font-size: 10.5px; color: var(--text-secondary); margin-top: 1px; }
+/* CIM change-type tints (match the table's row colors) */
+.mx-cell.mx-new      { background: #ecfdf3; }
+.mx-cell.mx-change   { background: #eff6ff; }
+.mx-cell.mx-inact    { background: #fef2f2; }
+.mx-cell.mx-approved { background: #f1f5f9; }
+.mx-cell.mx-present  { background: #fff; }
+
 /* Concentration status badges (Portfolio expand rows): "Existing" vs
    "In workflow" — distinguishes approved concentrations from ones being
    added through the current CIM proposal. */

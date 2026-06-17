@@ -208,6 +208,10 @@
     <!-- Portfolio table toolbar (result count only — actions moved to header) -->
     <div id="portfolio-table-toolbar" style="display:none">
         <span id="portfolio-result-count" class="result-count"></span>
+        <span class="portfolio-layout-toggle">
+            <button class="portfolio-layout-btn active" data-layout="table" onclick="setPortfolioLayout('table')">Table</button>
+            <button class="portfolio-layout-btn" data-layout="matrix" onclick="setPortfolioLayout('matrix')">Matrix</button>
+        </span>
     </div>
 
     <!-- Portfolio Views modal (mirrors student tracker's filter builder modal) -->

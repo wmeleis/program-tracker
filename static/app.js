@@ -4734,6 +4734,30 @@ function _loadPortfolioCols() {
 }
 let portfolioVisibleCols = _loadPortfolioCols();
 
+// Portfolio layout mode: 'table' (default) or 'matrix' (program × campus grid).
+let portfolioLayout = (() => {
+    try { return localStorage.getItem('cim-portfolio-layout') || 'table'; }
+    catch (_) { return 'table'; }
+})();
+// Matrix: which parent programs have their concentration rows expanded
+// (collapsed by default — concentrations hidden until you expand the program).
+let portfolioMatrixExpanded = new Set();
+
+function setPortfolioLayout(mode) {
+    portfolioLayout = (mode === 'matrix') ? 'matrix' : 'table';
+    try { localStorage.setItem('cim-portfolio-layout', portfolioLayout); } catch (_) {}
+    document.querySelectorAll('.portfolio-layout-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.layout === portfolioLayout);
+    });
+    renderPortfolioTable();
+}
+
+function togglePortfolioMatrixRow(baseKey) {
+    if (portfolioMatrixExpanded.has(baseKey)) portfolioMatrixExpanded.delete(baseKey);
+    else portfolioMatrixExpanded.add(baseKey);
+    renderPortfolioMatrix();
+}
+
 // Per-column width overrides for the Portfolio table — {colKey: widthPx}.
 // Persisted to localStorage so user-resized columns survive reloads.
 function _loadPortfolioColWidths() {
@@ -6227,7 +6251,166 @@ function _portfolioTopLevelCount(filtered) {
     return topLevelIds.size;
 }
 
+// ── Portfolio Matrix view (program × campus) ───────────────────────────────
+// Preferred campus column order; anything else falls in alphabetically after.
+const _MATRIX_CAMPUS_ORDER = [
+    'Boston', 'Oakland', 'Online', 'Toronto', 'Vancouver',
+    'Seattle', 'Portland', 'Arlington', 'Miami', 'Charlotte',
+];
+
+const _CIM_STAGE_SHORT = {
+    "Program PR Graduate Dean's Office": 'Grad Dean',
+    'Provost Initial Review': 'Provost Init',
+    'Program Review 2': 'Review 2',
+    'Program Graduate Provost Review': 'Grad Provost',
+    'Program GRA Regulatory': 'GRA',
+    'Program Graduate Curriculum Committee': 'Grad Curric',
+    'Program Undergraduate Curriculum Committee - Tabled Proposals': 'Tabled',
+    'Program Provost Administrative and Budgetary Review': 'Provost A&B',
+    'Program Provost Approval': 'Provost Appr',
+    'Program Faculty Senate': 'Faculty Sen',
+    'Program University Board of Trustees': 'Trustees',
+    'Program Setup': 'Setup',
+    'Program Teach-Out': 'Teach-Out',
+};
+
+function _matrixStageLabel(step) {
+    if (!step) return '';
+    if (typeof isCollegeStep === 'function' && isCollegeStep(step)) return 'College';
+    const c = (typeof canonicalStep === 'function') ? canonicalStep(step) : step;
+    return _CIM_STAGE_SHORT[c] || c.replace(/^Program /, '');
+}
+
+// One program (deployment) cell: CIM stage + portfolio (SVT/GTM) status.
+function _matrixProgramCell(p) {
+    if (!p) return '<td class="mx-cell mx-empty"></td>';
+    let stage = '', tintClass = '';
+    if (p.cim_completion_date) {
+        stage = 'Approved';
+        tintClass = 'mx-approved';
+    } else if (p.cim_step) {
+        stage = _matrixStageLabel(p.cim_step);
+        tintClass = p.cim_change_type === 'New' ? 'mx-new'
+            : p.cim_change_type === 'Inactivation' ? 'mx-inact'
+            : 'mx-change';
+    }
+    const svt = p.svt_status || p.gtm_type || '';
+    const stageHtml = stage ? `<span class="mx-stage">${escapeHtml(stage)}</span>` : '';
+    const svtHtml = svt ? `<span class="mx-sub">${escapeHtml(svt)}</span>` : '';
+    if (!stageHtml && !svtHtml) return '<td class="mx-cell mx-present"></td>';
+    return `<td class="mx-cell ${tintClass}">${stageHtml}${svtHtml}</td>`;
+}
+
+// One concentration cell for a given campus deployment.
+function _matrixConcCell(info) {
+    if (!info) return '<td class="mx-cell mx-empty"></td>';
+    const badge = info.status === 'new'
+        ? '<span class="conc-status conc-workflow">In workflow</span>'
+        : '<span class="conc-status conc-existing">Existing</span>';
+    const svt = info.svt_status ? `<span class="mx-sub">${escapeHtml(info.svt_status)}</span>` : '';
+    return `<td class="mx-cell mx-present">${badge}${svt}</td>`;
+}
+
+function renderPortfolioMatrix() {
+    const container = document.getElementById('programs-table-container');
+    if (!container) return;
+
+    // Only top-level deployment rows participate (concentrations come from each
+    // deployment's own parsed concentration list, not from sub-rows).
+    const rows = getPortfolioFiltered().filter(p => !p.concentration_of);
+
+    const campusOf = p => p.campus || extractCampus(p.program_name || '') || 'Boston';
+    const baseOf = p => normalizePortfolioName(stripCampusFromName(p.program_name || ''));
+
+    // Group deployments by base program name.
+    const groups = {};            // baseName → {name, deployments:{campus:row}, concs:{conc:{campus:info}}}
+    const campusSet = new Set();
+    rows.forEach(p => {
+        const base = baseOf(p);
+        if (!base) return;
+        const camp = campusOf(p);
+        campusSet.add(camp);
+        const g = groups[base] || (groups[base] = { name: base, deployments: {}, concs: {} });
+        // If two records map to the same base+campus, prefer one in active workflow.
+        const existing = g.deployments[camp];
+        if (!existing || (!existing.cim_step && p.cim_step)) g.deployments[camp] = p;
+        (p.concentrations || []).forEach(c => {
+            const cn = (typeof c === 'string') ? c : (c && c.name) || '';
+            if (!cn) return;
+            const cg = g.concs[cn] || (g.concs[cn] = {});
+            cg[camp] = {
+                status: (typeof c === 'object' && c.status) || 'existing',
+                svt_status: (typeof c === 'object' && c.svt_status) || '',
+            };
+        });
+    });
+
+    // Column order: preferred list first, then any extras alphabetically.
+    const campuses = [...campusSet].sort((a, b) => {
+        const ia = _MATRIX_CAMPUS_ORDER.indexOf(a), ib = _MATRIX_CAMPUS_ORDER.indexOf(b);
+        if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        return a.localeCompare(b);
+    });
+
+    const baseNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+
+    const countEl = document.getElementById('portfolio-result-count');
+    if (countEl) countEl.textContent =
+        `${baseNames.length} program${baseNames.length === 1 ? '' : 's'} · ${campuses.length} campus${campuses.length === 1 ? '' : 'es'}`;
+
+    if (!baseNames.length) {
+        container.innerHTML = '<p class="empty-state">No programs match the current filters.</p>';
+        return;
+    }
+
+    const headCells = campuses.map(c =>
+        `<th class="mx-campus-col">${escapeHtml(abbreviateCampus(c))}</th>`).join('');
+    const bodyRows = [];
+    baseNames.forEach(base => {
+        const g = groups[base];
+        const concNames = Object.keys(g.concs).sort((a, b) => a.localeCompare(b));
+        const hasConcs = concNames.length > 0;
+        const expanded = portfolioMatrixExpanded.has(base);
+        const caret = hasConcs
+            ? `<span class="mx-caret">${expanded ? '▾' : '▸'}</span>`
+            : '<span class="mx-caret-spacer"></span>';
+        const nameClick = hasConcs ? ` onclick="togglePortfolioMatrixRow('${escapeHtml(base).replace(/'/g, "\\'")}')"` : '';
+        const progCells = campuses.map(c => _matrixProgramCell(g.deployments[c])).join('');
+        bodyRows.push(
+            `<tr class="mx-prog-row">
+                <th class="mx-rowhead${hasConcs ? ' mx-clickable' : ''}"${nameClick}>${caret}${escapeHtml(base)}</th>
+                ${progCells}
+            </tr>`);
+        if (hasConcs && expanded) {
+            concNames.forEach(cn => {
+                const cells = campuses.map(c => _matrixConcCell(g.concs[cn][c])).join('');
+                bodyRows.push(
+                    `<tr class="mx-conc-row">
+                        <th class="mx-rowhead mx-conc-name">${escapeHtml(cn)}</th>
+                        ${cells}
+                    </tr>`);
+            });
+        }
+    });
+
+    container.innerHTML = `
+        <div class="mx-scroll">
+        <table class="program-table matrix-table">
+            <thead><tr><th class="mx-corner">Program</th>${headCells}</tr></thead>
+            <tbody>${bodyRows.join('')}</tbody>
+        </table>
+        </div>`;
+}
+
+function _syncLayoutButtons() {
+    document.querySelectorAll('.portfolio-layout-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.layout === portfolioLayout);
+    });
+}
+
 function renderPortfolioTable() {
+    _syncLayoutButtons();
+    if (portfolioLayout === 'matrix') return renderPortfolioMatrix();
     const container = document.getElementById('programs-table-container');
     if (!container) return;
 
