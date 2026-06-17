@@ -4773,6 +4773,53 @@ function _savePortfolioColWidths() {
     catch (e) {}
 }
 
+// Matrix column widths, keyed by 'prog' | 'college' | 'c:<Campus>'.
+let matrixColWidths = (() => {
+    try { const s = localStorage.getItem('cim-matrix-col-widths'); const o = s ? JSON.parse(s) : {};
+          return (o && typeof o === 'object') ? o : {}; } catch (_) { return {}; }
+})();
+function _saveMatrixColWidths() {
+    try { localStorage.setItem('cim-matrix-col-widths', JSON.stringify(matrixColWidths)); } catch (_) {}
+}
+
+// Resize a matrix column via its header's drag handle. Adjusts the matching
+// <col> width and grows/shrinks the table by the same delta so the other
+// columns keep their widths (table-layout: fixed). For the two sticky columns
+// it also updates the CSS vars that drive the sticky `left` offsets.
+function startMatrixColResize(e, key) {
+    e.stopPropagation();
+    e.preventDefault();
+    const th = e.target.closest('th');
+    const table = e.target.closest('table');
+    if (!th || !table) return;
+    const col = table.querySelector(`col[data-mxcol="${(window.CSS && CSS.escape) ? CSS.escape(key) : key}"]`);
+    const startX = e.clientX;
+    const startW = th.getBoundingClientRect().width;
+    const startTableW = table.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const apply = (ev) => {
+        const newW = Math.max(40, Math.round(startW + (ev.clientX - startX)));
+        if (col) col.style.width = newW + 'px';
+        table.style.width = (startTableW + (newW - startW)) + 'px';
+        if (key === 'prog') table.style.setProperty('--mx-prog-w', newW + 'px');
+        if (key === 'college') table.style.setProperty('--mx-college-w', newW + 'px');
+        return newW;
+    };
+    const onMove = (ev) => apply(ev);
+    const onUp = (ev) => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        matrixColWidths[key] = apply(ev);
+        _saveMatrixColWidths();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+}
+if (typeof window !== 'undefined') window.startMatrixColResize = startMatrixColResize;
+
 // Mouse-drag column resizer. Called from the inline onmousedown on each
 // header's <span class="col-resize"> handle. The handle's stopPropagation
 // prevents the click from also firing the header's sort handler.
@@ -6367,8 +6414,19 @@ function renderPortfolioMatrix() {
         return;
     }
 
+    const _mxHandle = (key) =>
+        `<span class="col-resize" onmousedown="startMatrixColResize(event,'${key}')" onclick="event.stopPropagation()"></span>`;
+    const progW = matrixColWidths.prog || 260;
+    const collegeW = matrixColWidths.college || 64;
+    const campusW = c => matrixColWidths['c:' + c] || 100;
+    const totalW = progW + collegeW + campuses.reduce((s, c) => s + campusW(c), 0);
+    const colGroup = '<colgroup>'
+        + `<col data-mxcol="prog" style="width:${progW}px">`
+        + `<col data-mxcol="college" style="width:${collegeW}px">`
+        + campuses.map(c => `<col data-mxcol="c:${escapeHtml(c)}" style="width:${campusW(c)}px">`).join('')
+        + '</colgroup>';
     const headCells = campuses.map(c =>
-        `<th class="mx-campus-col">${escapeHtml(abbreviateCampus(c))}</th>`).join('');
+        `<th class="mx-campus-col">${escapeHtml(abbreviateCampus(c))}${_mxHandle('c:' + escapeHtml(c).replace(/'/g, "\\'"))}</th>`).join('');
     const _collegeCell = (col) => col
         ? `<td class="mx-college-cell" title="${escapeHtml(col)}">${escapeHtml(abbreviateCollege(col))}</td>`
         : '<td class="mx-college-cell"></td>';
@@ -6406,8 +6464,13 @@ function renderPortfolioMatrix() {
 
     container.innerHTML = `
         <div class="mx-scroll">
-        <table class="program-table matrix-table">
-            <thead><tr><th class="mx-corner">Program</th><th class="mx-corner2">College</th>${headCells}</tr></thead>
+        <table class="program-table matrix-table" style="table-layout:fixed; width:${totalW}px; --mx-prog-w:${progW}px; --mx-college-w:${collegeW}px">
+            ${colGroup}
+            <thead><tr>
+                <th class="mx-corner">Program${_mxHandle('prog')}</th>
+                <th class="mx-corner2">College${_mxHandle('college')}</th>
+                ${headCells}
+            </tr></thead>
             <tbody>${bodyRows.join('')}</tbody>
         </table>
         </div>`;

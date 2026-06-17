@@ -2230,32 +2230,35 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .portfolio-layout-btn + .portfolio-layout-btn { border-left: 1px solid var(--border); }
 .portfolio-layout-btn.active { background: #eff6ff; color: var(--accent); }
 
-/* Portfolio Matrix (program × campus grid) */
+/* Portfolio Matrix (program × campus grid) — widths come from <colgroup>
+   (resizable via the header handles); table-layout:fixed is set inline. */
 .mx-scroll { overflow-x: auto; }
-table.matrix-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+table.matrix-table { border-collapse: separate; border-spacing: 0; }
 table.matrix-table th, table.matrix-table td {
     border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
     padding: 6px 10px; font-size: 12px; vertical-align: top;
+    overflow: hidden; overflow-wrap: anywhere;
 }
 table.matrix-table thead th {
     position: sticky; top: 0; z-index: 2; background: #f8fafc;
     font-weight: 700; color: var(--text-secondary); white-space: nowrap;
 }
+table.matrix-table th { position: relative; }
 .mx-corner, .mx-rowhead {
     position: sticky; left: 0; z-index: 1; background: #fff; text-align: left;
-    width: 260px; min-width: 260px; max-width: 260px; font-weight: 600;
+    font-weight: 600;
 }
 .mx-corner { z-index: 3; background: #f8fafc; }
-/* Second sticky column: college acronym, pinned just right of the program name. */
+/* Second sticky column: college acronym, pinned just right of the program name.
+   Its `left` tracks the (resizable) program-column width via the CSS var. */
 .mx-corner2, .mx-college-cell {
-    position: sticky; left: 260px; z-index: 1; background: #fff;
-    width: 64px; min-width: 64px; max-width: 64px; text-align: center;
-    border-right: 2px solid var(--border);
+    position: sticky; left: var(--mx-prog-w, 260px); z-index: 1; background: #fff;
+    text-align: center; border-right: 2px solid var(--border);
 }
 .mx-corner2 { z-index: 3; background: #f8fafc; }
 .mx-college-cell { font-weight: 600; color: #475569; font-size: 11px; }
 .mx-conc-row .mx-college-cell { font-weight: 400; background: #fcfcfd; }
-.mx-campus-col { text-align: center; min-width: 92px; }
+.mx-campus-col { text-align: center; }
 .mx-clickable { cursor: pointer; }
 .mx-clickable:hover { background: #f8fafc; }
 .mx-caret { display: inline-block; width: 14px; color: var(--text-secondary); }
