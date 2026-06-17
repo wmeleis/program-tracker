@@ -2141,7 +2141,7 @@ async function renderRefsList() {
                 </div>
             </div>
             <div class="refs-list-item-actions">
-                <button class="refs-list-item-download" onclick="downloadCustomRef(${r.id})">Download .docx</button>
+                <button class="refs-list-item-download" onclick="downloadCustomRef(${r.id})">Download</button>
                 <button class="refs-list-item-delete" onclick="deleteCustomRef(${r.id}, '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Delete</button>
             </div>
         </div>`;
