@@ -132,7 +132,7 @@
         </div>
       </div>
       <div class="portfolio-filter-block portfolio-filter-block-2">
-        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <div class="pf-cim-row" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
             <span class="portfolio-btn-row-label">CIM:</span>
             <button class="portfolio-incim-btn" data-incim="Yes" onclick="setPortfolioInCim(this,'Yes')"><span class="info-tip-wrap">In CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Program exists in CourseLeaf CIM — active in workflow or already approved/historical.</span></span></span></button>
             <button class="portfolio-incim-btn" data-incim="No"  onclick="setPortfolioInCim(this,'No')"><span class="info-tip-wrap">Not in CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Portfolio entry has no CIM record — appears only in external feeds (SVT, IPD, OTP).</span></span></span></button>
@@ -145,7 +145,7 @@
         <!-- Portfolio search is the header #filter-search; applyFilters()
              routes it through setPortfolioSearch() on Portfolio view. No
              separate Portfolio search input here. -->
-        <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group" id="pf-admit-break" style="flex-basis:100%; margin:0; padding:0"></div>
         <div class="filter-group">
             <label>Admitting Today:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Whether the program is currently admitting students. Yes = active, no inactivation in progress. No = inactivation underway or complete.</span></span></label>
             <div class="filter-select-wrap">

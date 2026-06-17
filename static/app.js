@@ -6503,6 +6503,11 @@ function _syncLayoutButtons() {
     });
     const statusBreak = document.getElementById('pf-status-break');
     if (statusBreak) statusBreak.style.display = matrix ? 'none' : '';
+
+    // Matrix mode: collapse the CIM buttons + Admitting Today onto one compact
+    // row (CSS keys off this class) instead of the table layout's stacked rows.
+    const filterSection = document.getElementById('portfolio-filters');
+    if (filterSection) filterSection.classList.toggle('matrix-mode', matrix);
 }
 
 function renderPortfolioTable() {

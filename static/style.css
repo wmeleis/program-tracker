@@ -2230,6 +2230,12 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .portfolio-layout-btn + .portfolio-layout-btn { border-left: 1px solid var(--border); }
 .portfolio-layout-btn.active { background: #eff6ff; color: var(--accent); }
 
+/* Matrix mode: flow the CIM buttons + Admitting Today onto one compact row
+   (in Table mode the CIM buttons occupy their own full-width row). */
+.portfolio-filters-section.matrix-mode .pf-cim-row { flex-basis: auto !important; }
+.portfolio-filters-section.matrix-mode #pf-admit-break { display: none !important; }
+.portfolio-filters-section.matrix-mode .portfolio-filter-block-2 { gap: 8px 16px; align-items: center; }
+
 /* Portfolio Matrix (program × campus grid) — widths come from <colgroup>
    (resizable via the header handles); table-layout:fixed is set inline. */
 .mx-scroll { overflow-x: auto; }
