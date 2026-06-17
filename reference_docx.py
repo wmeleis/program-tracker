@@ -18,11 +18,31 @@ The output is intentionally uniform across references regardless of how
 messy the original upload was — that's the "standard, organized format".
 """
 
+import re
 from io import BytesIO
 
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+# CourseLeaf wrapper headings that carry no real meaning — they label the whole
+# curriculum block, not a distinct section, and the source docs repeat them.
+# Dropped from the output (the courses underneath still render).
+_BOILERPLATE_HEADINGS = {
+    'catalog presentation of this program',
+}
+
+
+def _norm_heading(h):
+    return re.sub(r'\s+', ' ', (h or '').replace('\xa0', ' ')).strip()
+
+
+def _course_sig(courses):
+    """Signature of a section's course rows (code+title), for de-duplication."""
+    return tuple(
+        ((c.get('code') or '').strip().lower(), (c.get('title') or '').strip().lower())
+        for c in (courses or []) if not c.get('is_header')
+    )
 
 
 def _set_cell_text(cell, text, bold=False):
@@ -53,10 +73,29 @@ def build_reference_docx(name, sections, notes='', title=''):
         run.font.size = Pt(10)
         run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
 
+    seen_sigs = set()        # (heading_lower, course_sig) already rendered → drop exact dups
+    prev_heading_lower = None  # suppress a heading that just repeats the one above
     for section in (sections or []):
-        sec_heading = (section.get('heading') or '').strip()
+        sec_heading = _norm_heading(section.get('heading'))
         courses = section.get('courses') or []
-        if sec_heading:
+        heading_lower = sec_heading.lower()
+        sig = _course_sig(courses)
+
+        # Drop a section that exactly repeats an earlier one (same heading +
+        # identical course list) — e.g. CGT's duplicated "Program Credit/GPA
+        # Requirements" modality tables.
+        if (heading_lower, sig) in seen_sigs and sig:
+            continue
+        seen_sigs.add((heading_lower, sig))
+
+        # Show the heading unless it's boilerplate or it just repeats the
+        # heading immediately above (a near-duplicate variant of the same
+        # section). The courses still render either way.
+        show_heading = bool(sec_heading) \
+            and heading_lower not in _BOILERPLATE_HEADINGS \
+            and heading_lower != prev_heading_lower
+        prev_heading_lower = heading_lower
+        if show_heading:
             doc.add_heading(sec_heading, level=2)
         if not courses:
             continue
