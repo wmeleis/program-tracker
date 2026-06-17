@@ -283,6 +283,47 @@ def _strip_campus_metadata_rows(sections):
     return sections
 
 
+# Editorial / campus-availability noise that CourseLeaf umbrella docs sprinkle
+# into the curriculum — NOT course content or meaningful structure. Kept
+# deliberately narrow so real instructions ("Complete one of the following",
+# "Option A …", "In consultation with advisor …") are preserved.
+_NOISE_TEXT_RES = [
+    re.compile(r'campus[-\s]*specific curriculum page', re.I),
+    re.compile(r'not all .*available on each campus', re.I),
+    re.compile(r'directly from the .*catalog', re.I),
+    re.compile(r'drafted by legal', re.I),
+    re.compile(r'^list any required courses that fulfill', re.I),
+]
+_CAMPUS_LABEL_RE = re.compile(
+    r'^(toronto|boston|oakland|portland|online|vancouver|seattle|miami|'
+    r'arlington|silicon valley|charlotte)$', re.I)
+
+
+def _is_noise_text(text):
+    t = (text or '').strip()
+    if not t:
+        return False
+    if _CAMPUS_LABEL_RE.match(t):
+        return True
+    return any(rx.search(t) for rx in _NOISE_TEXT_RES)
+
+
+def _strip_noise_rows(sections):
+    """Drop editorial/campus-availability notes and stray campus labels.
+
+    A noise section heading is blanked (its course table still renders, just
+    without the note as a heading); noise header rows are removed outright.
+    """
+    for sec in sections:
+        if _is_noise_text(sec.get('heading', '')):
+            sec['heading'] = ''
+        sec['courses'] = [
+            r for r in sec['courses']
+            if not (r.get('is_header') and _is_noise_text(r.get('text', '')))
+        ]
+    return sections
+
+
 def _extract_options_abc_from_core(sections):
     """Find the 'Complete one of the following ... options' block in the
     Core Requirements section and return its rows (the Option A/B/C headers
@@ -464,6 +505,7 @@ def _build_sections(body):
             emit_table(child, modality=mod)
 
     sections = _strip_campus_metadata_rows(sections)
+    sections = _strip_noise_rows(sections)
     sections = _promote_program_pathway_section(sections)
     return sections
 
