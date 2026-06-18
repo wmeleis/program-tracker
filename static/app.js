@@ -3507,7 +3507,12 @@ function _codePresent(codeStr, discreteSet, ranges) {
     if (m && ranges) {
         const pre = m[1], n = +m[2];
         for (const r of ranges) {
-            if ((r.prefix || '').toLowerCase() === pre && n >= r.range[0] && n <= r.range[1]) return true;
+            if ((r.prefix || '').toLowerCase() === pre && n >= r.range[0] && n <= r.range[1]) {
+                // A subject wildcard covers this code unless it's an explicit exception.
+                const excluded = (r.exclusions || []).some(
+                    ex => normForCompare((ex || '').replace(/\s+/g, ' ')) === c);
+                if (!excluded) return true;
+            }
         }
     }
     return false;
@@ -3538,16 +3543,20 @@ function renderCourseCell(item, cls, otherItem, mySide, oppositeAll, oppositeRan
     const isAlt = /^(or|and)\s+/i.test(item.code || '');
     const codeCls = isAlt ? `${cls} cmp-code cmp-alt` : `${cls} cmp-code`;
 
+    // A subject-wildcard entry ("Any CSYE course") is a match-anything
+    // placeholder, not a specific course — render it neutral, never red/green.
+    const isWild = !!item.subjectWildcard;
+
     // Render the primary + any alternatives in the same cell so they can never
     // be visually separated by the LCS diff layout. Each code (primary + each
     // alt) is colored independently by its own presence on the opposite side.
-    const p = pcls(item.code);
+    const p = isWild ? '' : pcls(item.code);
     let codeHtml = `<span class="${p}">${escapeHtml(item.code)}</span>`;
     let titleHtml = `<span class="${p}">${escapeHtml(titleWithHours)}</span>`;
     if (item.alts && item.alts.length) {
         for (const a of item.alts) {
             const altTitleWithHours = a.hours ? `${a.title} (${a.hours}SH)` : a.title;
-            const ap = pcls(a.code);
+            const ap = isWild ? '' : pcls(a.code);
             codeHtml += `<div class="cmp-alt-line ${ap}">${escapeHtml(a.code)}</div>`;
             titleHtml += `<div class="cmp-alt-line ${ap}">${escapeHtml(altTitleWithHours)}</div>`;
         }
@@ -3566,8 +3575,16 @@ function renderSideBySide(diff, leftLabel, rightLabel) {
     const collect = (set, ranges, item) => {
         if (!item || item.isHeader) return;
         const norm = c => normForCompare((c || '').replace(/^(or|and)\s+/i, ''));
-        if (item.subjectWildcard && item.subjectWildcard.range) {
-            ranges.push({prefix: item.subjectWildcard.prefix, range: item.subjectWildcard.range});
+        if (item.subjectWildcard) {
+            // Range wildcards ("Any INFO course 5000–7999") carry an explicit
+            // range; OPEN wildcards ("Any CSYE course") cover the whole subject,
+            // so treat them as [0, 9999] and carry the exclusions so an excepted
+            // course (e.g. "except CSYE 6220") still flags if present.
+            ranges.push({
+                prefix: item.subjectWildcard.prefix,
+                range: item.subjectWildcard.range || [0, 9999],
+                exclusions: item.subjectWildcard.exclusions || [],
+            });
         }
         if (item.code) set.add(norm(item.code));
         for (const a of (item.alts || [])) set.add(norm(a.code));
