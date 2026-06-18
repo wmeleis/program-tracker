@@ -2250,6 +2250,8 @@ table.matrix-table thead th {
     font-weight: 700; color: var(--text-secondary); white-space: nowrap;
 }
 table.matrix-table th { position: relative; }
+table.matrix-table th.mx-sortable { cursor: pointer; user-select: none; }
+table.matrix-table th.mx-sortable:hover { background: #eef2f7; }
 .mx-corner, .mx-rowhead {
     position: sticky; left: 0; z-index: 1; background: #fff; text-align: left;
     font-weight: 600;

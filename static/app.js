@@ -4775,6 +4775,16 @@ function togglePortfolioMatrixRow(baseKey) {
     renderPortfolioMatrix();
 }
 
+// Matrix row sorting. Key is 'name', 'college', or 'c:<Campus>' (sort programs
+// by their status in that campus column). Clicking the active header flips dir.
+let matrixSortKey = 'name';
+let matrixSortDir = 1;
+function sortPortfolioMatrix(key) {
+    if (matrixSortKey === key) matrixSortDir = -matrixSortDir;
+    else { matrixSortKey = key; matrixSortDir = 1; }
+    renderPortfolioMatrix();
+}
+
 // Per-column width overrides for the Portfolio table — {colKey: widthPx}.
 // Persisted to localStorage so user-resized columns survive reloads.
 function _loadPortfolioColWidths() {
@@ -6420,7 +6430,25 @@ function renderPortfolioMatrix() {
         return a.localeCompare(b);
     });
 
-    const baseNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    // Sort value per program for the active column. Campus columns sort by the
+    // deployment's status there (offered-with-stage first, not-offered last).
+    const _mxSortVal = (g) => {
+        if (matrixSortKey === 'college') return (g.college || '').toLowerCase();
+        if (matrixSortKey.indexOf('c:') === 0) {
+            const dep = g.deployments[matrixSortKey.slice(2)];
+            if (!dep) return '￿';                       // not offered → last
+            if (dep.cim_completion_date) return '1_approved';
+            if (dep.cim_step) return '0_' + _matrixStageLabel(dep.cim_step).toLowerCase();
+            return '2_' + ((dep.svt_status || dep.gtm_type || '')).toLowerCase();
+        }
+        return (g.name || '').toLowerCase();               // 'name'
+    };
+    const baseNames = Object.keys(groups).sort((a, b) => {
+        const va = _mxSortVal(groups[a]), vb = _mxSortVal(groups[b]);
+        if (va < vb) return -matrixSortDir;
+        if (va > vb) return matrixSortDir;
+        return groups[a].name.localeCompare(groups[b].name);  // stable tiebreak
+    });
 
     const countEl = document.getElementById('portfolio-result-count');
     if (countEl) countEl.textContent =
@@ -6442,8 +6470,11 @@ function renderPortfolioMatrix() {
         + `<col data-mxcol="college" style="width:${collegeW}px">`
         + campuses.map(c => `<col data-mxcol="c:${escapeHtml(c)}" style="width:${campusW(c)}px">`).join('')
         + '</colgroup>';
-    const headCells = campuses.map(c =>
-        `<th class="mx-campus-col">${escapeHtml(abbreviateCampus(c))}${_mxHandle('c:' + escapeHtml(c).replace(/'/g, "\\'"))}</th>`).join('');
+    const _mxArrow = (k) => matrixSortKey === k ? (matrixSortDir === 1 ? ' ▲' : ' ▼') : '';
+    const headCells = campuses.map(c => {
+        const ck = 'c:' + escapeHtml(c).replace(/'/g, "\\'");
+        return `<th class="mx-campus-col mx-sortable" onclick="sortPortfolioMatrix('${ck}')">${escapeHtml(abbreviateCampus(c))}${_mxArrow('c:' + c)}${_mxHandle(ck)}</th>`;
+    }).join('');
     const _collegeCell = (col) => col
         ? `<td class="mx-college-cell" title="${escapeHtml(col)}">${escapeHtml(abbreviateCollege(col))}</td>`
         : '<td class="mx-college-cell"></td>';
@@ -6484,8 +6515,8 @@ function renderPortfolioMatrix() {
         <table class="program-table matrix-table" style="table-layout:fixed; width:${totalW}px; --mx-prog-w:${progW}px; --mx-college-w:${collegeW}px">
             ${colGroup}
             <thead><tr>
-                <th class="mx-corner">Program${_mxHandle('prog')}</th>
-                <th class="mx-corner2">College${_mxHandle('college')}</th>
+                <th class="mx-corner mx-sortable" onclick="sortPortfolioMatrix('name')">Program${_mxArrow('name')}${_mxHandle('prog')}</th>
+                <th class="mx-corner2 mx-sortable" onclick="sortPortfolioMatrix('college')">College${_mxArrow('college')}${_mxHandle('college')}</th>
                 ${headCells}
             </tr></thead>
             <tbody>${bodyRows.join('')}</tbody>
