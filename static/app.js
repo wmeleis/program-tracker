@@ -298,9 +298,6 @@ function switchView(view) {
     // Update proposal button labels for Programs vs Courses
     const newBtn = document.getElementById('btn-proposal-new');
     if (newBtn) newBtn.textContent = view === 'courses' ? 'New Courses' : 'New Programs';
-    // Continuing only applies to courses
-    const contBtn = document.getElementById('btn-type-continuing');
-    if (contBtn) contBtn.style.display = view === 'courses' ? 'inline-block' : 'none';
     // Update search placeholder. Wildcards: * matches any characters, ? matches one.
     const searchEl = document.getElementById('filter-search');
     if (searchEl) {
@@ -1401,10 +1398,22 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
             if (col === cimCollegeSelected && detector(step) && step.indexOf(pre) === 0) universe.add(step);
         });
     }
-    const roles = [...universe].sort((a, b) => {
+    let roles = [...universe].sort((a, b) => {
         const ra = collegeRoleRank(a), rb = collegeRoleRank(b);
         return ra !== rb ? ra - rb : a.localeCompare(b);
     });
+    // Graduate / Undergraduate switch prunes role tiles by the level token in
+    // the role name; level-agnostic roles (dept chairs, Accreditor, Continuing-
+    // Ed) stay visible under either level. (\bGraduate\b doesn't match
+    // "Undergraduate", so the two are cleanly distinguished.)
+    if (typeFilter === 'Graduate' || typeFilter === 'Undergraduate') {
+        roles = roles.filter(r => {
+            const isUg = /\bUndergraduate\b/i.test(r);
+            const isGrad = /\bGraduate\b/i.test(r) && !isUg;
+            if (!isGrad && !isUg) return true;                  // agnostic → keep
+            return typeFilter === 'Graduate' ? isGrad : isUg;
+        });
+    }
     let html = roles.map(role => {
         const cnt = roleCounts[role] || 0;
         const active = pipelineFilter === role ? ' active' : '';
