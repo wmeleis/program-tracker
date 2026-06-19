@@ -1376,13 +1376,23 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     const raw = baseFiltered || (isCourseView ? allCourses : allPrograms);
     const source = (raw || []).filter(p => p.college === cimCollegeSelected);
     const detector = _cimCollegeDetector();
+    const code = _COLLEGE_CODE[cimCollegeSelected];
+    // A step belongs to ANOTHER college if it carries a different college's code
+    // prefix (e.g. "Program AM …" under Bouvé = CAMD's, via a cross-listed
+    // program). Those don't belong on this college's bar — bucket them with the
+    // trailing "not at one of our steps" tile. Un-prefixed dept chairs (ARTD,
+    // PHSC, …) and this college's own prefix stay.
+    const _foreign = step => {
+        const m = step.match(/^Program (AM|BA|BV|CS|EN|LW|MI|PS|SC|SH) /);
+        return code && m && m[1] !== code;
+    };
     const roleCounts = {};
     let downstream = 0;
     source.forEach(p => {
         const step = p.current_step;
         if (!step) return;                       // not in workflow
-        if (detector(step)) roleCounts[step] = (roleCounts[step] || 0) + 1;
-        else downstream += 1;                    // past the college
+        if (detector(step) && !_foreign(step)) roleCounts[step] = (roleCounts[step] || 0) + 1;
+        else downstream += 1;                    // past the college, or at another college
     });
     // Tile SET = roles a program is CURRENTLY at (any role, real position) PLUS
     // this college's own roles from the workflow definitions so the sequence
@@ -1392,7 +1402,6 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     // carrying THIS college's code prefix (e.g. "Program BV …"). Currently-
     // occupied roles are always kept since they're the program's real position.
     const universe = new Set(Object.keys(roleCounts));
-    const code = _COLLEGE_CODE[cimCollegeSelected];
     if (cimRolePairs && code) {
         const pre = 'Program ' + code + ' ';
         const pairs = (isCourseView ? cimRolePairs.courses : cimRolePairs.programs) || [];
