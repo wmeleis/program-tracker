@@ -651,6 +651,27 @@ function isCollegeStep(step) {
     return step.match(/^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )/);
 }
 
+// College-PERSPECTIVE detector (programs). Unlike isCollegeStep's prefix
+// allowlist (which omits BV, LW, MI, …), this is the complement: since the
+// College perspective is already scoped to one college, ANY step that isn't a
+// university-pipeline stage (Provost/Setup/Senate/Trustees/Registrar/…) is one
+// of that college's own internal roles — regardless of its prefix. This auto-
+// captures every college's roles with no hardcoded list to maintain.
+function isCollegeInternalStep(step) {
+    if (!step) return false;
+    if (PIPELINE_STEPS.has(canonicalStep(step))) return false;   // OTP/university stage
+    if (/\b(Provost|Registrar|Global Launch|Faculty Senate|Board of Trustees)\b/i.test(step)) return false;
+    return true;
+}
+// Pick the right "is this a college-internal step" detector for the current
+// perspective + view. OTP keeps the historical isCollegeStep (drives the
+// virtual College tile); College perspective uses the complement above.
+function _cimCollegeDetector() {
+    const isCourse = currentView === 'courses';
+    if (cimPerspective === 'college') return isCourse ? isCourseCollegeStep : isCollegeInternalStep;
+    return isCourse ? isCourseCollegeStep : isCollegeStep;
+}
+
 // Course pipeline steps (centralized, non-college course workflow roles)
 const COURSE_PIPELINE_STEPS = new Set([
     "Checkpoint",
@@ -1099,7 +1120,7 @@ function updateProgramKindCounts() {
     if (pipelineFilter) {
         baseExclKind = baseExclKind.filter(p => {
             if (pipelineFilter === '__college__') return isCollegeStep(p.current_step);
-            if (pipelineFilter === '__downstream__') return !!p.current_step && !isCollegeStep(p.current_step);
+            if (pipelineFilter === '__downstream__') { const d = _cimCollegeDetector(); return !!p.current_step && !d(p.current_step); }
             if (pipelineFilter === '__complete__') return !!p.completion_date;
             return canonicalStep(p.current_step) === pipelineFilter;
         });
@@ -1320,7 +1341,7 @@ function renderPipeline(pipeline, baseFiltered) {
 function renderCollegePipeline(baseFiltered, isCourseView) {
     const bar = document.getElementById('pipeline-bar');
     const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
-    const detector = isCourseView ? isCourseCollegeStep : isCollegeStep;
+    const detector = _cimCollegeDetector();
     const roleCounts = {};
     let downstream = 0;
     source.forEach(p => {
@@ -1564,7 +1585,7 @@ async function applyFilters() {
     // the College tile, the dropdown counts include programs at non-college steps and
     // disagree with the rendered table.
     const collegeBase = getBaseFiltered(approverProgramIds, {college: true});
-    const collegeDetectorForCounts = currentView === 'courses' ? isCourseCollegeStep : isCollegeStep;
+    const collegeDetectorForCounts = _cimCollegeDetector();
     const collegeBaseAfterPipeline = pipelineFilter ? collegeBase.filter(p => {
         if (pipelineFilter === '__college__') return collegeDetectorForCounts(p.current_step);
         if (pipelineFilter === '__downstream__') return !!p.current_step && !collegeDetectorForCounts(p.current_step);
@@ -1598,7 +1619,7 @@ async function applyFilters() {
     updateProgramKindCounts();
 
     // Now apply pipeline filter for the table (college already applied in baseFiltered)
-    const collegeDetector = currentView === 'courses' ? isCourseCollegeStep : isCollegeStep;
+    const collegeDetector = _cimCollegeDetector();
     const isCoursesView = currentView === 'courses';
     const bucketDef = isCoursesView && pipelineFilter
         ? COURSE_BUCKETS.find(b => b.role === pipelineFilter)
