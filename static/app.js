@@ -1405,13 +1405,16 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     // Graduate / Undergraduate switch prunes role tiles by the level token in
     // the role name; level-agnostic roles (dept chairs, Accreditor, Continuing-
     // Ed) stay visible under either level. (\bGraduate\b doesn't match
-    // "Undergraduate", so the two are cleanly distinguished.)
-    if (typeFilter === 'Graduate' || typeFilter === 'Undergraduate') {
+    // "Undergraduate", so the two are cleanly distinguished.) typeFilter is a
+    // Set (multi-select); only prune when exactly one of Grad/UG is selected.
+    const wantGrad = typeFilter.has('Graduate');
+    const wantUg = typeFilter.has('Undergraduate');
+    if (wantGrad !== wantUg) {
         roles = roles.filter(r => {
             const isUg = /\bUndergraduate\b/i.test(r);
             const isGrad = /\bGraduate\b/i.test(r) && !isUg;
             if (!isGrad && !isUg) return true;                  // agnostic → keep
-            return typeFilter === 'Graduate' ? isGrad : isUg;
+            return wantGrad ? isGrad : isUg;
         });
     }
     let html = roles.map(role => {
