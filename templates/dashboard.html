@@ -253,7 +253,13 @@
 
     <!-- Pipeline Summary -->
     <section id="pipeline" class="pipeline-section">
-        <h2>Pipeline Summary</h2>
+        <div class="pipeline-header-row">
+            <h2>Pipeline Summary</h2>
+            <span id="pipeline-panel-toggle" class="panel-toggle" style="display:none">
+                <button class="panel-toggle-btn" data-panel="college" onclick="setCollegePanel('college')">College steps</button>
+                <button class="panel-toggle-btn" data-panel="downstream" onclick="setCollegePanel('downstream')">University pipeline ▸</button>
+            </span>
+        </div>
         <div id="pipeline-bar" class="pipeline-bar">
             <!-- Populated by JS -->
         </div>

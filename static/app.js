@@ -1320,6 +1320,9 @@ function renderPipeline(pipeline, baseFiltered) {
         if (cBtn) { cBtn.classList.toggle('active-complete', pipelineFilter === '__complete__'); cBtn.style.display = ''; }
         return;
     }
+    // Central perspective: no panel toggle.
+    const _tog = document.getElementById('pipeline-panel-toggle');
+    if (_tog) _tog.style.display = 'none';
     // Add College Review as the first step in the pipeline
     const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
     const detector = isCourseView ? isCourseCollegeStep : isCollegeStep;
@@ -1462,16 +1465,20 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
         return source.filter(p => p.current_step && canonicalStep(p.current_step) === role).length;
     };
     const downHtml = stages.map(st => tile(st.role, st.short_name, stageCount(st.role))).join('');
-    // The two panels swap via an arrow at the end of the bar (slides college
-    // steps out, post-college stages in — and back). collegePanel holds which
-    // is showing; renderCollegePipeline is re-run on toggle (args stashed).
+    // The two panels swap via the toggle next to the "Pipeline Summary" heading
+    // (always on-screen, unlike an arrow at the end of a scrollable bar).
+    // collegePanel holds which is showing; renderCollegePipeline is re-run on
+    // toggle (args stashed). The bar still slide-animates on each swap.
     _collegePipeArgs = { baseFiltered: raw, isCourseView };
-    const fwd = '<div class="pipeline-arrow" title="Show post-college stages →" onclick="setCollegePanel(\'downstream\')">▸</div>';
-    const back = '<div class="pipeline-arrow" title="← Back to college steps" onclick="setCollegePanel(\'college\')">◂</div>';
-    bar.innerHTML = (collegePanel === 'downstream')
-        ? (back + downHtml)
-        : (collegeHtml + fwd);
+    bar.innerHTML = (collegePanel === 'downstream') ? downHtml : collegeHtml;
     bar.classList.remove('pipe-slide-in'); void bar.offsetWidth; bar.classList.add('pipe-slide-in');
+    // Show + sync the header panel toggle (college perspective only).
+    const tog = document.getElementById('pipeline-panel-toggle');
+    if (tog) {
+        tog.style.display = '';
+        tog.querySelectorAll('.panel-toggle-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.panel === collegePanel));
+    }
 }
 
 function setCimPerspective(mode) {
@@ -1516,6 +1523,11 @@ function syncPerspectiveUI() {
     const cf = document.getElementById('filter-college');
     const cfGroup = cf && cf.closest('.filter-group');
     if (cfGroup) cfGroup.style.display = (cimPerspective === 'college' && onCimView) ? 'none' : '';
+    // The panel toggle only applies in College perspective on a CIM view; hide
+    // it elsewhere (renderPipeline also hides it on the Central path, but
+    // catalog/portfolio don't call renderPipeline at all).
+    const tog = document.getElementById('pipeline-panel-toggle');
+    if (tog && !(cimPerspective === 'college' && onCimView)) tog.style.display = 'none';
 }
 
 function populateCampusFilter() {
