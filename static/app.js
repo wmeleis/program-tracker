@@ -61,6 +61,7 @@ function _saveCimPerspective() {
 // generic "Chair" so committee-chair roles don't rank as plain chairs.
 function collegeRoleRank(step) {
     const s = step || '';
+    if (/Checkpoint/i.test(s)) return 0;   // earliest course step; shown in both panels
     if (/Program Director/i.test(s)) return 1;
     if (/Program Review/i.test(s)) return 3;
     if (/Curriculum Committee/i.test(s)) return 4;
@@ -1405,6 +1406,10 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
         if (!step) return;                       // not in workflow
         if (detector(step) && !_foreign(step)) roleCounts[step] = (roleCounts[step] || 0) + 1;
         else downstream += 1;                    // past the college, or at another college
+        // Checkpoint is shown in BOTH panels: the detector excludes it (it's a
+        // COURSE_BUCKET, so it lives in the university panel), but we also give
+        // it a tile in the college panel since it's the earliest course step.
+        if (isCourseView && step === 'Checkpoint') roleCounts['Checkpoint'] = (roleCounts['Checkpoint'] || 0) + 1;
     });
     // Tile SET = roles a program is CURRENTLY at (any role, real position) PLUS
     // this college's own roles from the workflow definitions so the sequence
