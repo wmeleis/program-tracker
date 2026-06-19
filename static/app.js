@@ -1451,14 +1451,19 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
         }
         return source.filter(p => p.current_step && canonicalStep(p.current_step) === role).length;
     };
-    if (stages.length) {
+    // Only show downstream stages that actually have programs from this college
+    // (in OTP-pipeline order), so the bar stays compact — the empty university
+    // stages aren't relevant to the AD, unlike the college's own sequence.
+    const dsTiles = stages
+        .map(st => ({ st, cnt: stageCount(st.role) }))
+        .filter(x => x.cnt > 0);
+    if (dsTiles.length) {
         html += '<div class="pipeline-divider" title="University pipeline (after the college)">→</div>';
-        html += stages.map(st => {
-            const cnt = stageCount(st.role);
+        html += dsTiles.map(({ st, cnt }) => {
             const active = pipelineFilter === st.role ? ' active' : '';
             const roleArg = st.role.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             return `
-                <div class="pipeline-step ${cnt > 0 ? 'has-items' : 'empty'}${active}"
+                <div class="pipeline-step has-items${active}"
                      onclick="togglePipelineFilter('${roleArg}')"
                      title="${escapeHtml(st.role)}: ${cnt}">
                     <span class="step-count">${cnt}</span>
