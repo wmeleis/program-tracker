@@ -235,9 +235,9 @@
     <!-- CIM scoping controls (chosen first, above the pipeline/buttons) -->
     <section id="cim-scope-bar" class="filters-section scope-bar">
         <div class="filter-group" id="perspective-filter-group">
-            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">OTP = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles.</span></span></label>
+            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Central = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles.</span></span></label>
             <div id="perspective-bar" class="perspective-bar">
-                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">OTP</button>
+                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">Central</button>
                 <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
                 <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
             </div>
