@@ -215,8 +215,10 @@ function switchView(view) {
     if (subjectSel) subjectSel.value = '';
 
     // Hide/show sections based on view
-    const typeSection = document.querySelector('.view-group');
-    const proposalSection = document.querySelectorAll('.view-group')[1];
+    // The Level switch moved into the filter bar, so smart-views-section now
+    // holds only the proposal buttons (one .view-group). Both refs point to it.
+    const typeSection = document.querySelector('.smart-views-section .view-group');
+    const proposalSection = typeSection;
     const campusFilter = document.getElementById('filter-campus');
 
     const subjectGroup = document.getElementById('filter-group-subject');
@@ -1465,8 +1467,11 @@ function populatePerspectiveCollege() {
 }
 function syncPerspectiveUI() {
     const onCimView = currentView === 'programs' || currentView === 'courses';
-    const grp = document.getElementById('perspective-filter-group');
-    if (grp) grp.style.display = onCimView ? '' : 'none';
+    // Perspective, Level, and the row-break are CIM-only scoping controls.
+    ['perspective-filter-group', 'level-filter-group', 'scoping-row-break'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = onCimView ? '' : 'none';
+    });
     document.querySelectorAll('.perspective-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.persp === cimPerspective));
     const sel = document.getElementById('perspective-college');
