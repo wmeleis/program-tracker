@@ -863,11 +863,14 @@ async function loadDashboard() {
         loadApprovers(),
         ensureCimRolePairs()
     ]);
-    // Re-render pipeline now that allPrograms is loaded (for college count)
-    if (cachedPipeline.length) renderPipeline(cachedPipeline, allPrograms);
+    // Render everything through applyFilters so the type/proposal/pipeline
+    // counts and the table are all scoped to the active perspective + filters
+    // (e.g. College perspective + a selected college). Calling the bare
+    // update*Counts() here instead showed whole-DB counts — a Graduate button
+    // reading 1036 (all grad, any state) instead of 14 (KHY grad in-workflow)
+    // — until the user happened to click a filter that re-ran applyFilters.
     updateSmartViewCounts();
-    updateTypeCounts();
-    updateProposalCounts();
+    applyFilters();
 }
 
 async function loadPipeline() {
