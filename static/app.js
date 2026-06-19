@@ -1321,9 +1321,11 @@ function renderPipeline(pipeline, baseFiltered) {
         if (cBtn) { cBtn.classList.toggle('active-complete', pipelineFilter === '__complete__'); cBtn.style.display = ''; }
         return;
     }
-    // Central perspective: no panel toggle.
+    // Central perspective: static "Pipeline Summary" heading, no panel arrow.
     const _tog = document.getElementById('pipeline-panel-toggle');
     if (_tog) _tog.style.display = 'none';
+    const _h2 = document.querySelector('#pipeline h2');
+    if (_h2) _h2.style.display = '';
     // Add College Review as the first step in the pipeline
     const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
     const detector = isCourseView ? isCourseCollegeStep : isCollegeStep;
@@ -1477,17 +1479,19 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     _collegePipeArgs = { baseFiltered: raw, isCourseView };
     bar.innerHTML = (collegePanel === 'downstream') ? downHtml : collegeHtml;
     bar.classList.remove('pipe-slide-in'); void bar.offsetWidth; bar.classList.add('pipe-slide-in');
-    // Show + sync the header panel arrow (college perspective only). A single
-    // directional arrow conveys that the two panels are one continuous
-    // pipeline: forward → into the university stages, back ← to college steps.
+    // The arrow IS the section heading in college perspective: it replaces the
+    // static "Pipeline Summary" h2 and flips between the two panels, conveying
+    // one continuous pipeline. Forward → into the university stages, back ←.
+    const h2 = document.querySelector('#pipeline h2');
+    if (h2) h2.style.display = 'none';
     const tog = document.getElementById('pipeline-panel-toggle');
     if (tog) {
         tog.style.display = '';
         if (collegePanel === 'downstream') {
-            tog.innerHTML = '◂ College steps';
+            tog.innerHTML = '◂ University Pipeline Summary';
             tog.onclick = () => setCollegePanel('college');
         } else {
-            tog.innerHTML = 'University pipeline ▸';
+            tog.innerHTML = 'College Pipeline Summary ▸';
             tog.onclick = () => setCollegePanel('downstream');
         }
     }
@@ -1539,7 +1543,11 @@ function syncPerspectiveUI() {
     // it elsewhere (renderPipeline also hides it on the Central path, but
     // catalog/portfolio don't call renderPipeline at all).
     const tog = document.getElementById('pipeline-panel-toggle');
-    if (tog && !(cimPerspective === 'college' && onCimView)) tog.style.display = 'none';
+    if (tog && !(cimPerspective === 'college' && onCimView)) {
+        tog.style.display = 'none';
+        const h2 = document.querySelector('#pipeline h2');
+        if (h2) h2.style.display = '';
+    }
 }
 
 function populateCampusFilter() {

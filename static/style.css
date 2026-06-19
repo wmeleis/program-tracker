@@ -127,20 +127,22 @@ header h1 {
     gap: 16px;
     margin-bottom: 12px;
 }
-/* College⇄University directional arrow, next to the "Pipeline Summary" heading
-   so it never scrolls off the (horizontally scrollable) pipeline bar. The arrow
-   conveys that the two panels are one continuous pipeline. */
+/* In college perspective the directional arrow REPLACES the "Pipeline Summary"
+   heading: it's styled like the h2 but clickable, and flips between the
+   college-steps and university-stages panels (conveying one continuous
+   pipeline). Lives in the header so it never scrolls off the bar. */
 .panel-arrow {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: #eff6ff;
-    color: var(--accent);
-    font-size: 12px;
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: 14px;
     font-weight: 600;
-    padding: 4px 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
     cursor: pointer;
 }
-.panel-arrow:hover { background: #e0e7f0; }
+.panel-arrow:hover { text-decoration: underline; }
 
 .pipeline-bar {
     display: flex;
