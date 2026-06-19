@@ -143,6 +143,16 @@ header h1 {
     cursor: pointer;
 }
 .panel-arrow:hover { text-decoration: underline; }
+/* The "go to the other panel (N there)" hint inside the heading-arrow. Smaller,
+   normal-weight, not uppercase, so it reads as a sub-label of the heading. */
+.panel-arrow-alt {
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: 10px;
+    opacity: 0.85;
+}
 
 .pipeline-bar {
     display: flex;

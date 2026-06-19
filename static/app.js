@@ -1487,11 +1487,18 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     const tog = document.getElementById('pipeline-panel-toggle');
     if (tog) {
         tog.style.display = '';
+        // Show the OTHER (hidden) panel's count on the arrow so the totals
+        // reconcile at a glance: a college whose programs have all advanced to
+        // university stages (e.g. Khoury, all at "Setup") otherwise sees an
+        // empty College panel that looks broken vs. the level button / list.
+        // college tiles sum (collegeCount) + past-college (pastCount) = in-scope total.
+        const pastCount = downstream;
+        const collegeCount = source.filter(p => p.current_step).length - downstream;
         if (collegePanel === 'downstream') {
-            tog.innerHTML = '◂ University Pipeline Summary';
+            tog.innerHTML = `University Pipeline Summary <span class="panel-arrow-alt">◂ College pipeline (${collegeCount})</span>`;
             tog.onclick = () => setCollegePanel('college');
         } else {
-            tog.innerHTML = 'College Pipeline Summary ▸';
+            tog.innerHTML = `College Pipeline Summary <span class="panel-arrow-alt">University pipeline (${pastCount}) ▸</span>`;
             tog.onclick = () => setCollegePanel('downstream');
         }
     }
