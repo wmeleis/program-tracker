@@ -10,7 +10,7 @@ from flask_cors import CORS
 
 from database import (
     init_db, migrate_db, get_all_programs, get_program_workflow,
-    get_pipeline_counts, get_recent_changes, get_last_scan,
+    get_pipeline_counts, get_workflow_role_pairs, get_recent_changes, get_last_scan,
     get_programs_by_step, get_colleges, get_current_approvers,
     get_programs_by_approver, get_program_curriculum,
     get_reference_curriculum, get_all_courses, get_course_workflow,
@@ -688,6 +688,17 @@ def api_pipeline():
             'count': counts.get(role, 0)
         })
     return jsonify({'pipeline': pipeline})
+
+
+@app.route('/api/workflow_roles')
+def api_workflow_roles():
+    """Distinct (college, step_name) pairs from program + course workflows.
+
+    Lets the College-perspective pipeline show a college's full internal role
+    sequence (not just currently-occupied roles). The frontend classifies which
+    pairs are college-internal with its own detectors.
+    """
+    return jsonify(get_workflow_role_pairs())
 
 
 @app.route('/api/changes')

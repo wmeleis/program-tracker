@@ -533,6 +533,34 @@ def get_pipeline_counts(tracked_roles, canonicalize=None):
         return counts
 
 
+def get_workflow_role_pairs():
+    """Return distinct (college, step_name) pairs from program and course
+    workflow definitions.
+
+    Used by the College-perspective pipeline to show a college's FULL internal
+    role sequence (every role its programs pass through), not just roles a
+    program currently sits at. The frontend classifies which pairs are
+    college-internal using its own detectors, so this stays logic-free.
+    """
+    with get_db() as conn:
+        prog = conn.execute("""
+            SELECT DISTINCT p.college AS college, ws.step_name AS step
+            FROM workflow_steps ws JOIN programs p ON p.id = ws.program_id
+            WHERE p.college IS NOT NULL AND p.college != ''
+              AND ws.step_name IS NOT NULL AND ws.step_name != ''
+        """).fetchall()
+        course = conn.execute("""
+            SELECT DISTINCT c.college AS college, cws.step_name AS step
+            FROM course_workflow_steps cws JOIN courses c ON c.id = cws.course_id
+            WHERE c.college IS NOT NULL AND c.college != ''
+              AND cws.step_name IS NOT NULL AND cws.step_name != ''
+        """).fetchall()
+        return {
+            'programs': [[r['college'], r['step']] for r in prog],
+            'courses': [[r['college'], r['step']] for r in course],
+        }
+
+
 def get_recent_changes(limit=50):
     """Get recent changes across all programs."""
     with get_db() as conn:

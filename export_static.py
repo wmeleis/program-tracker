@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from database import (
-    get_all_programs, get_program_workflow, get_pipeline_counts,
+    get_all_programs, get_program_workflow, get_pipeline_counts, get_workflow_role_pairs,
     get_recent_changes, get_last_scan, get_colleges,
     get_current_approvers, get_all_curriculum, get_all_reference_curriculum,
     get_all_program_reference_overrides, get_custom_reference,
@@ -232,6 +232,7 @@ def export_data():
         'programs': programs,
         'courses': courses,
         'pipeline': pipeline,
+        'workflow_roles': get_workflow_role_pairs(),
         'changes': changes,
         'last_scan': last_scan,
         'colleges': colleges,
@@ -782,6 +783,7 @@ function __staticInit() {
         // Programs (load before pipeline so college count works)
         allPrograms = D.programs || [];
         cachedPipeline = D.pipeline;
+        if (D.workflow_roles) cimRolePairs = D.workflow_roles;
 
         // Pipeline (after allPrograms so college count is correct)
         renderPipeline(D.pipeline, allPrograms);

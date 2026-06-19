@@ -21,6 +21,25 @@ let cimPerspective = (() => {
 let cimCollegeSelected = (() => {
     try { return localStorage.getItem('cim-college-selected') || ''; } catch (_) { return ''; }
 })();
+// College full name → CIM role-prefix code, used to pick a college's OWN roles
+// out of the (noisy, cross-college) workflow-step union.
+const _COLLEGE_CODE = {
+    'Coll of Arts, Media & Design': 'AM',
+    "D'Amore-McKim School Business": 'BA',
+    'Bouve College of Hlth Sciences': 'BV',
+    'Khoury Coll of Comp Sciences': 'CS',
+    'College of Engineering': 'EN',
+    'School of Law': 'LW',
+    'Mills College at NU': 'MI',
+    'Coll of Professional Studies': 'PS',
+    'College of Science': 'SC',
+    'Coll of Soc Sci & Humanities': 'SH',
+};
+// Distinct (college, step_name) pairs from program + course workflow defs.
+// Lets the College perspective show a college's FULL role sequence (every role
+// its programs pass through), not just currently-occupied roles. Loaded once
+// (fetched on Flask, embedded in data.json on the static site).
+let cimRolePairs = null;
 function _saveCimPerspective() {
     try {
         localStorage.setItem('cim-perspective', cimPerspective);
@@ -832,7 +851,8 @@ async function loadDashboard() {
         loadChanges(),
         loadScanStatus(),
         loadColleges(),
-        loadApprovers()
+        loadApprovers(),
+        ensureCimRolePairs()
     ]);
     // Re-render pipeline now that allPrograms is loaded (for college count)
     if (cachedPipeline.length) renderPipeline(cachedPipeline, allPrograms);
@@ -878,7 +898,8 @@ async function loadCoursesDashboard() {
         loadCourses(),
         loadScanStatus(),
         loadCourseColleges(),
-        loadCourseApprovers()
+        loadCourseApprovers(),
+        ensureCimRolePairs()
     ]);
     if (cachedCoursePipeline.length) renderPipeline(cachedCoursePipeline, allCourses);
     updateCourseSmartViewCounts();
@@ -1338,6 +1359,16 @@ function renderPipeline(pipeline, baseFiltered) {
 // own in-workflow roles (ordered by collegeRoleRank) as fine-grained tiles,
 // then a trailing "→ Provost" tile aggregating items that have moved past the
 // college into the university pipeline.
+// Fetch the (college, step) workflow-role pairs once (no-op on static, where
+// data.json already populated cimRolePairs).
+async function ensureCimRolePairs() {
+    if (cimRolePairs) return;
+    try {
+        const res = await fetch('/api/workflow_roles');
+        if (res.ok) cimRolePairs = await res.json();
+    } catch (_) { /* leave null; renderCollegePipeline falls back */ }
+}
+
 function renderCollegePipeline(baseFiltered, isCourseView) {
     const bar = document.getElementById('pipeline-bar');
     // Self-scope to the selected college. renderPipeline is sometimes called
@@ -1354,16 +1385,32 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
         if (detector(step)) roleCounts[step] = (roleCounts[step] || 0) + 1;
         else downstream += 1;                    // past the college
     });
-    const roles = Object.keys(roleCounts).sort((a, b) => {
+    // Tile SET = roles a program is CURRENTLY at (any role, real position) PLUS
+    // this college's own roles from the workflow definitions so the sequence
+    // shows even when a role is empty. The workflow union is noisy (joint
+    // programs route through OTHER colleges' committees; ad-hoc reviewer /
+    // checkpoint steps), so the empty-role additions are restricted to roles
+    // carrying THIS college's code prefix (e.g. "Program BV …"). Currently-
+    // occupied roles are always kept since they're the program's real position.
+    const universe = new Set(Object.keys(roleCounts));
+    const code = _COLLEGE_CODE[cimCollegeSelected];
+    if (cimRolePairs && code) {
+        const pre = 'Program ' + code + ' ';
+        const pairs = (isCourseView ? cimRolePairs.courses : cimRolePairs.programs) || [];
+        pairs.forEach(([col, step]) => {
+            if (col === cimCollegeSelected && detector(step) && step.indexOf(pre) === 0) universe.add(step);
+        });
+    }
+    const roles = [...universe].sort((a, b) => {
         const ra = collegeRoleRank(a), rb = collegeRoleRank(b);
         return ra !== rb ? ra - rb : a.localeCompare(b);
     });
     let html = roles.map(role => {
-        const cnt = roleCounts[role];
+        const cnt = roleCounts[role] || 0;
         const active = pipelineFilter === role ? ' active' : '';
         const roleArg = role.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         return `
-            <div class="pipeline-step has-items${active}"
+            <div class="pipeline-step ${cnt > 0 ? 'has-items' : 'empty'}${active}"
                  onclick="togglePipelineFilter('${roleArg}')"
                  title="${escapeHtml(role)}: ${cnt}">
                 <span class="step-count">${cnt}</span>
