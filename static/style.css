@@ -127,27 +127,20 @@ header h1 {
     gap: 16px;
     margin-bottom: 12px;
 }
-/* College⇄University panel toggle, next to the "Pipeline Summary" heading so it
-   never scrolls off the (horizontally scrollable) pipeline bar. */
-.panel-toggle {
-    display: inline-flex;
-    gap: 0;
+/* College⇄University directional arrow, next to the "Pipeline Summary" heading
+   so it never scrolls off the (horizontally scrollable) pipeline bar. The arrow
+   conveys that the two panels are one continuous pipeline. */
+.panel-arrow {
     border: 1px solid var(--border);
     border-radius: 6px;
-    overflow: hidden;
-}
-.panel-toggle-btn {
-    border: none;
-    background: var(--surface);
-    color: var(--text-secondary);
+    background: #eff6ff;
+    color: var(--accent);
     font-size: 12px;
     font-weight: 600;
     padding: 4px 12px;
     cursor: pointer;
 }
-.panel-toggle-btn + .panel-toggle-btn { border-left: 1px solid var(--border); }
-.panel-toggle-btn:hover { background: #eef2f7; }
-.panel-toggle-btn.active { background: #eff6ff; color: var(--accent); }
+.panel-arrow:hover { background: #e0e7f0; }
 
 .pipeline-bar {
     display: flex;

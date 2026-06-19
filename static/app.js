@@ -1477,12 +1477,19 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     _collegePipeArgs = { baseFiltered: raw, isCourseView };
     bar.innerHTML = (collegePanel === 'downstream') ? downHtml : collegeHtml;
     bar.classList.remove('pipe-slide-in'); void bar.offsetWidth; bar.classList.add('pipe-slide-in');
-    // Show + sync the header panel toggle (college perspective only).
+    // Show + sync the header panel arrow (college perspective only). A single
+    // directional arrow conveys that the two panels are one continuous
+    // pipeline: forward → into the university stages, back ← to college steps.
     const tog = document.getElementById('pipeline-panel-toggle');
     if (tog) {
         tog.style.display = '';
-        tog.querySelectorAll('.panel-toggle-btn').forEach(b =>
-            b.classList.toggle('active', b.dataset.panel === collegePanel));
+        if (collegePanel === 'downstream') {
+            tog.innerHTML = '◂ College steps';
+            tog.onclick = () => setCollegePanel('college');
+        } else {
+            tog.innerHTML = 'University pipeline ▸';
+            tog.onclick = () => setCollegePanel('downstream');
+        }
     }
 }
 
