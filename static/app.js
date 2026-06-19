@@ -1340,7 +1340,11 @@ function renderPipeline(pipeline, baseFiltered) {
 // college into the university pipeline.
 function renderCollegePipeline(baseFiltered, isCourseView) {
     const bar = document.getElementById('pipeline-bar');
-    const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
+    // Self-scope to the selected college. renderPipeline is sometimes called
+    // with the full unscoped set (initial load / post-scan), so never trust the
+    // caller to have filtered — always restrict to this college here.
+    const raw = baseFiltered || (isCourseView ? allCourses : allPrograms);
+    const source = (raw || []).filter(p => p.college === cimCollegeSelected);
     const detector = _cimCollegeDetector();
     const roleCounts = {};
     let downstream = 0;
