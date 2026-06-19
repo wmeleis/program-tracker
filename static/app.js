@@ -1465,8 +1465,8 @@ function populatePerspectiveCollege() {
 }
 function syncPerspectiveUI() {
     const onCimView = currentView === 'programs' || currentView === 'courses';
-    const bar = document.getElementById('perspective-bar');
-    if (bar) bar.style.display = onCimView ? '' : 'none';
+    const grp = document.getElementById('perspective-filter-group');
+    if (grp) grp.style.display = onCimView ? '' : 'none';
     document.querySelectorAll('.perspective-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.persp === cimPerspective));
     const sel = document.getElementById('perspective-college');

@@ -234,15 +234,7 @@
 
     <!-- Pipeline Summary -->
     <section id="pipeline" class="pipeline-section">
-        <div class="pipeline-header-row">
-            <h2>Pipeline Summary</h2>
-            <div id="perspective-bar" class="perspective-bar">
-                <span class="perspective-label">Perspective:</span>
-                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">OTP</button>
-                <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
-                <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
-            </div>
-        </div>
+        <h2>Pipeline Summary</h2>
         <div id="pipeline-bar" class="pipeline-bar">
             <!-- Populated by JS -->
         </div>
@@ -289,6 +281,14 @@
 
     <!-- Filters -->
     <section class="filters-section">
+        <div class="filter-group" id="perspective-filter-group">
+            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">OTP = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles.</span></span></label>
+            <div id="perspective-bar" class="perspective-bar">
+                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">OTP</button>
+                <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
+                <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
+            </div>
+        </div>
         <div class="filter-group">
             <label>College:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the college or school responsible for the program.</span></span></label>
             <div class="filter-select-wrap">
