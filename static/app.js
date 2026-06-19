@@ -1482,28 +1482,17 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     _collegePipeArgs = { baseFiltered: raw, isCourseView };
     bar.innerHTML = (collegePanel === 'downstream') ? downHtml : collegeHtml;
     bar.classList.remove('pipe-slide-in'); void bar.offsetWidth; bar.classList.add('pipe-slide-in');
-    // The arrow IS the section heading in college perspective: it replaces the
-    // static "Pipeline Summary" h2 and flips between the two panels, conveying
-    // one continuous pipeline. Forward → into the university stages, back ←.
+    // Static "Pipeline Summary" heading stays; a small arrow next to it flips
+    // between the college-steps and university-stages panels (▸ forward, ◂ back).
     const h2 = document.querySelector('#pipeline h2');
-    if (h2) h2.style.display = 'none';
+    if (h2) h2.style.display = '';
     const tog = document.getElementById('pipeline-panel-toggle');
     if (tog) {
         tog.style.display = '';
-        // Show the OTHER (hidden) panel's count on the arrow so the totals
-        // reconcile at a glance: a college whose programs have all advanced to
-        // university stages (e.g. Khoury, all at "Setup") otherwise sees an
-        // empty College panel that looks broken vs. the level button / list.
-        // college tiles sum (collegeCount) + past-college (pastCount) = in-scope total.
-        const pastCount = downstream;
-        const collegeCount = source.filter(p => p.current_step).length - downstream;
-        if (collegePanel === 'downstream') {
-            tog.innerHTML = `University Pipeline Summary <span class="panel-arrow-alt">◂ College pipeline (${collegeCount})</span>`;
-            tog.onclick = () => setCollegePanel('college');
-        } else {
-            tog.innerHTML = `College Pipeline Summary <span class="panel-arrow-alt">University pipeline (${pastCount}) ▸</span>`;
-            tog.onclick = () => setCollegePanel('downstream');
-        }
+        const toDownstream = collegePanel !== 'downstream';
+        tog.innerHTML = toDownstream ? '▸' : '◂';
+        tog.title = toDownstream ? 'Show university pipeline' : 'Back to college steps';
+        tog.onclick = () => setCollegePanel(toDownstream ? 'downstream' : 'college');
     }
 }
 
