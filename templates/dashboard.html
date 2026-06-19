@@ -232,6 +232,25 @@
         </div>
     </div>
 
+    <!-- CIM scoping controls (chosen first, above the pipeline/buttons) -->
+    <section id="cim-scope-bar" class="filters-section scope-bar">
+        <div class="filter-group" id="perspective-filter-group">
+            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">OTP = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles.</span></span></label>
+            <div id="perspective-bar" class="perspective-bar">
+                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">OTP</button>
+                <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
+                <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
+            </div>
+        </div>
+        <div class="filter-group" id="level-filter-group">
+            <label>Level:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Graduate / Undergraduate. Filters the table by level; in College perspective it also prunes the role tiles to that level.</span></span></label>
+            <div class="level-switch">
+                <button class="type-btn" onclick="setTypeFilter('Graduate')">Graduate</button>
+                <button class="type-btn" onclick="setTypeFilter('Undergraduate')">Undergraduate</button>
+            </div>
+        </div>
+    </section>
+
     <!-- Pipeline Summary -->
     <section id="pipeline" class="pipeline-section">
         <h2>Pipeline Summary</h2>
@@ -275,21 +294,6 @@
 
     <!-- Filters -->
     <section class="filters-section">
-        <div class="filter-group" id="perspective-filter-group">
-            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">OTP = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles.</span></span></label>
-            <div id="perspective-bar" class="perspective-bar">
-                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">OTP</button>
-                <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
-                <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
-            </div>
-        </div>
-        <div class="filter-group" id="level-filter-group">
-            <label>Level:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Graduate / Undergraduate. Filters the table by level; in College perspective it also prunes the role tiles to that level.</span></span></label>
-            <div class="level-switch">
-                <button class="type-btn" onclick="setTypeFilter('Graduate')">Graduate</button>
-                <button class="type-btn" onclick="setTypeFilter('Undergraduate')">Undergraduate</button>
-            </div>
-        </div>
         <div class="filter-group">
             <label>College:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the college or school responsible for the program.</span></span></label>
             <div class="filter-select-wrap">
@@ -299,7 +303,6 @@
                 <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
             </div>
         </div>
-        <div class="filter-group" id="scoping-row-break" style="flex-basis:100%; margin:0; padding:0"></div>
         <div class="filter-group" id="filter-group-subject" style="display: none">
             <label>Subject Code:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter courses by their subject prefix (e.g. CS, ENGR, HIST).</span></span></label>
             <div class="filter-select-wrap">

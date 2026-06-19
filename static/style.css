@@ -2230,6 +2230,8 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .perspective-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
 .level-switch-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-right: 4px; align-self: center; }
 .level-switch { display: inline-flex; gap: 6px; }
+/* CIM scoping bar sits above the pipeline; chosen before the tiles/buttons. */
+#cim-scope-bar.scope-bar { margin-bottom: 12px; }
 .perspective-btn {
     padding: 4px 12px; border: 1px solid var(--border); background: #fff;
     color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;

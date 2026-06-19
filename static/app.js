@@ -229,7 +229,7 @@ function switchView(view) {
     const smartViewsSection = document.querySelector('.smart-views-section');
     const kindFilterRow     = document.getElementById('kind-filter-row');
     const smartActionsSection = document.querySelector('.smart-actions-section');
-    const filtersSection    = document.querySelector('.filters-section');
+    const filtersSection    = document.querySelector('.filters-section:not(.scope-bar)');
 
     const portfolioToolbar  = document.getElementById('portfolio-table-toolbar');
     const portfolioHdrAct   = document.getElementById('portfolio-header-actions');
@@ -1468,7 +1468,7 @@ function populatePerspectiveCollege() {
 function syncPerspectiveUI() {
     const onCimView = currentView === 'programs' || currentView === 'courses';
     // Perspective, Level, and the row-break are CIM-only scoping controls.
-    ['perspective-filter-group', 'level-filter-group', 'scoping-row-break'].forEach(id => {
+    ['cim-scope-bar'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = onCimView ? '' : 'none';
     });
