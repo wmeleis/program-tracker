@@ -35,6 +35,15 @@ const _COLLEGE_CODE = {
     'College of Science': 'SC',
     'Coll of Soc Sci & Humanities': 'SH',
 };
+// College perspective: which pipeline panel is showing — 'college' (the
+// college's own role sequence) or 'downstream' (the full post-college
+// university pipeline). Toggled by the arrow at the end of the bar.
+let collegePanel = 'college';
+let _collegePipeArgs = null;   // last {baseFiltered, isCourseView} for re-render
+function setCollegePanel(p) {
+    collegePanel = (p === 'downstream') ? 'downstream' : 'college';
+    if (_collegePipeArgs) renderCollegePipeline(_collegePipeArgs.baseFiltered, _collegePipeArgs.isCourseView);
+}
 // Distinct (college, step_name) pairs from program + course workflow defs.
 // Lets the College perspective show a college's FULL role sequence (every role
 // its programs pass through), not just currently-occupied roles. Loaded once
@@ -1428,8 +1437,7 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
             return wantGrad ? isGrad : isUg;
         });
     }
-    let html = roles.map(role => {
-        const cnt = roleCounts[role] || 0;
+    const tile = (role, label, cnt) => {
         const active = pipelineFilter === role ? ' active' : '';
         const roleArg = role.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         return `
@@ -1437,12 +1445,14 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
                  onclick="togglePipelineFilter('${roleArg}')"
                  title="${escapeHtml(role)}: ${cnt}">
                 <span class="step-count">${cnt}</span>
-                <span class="step-name">${escapeHtml(collegeRoleShort(role))}</span>
+                <span class="step-name">${escapeHtml(label)}</span>
             </div>`;
-    }).join('');
-    // After the college's own roles, show the actual UNIVERSITY (OTP) pipeline
-    // stages — scoped to this college — as individual tiles, rather than one
-    // lumped "→ Provost". A divider marks the hand-off out of the college.
+    };
+    // PANEL 1: the college's own internal roles (full sequence, even empty).
+    const collegeHtml = roles.map(role =>
+        tile(role, collegeRoleShort(role), roleCounts[role] || 0)).join('');
+    // PANEL 2: the FULL university (OTP) pipeline stages, scoped to this college
+    // (all stages shown, including empty, so ADs can gauge progress + timing).
     const stages = isCourseView ? collapseCoursePipeline(cachedCoursePipeline || []) : (cachedPipeline || []);
     const stageCount = (role) => {
         if (isCourseView) {
@@ -1451,32 +1461,23 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
         }
         return source.filter(p => p.current_step && canonicalStep(p.current_step) === role).length;
     };
-    // Only show downstream stages that actually have programs from this college
-    // (in OTP-pipeline order), so the bar stays compact — the empty university
-    // stages aren't relevant to the AD, unlike the college's own sequence.
-    const dsTiles = stages
-        .map(st => ({ st, cnt: stageCount(st.role) }))
-        .filter(x => x.cnt > 0);
-    if (dsTiles.length) {
-        html += '<div class="pipeline-divider" title="University pipeline (after the college)">→</div>';
-        html += dsTiles.map(({ st, cnt }) => {
-            const active = pipelineFilter === st.role ? ' active' : '';
-            const roleArg = st.role.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            return `
-                <div class="pipeline-step has-items${active}"
-                     onclick="togglePipelineFilter('${roleArg}')"
-                     title="${escapeHtml(st.role)}: ${cnt}">
-                    <span class="step-count">${cnt}</span>
-                    <span class="step-name">${escapeHtml(st.short_name)}</span>
-                </div>`;
-        }).join('');
-    }
-    bar.innerHTML = html;
+    const downHtml = stages.map(st => tile(st.role, st.short_name, stageCount(st.role))).join('');
+    // The two panels swap via an arrow at the end of the bar (slides college
+    // steps out, post-college stages in — and back). collegePanel holds which
+    // is showing; renderCollegePipeline is re-run on toggle (args stashed).
+    _collegePipeArgs = { baseFiltered: raw, isCourseView };
+    const fwd = '<div class="pipeline-arrow" title="Show post-college stages →" onclick="setCollegePanel(\'downstream\')">▸</div>';
+    const back = '<div class="pipeline-arrow" title="← Back to college steps" onclick="setCollegePanel(\'college\')">◂</div>';
+    bar.innerHTML = (collegePanel === 'downstream')
+        ? (back + downHtml)
+        : (collegeHtml + fwd);
+    bar.classList.remove('pipe-slide-in'); void bar.offsetWidth; bar.classList.add('pipe-slide-in');
 }
 
 function setCimPerspective(mode) {
     cimPerspective = (mode === 'college') ? 'college' : 'otp';
     pipelineFilter = null;   // stage tiles differ between perspectives
+    collegePanel = 'college';
     _saveCimPerspective();
     syncPerspectiveUI();
     applyFilters();
@@ -1484,6 +1485,7 @@ function setCimPerspective(mode) {
 function setCimCollege(val) {
     cimCollegeSelected = val || '';
     pipelineFilter = null;
+    collegePanel = 'college';
     _saveCimPerspective();
     applyFilters();
 }
