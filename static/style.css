@@ -2220,6 +2220,21 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .auth-dot.ok { color: var(--success); }
 .auth-dot.bad { color: var(--danger); }
 
+/* OTP / College perspective toggle (CIM Programs & Courses pipeline) */
+.pipeline-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.perspective-bar { display: flex; align-items: center; gap: 8px; }
+.perspective-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+.perspective-btn {
+    padding: 4px 12px; border: 1px solid var(--border); background: #fff;
+    color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;
+    border-radius: 6px;
+}
+.perspective-btn.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
+.perspective-college {
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; max-width: 220px;
+}
+
 /* Portfolio layout toggle (Table | Matrix) */
 #portfolio-table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .portfolio-layout-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }

@@ -10,6 +10,50 @@ let detailTabState = {}; // programId/courseId -> 'workflow' | 'curriculum'
 let currentSort = { column: 'name', direction: 'asc' };
 let pipelineFilter = null;
 let smartView = 'all';
+// Pipeline perspective: 'otp' (default, university pipeline) or 'college'
+// (a college's internal roles, fine-grained, for ADs/coordinators). The
+// chosen perspective AND the selected college persist per browser so each
+// user reopens where they left off. There are no accounts, so "per user"
+// means per browser/device.
+let cimPerspective = (() => {
+    try { return localStorage.getItem('cim-perspective') || 'otp'; } catch (_) { return 'otp'; }
+})();
+let cimCollegeSelected = (() => {
+    try { return localStorage.getItem('cim-college-selected') || ''; } catch (_) { return ''; }
+})();
+function _saveCimPerspective() {
+    try {
+        localStorage.setItem('cim-perspective', cimPerspective);
+        localStorage.setItem('cim-college-selected', cimCollegeSelected || '');
+    } catch (_) {}
+}
+// Order a college's internal roles by role type (the agreed template):
+// Director → Chair → Program Review → Curriculum Committee → Dean's Office →
+// Accreditor → anything else. "Curriculum Committee" is checked before the
+// generic "Chair" so committee-chair roles don't rank as plain chairs.
+function collegeRoleRank(step) {
+    const s = step || '';
+    if (/Program Director/i.test(s)) return 1;
+    if (/Program Review/i.test(s)) return 3;
+    if (/Curriculum Committee/i.test(s)) return 4;
+    if (/Dean'?s Office/i.test(s)) return 5;
+    if (/Accreditor/i.test(s)) return 6;
+    if (/Chair/i.test(s)) return 2;
+    return 7;
+}
+// Short tile label for a college-internal role: drop "Program " and abbreviate
+// common words so the granular roles fit in a pipeline tile.
+function collegeRoleShort(step) {
+    return (step || '')
+        .replace(/^Program\s+/, '')
+        .replace(/\bUndergraduate\b/g, 'UG')
+        .replace(/\bGraduate\b/g, 'Grad')
+        .replace(/\bCurriculum Committee\b/g, 'Curric Cmte')
+        .replace(/\bDean'?s Office\b/g, 'Dean')
+        .replace(/\bProgram Review\b/g, 'Review')
+        .replace(/\bProgram Director\b/g, 'Director')
+        .replace(/\s+/g, ' ').trim();
+}
 // Multi-select. Holds any combination of 'Undergraduate', 'Graduate',
 // 'Continuing', 'Other', etc. Empty set = no type filter.
 let typeFilter = new Set();
@@ -246,6 +290,9 @@ function switchView(view) {
         else if (view === 'portfolio') searchEl.placeholder = 'Search portfolio by program, college, campus (* and ? wildcards)…';
         else                            searchEl.placeholder = 'Search programs by name or banner code (* and ? wildcards)…';
     }
+
+    // Show/hide the OTP/College perspective toggle for the new view.
+    syncPerspectiveUI();
 
     // Reload appropriate data
     if (view === 'programs') {
@@ -1052,6 +1099,7 @@ function updateProgramKindCounts() {
     if (pipelineFilter) {
         baseExclKind = baseExclKind.filter(p => {
             if (pipelineFilter === '__college__') return isCollegeStep(p.current_step);
+            if (pipelineFilter === '__downstream__') return !!p.current_step && !isCollegeStep(p.current_step);
             if (pipelineFilter === '__complete__') return !!p.completion_date;
             return canonicalStep(p.current_step) === pipelineFilter;
         });
@@ -1211,6 +1259,17 @@ function updateCollegeOptions(baseFiltered) {
 function renderPipeline(pipeline, baseFiltered) {
     const bar = document.getElementById('pipeline-bar');
     const isCourseView = currentView === 'courses';
+
+    // College perspective: replace the OTP pipeline with the selected college's
+    // own internal roles (ordered by role-type template) plus a trailing
+    // "→ Provost" tile for everything that has left the college. The set is
+    // already scoped to the college by getBaseFiltered.
+    if (cimPerspective === 'college' && cimCollegeSelected) {
+        renderCollegePipeline(baseFiltered, isCourseView);
+        const cBtn = document.getElementById('btn-proposal-complete');
+        if (cBtn) { cBtn.classList.toggle('active-complete', pipelineFilter === '__complete__'); cBtn.style.display = ''; }
+        return;
+    }
     // Add College Review as the first step in the pipeline
     const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
     const detector = isCourseView ? isCourseCollegeStep : isCollegeStep;
@@ -1254,6 +1313,88 @@ function renderPipeline(pipeline, baseFiltered) {
     }
 }
 
+// Build the pipeline bar for the College perspective: the selected college's
+// own in-workflow roles (ordered by collegeRoleRank) as fine-grained tiles,
+// then a trailing "→ Provost" tile aggregating items that have moved past the
+// college into the university pipeline.
+function renderCollegePipeline(baseFiltered, isCourseView) {
+    const bar = document.getElementById('pipeline-bar');
+    const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
+    const detector = isCourseView ? isCourseCollegeStep : isCollegeStep;
+    const roleCounts = {};
+    let downstream = 0;
+    source.forEach(p => {
+        const step = p.current_step;
+        if (!step) return;                       // not in workflow
+        if (detector(step)) roleCounts[step] = (roleCounts[step] || 0) + 1;
+        else downstream += 1;                    // past the college
+    });
+    const roles = Object.keys(roleCounts).sort((a, b) => {
+        const ra = collegeRoleRank(a), rb = collegeRoleRank(b);
+        return ra !== rb ? ra - rb : a.localeCompare(b);
+    });
+    let html = roles.map(role => {
+        const cnt = roleCounts[role];
+        const active = pipelineFilter === role ? ' active' : '';
+        const roleArg = role.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return `
+            <div class="pipeline-step has-items${active}"
+                 onclick="togglePipelineFilter('${roleArg}')"
+                 title="${escapeHtml(role)}: ${cnt}">
+                <span class="step-count">${cnt}</span>
+                <span class="step-name">${escapeHtml(collegeRoleShort(role))}</span>
+            </div>`;
+    }).join('');
+    const dsActive = pipelineFilter === '__downstream__' ? ' active' : '';
+    html += `
+        <div class="pipeline-step ${downstream > 0 ? 'has-items' : 'empty'}${dsActive}"
+             onclick="togglePipelineFilter('__downstream__')"
+             title="Past the college (Provost / University): ${downstream}">
+            <span class="step-count">${downstream}</span>
+            <span class="step-name">→ Provost</span>
+        </div>`;
+    bar.innerHTML = html;
+}
+
+function setCimPerspective(mode) {
+    cimPerspective = (mode === 'college') ? 'college' : 'otp';
+    pipelineFilter = null;   // stage tiles differ between perspectives
+    _saveCimPerspective();
+    syncPerspectiveUI();
+    applyFilters();
+}
+function setCimCollege(val) {
+    cimCollegeSelected = val || '';
+    pipelineFilter = null;
+    _saveCimPerspective();
+    applyFilters();
+}
+function populatePerspectiveCollege() {
+    const sel = document.getElementById('perspective-college');
+    if (!sel) return;
+    const src = currentView === 'courses' ? allCourses : allPrograms;
+    const colleges = [...new Set((src || []).map(p => p.college).filter(Boolean))].sort();
+    if (cimCollegeSelected && !colleges.includes(cimCollegeSelected)) colleges.push(cimCollegeSelected);
+    sel.innerHTML = '<option value="">Select a college…</option>' +
+        colleges.sort().map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))}</option>`).join('');
+    sel.value = cimCollegeSelected || '';
+}
+function syncPerspectiveUI() {
+    const onCimView = currentView === 'programs' || currentView === 'courses';
+    const bar = document.getElementById('perspective-bar');
+    if (bar) bar.style.display = onCimView ? '' : 'none';
+    document.querySelectorAll('.perspective-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.persp === cimPerspective));
+    const sel = document.getElementById('perspective-college');
+    if (sel) sel.style.display = (cimPerspective === 'college' && onCimView) ? '' : 'none';
+    // In College perspective the standalone College filter is redundant (scope
+    // is set by the perspective college), so hide it to avoid a conflicting
+    // double-filter that could blank the table.
+    const cf = document.getElementById('filter-college');
+    const cfGroup = cf && cf.closest('.filter-group');
+    if (cfGroup) cfGroup.style.display = (cimPerspective === 'college' && onCimView) ? 'none' : '';
+}
+
 function populateCampusFilter() {
     const campuses = new Set();
     allPrograms.forEach(p => {
@@ -1290,10 +1431,16 @@ function getBaseFiltered(approverProgramIds, exclude) {
 
     const sourceData = currentView === 'courses' ? allCourses : allPrograms;
 
+    const collegeScope = (cimPerspective === 'college' && cimCollegeSelected
+        && (currentView === 'programs' || currentView === 'courses'))
+        ? cimCollegeSelected : null;
+
     return sourceData.filter(item => {
         // TEMPLATE: ... entries are CIM scaffolding, never real programs.
         // Hide them from every program-side filter (courses don't have these).
         if (currentView === 'programs' && isTemplateProgram(item)) return false;
+        // College perspective scopes everything to the selected college.
+        if (collegeScope && item.college !== collegeScope) return false;
         // Smart-view definitions:
         //   new    = submitted in the last 30 days (no other qualifier)
         //   recent = step advanced in the last 14 days BUT NOT a new submission
@@ -1358,6 +1505,12 @@ function getBaseFiltered(approverProgramIds, exclude) {
 }
 
 async function applyFilters() {
+    // Keep the OTP/College perspective toggle + college picker in sync with
+    // the current view and state on every render.
+    if (currentView === 'programs' || currentView === 'courses') {
+        syncPerspectiveUI();
+        populatePerspectiveCollege();
+    }
     // Catalog view has a fundamentally different schema (paths instead of
     // numeric IDs, no college/type/proposal/campus dimensions). It has its
     // own minimal renderer rather than going through the program/course
@@ -1414,6 +1567,7 @@ async function applyFilters() {
     const collegeDetectorForCounts = currentView === 'courses' ? isCourseCollegeStep : isCollegeStep;
     const collegeBaseAfterPipeline = pipelineFilter ? collegeBase.filter(p => {
         if (pipelineFilter === '__college__') return collegeDetectorForCounts(p.current_step);
+        if (pipelineFilter === '__downstream__') return !!p.current_step && !collegeDetectorForCounts(p.current_step);
         if (pipelineFilter === '__complete__') return !!p.completion_date;
         if (currentView === 'courses') {
             const bd = COURSE_BUCKETS.find(b => b.role === pipelineFilter);
@@ -1429,6 +1583,7 @@ async function applyFilters() {
         if (!pipelineFilter) return set;
         return set.filter(p => {
             if (pipelineFilter === '__college__') return collegeDetectorForCounts(p.current_step);
+            if (pipelineFilter === '__downstream__') return !!p.current_step && !collegeDetectorForCounts(p.current_step);
             if (pipelineFilter === '__complete__') return !!p.completion_date;
             if (currentView === 'courses') {
                 const bd = COURSE_BUCKETS.find(b => b.role === pipelineFilter);
@@ -1450,6 +1605,7 @@ async function applyFilters() {
         : null;
     let filtered = baseFiltered.filter(p => {
         if (pipelineFilter === '__college__' && !collegeDetector(p.current_step)) return false;
+        if (pipelineFilter === '__downstream__') return !!p.current_step && !collegeDetector(p.current_step);
         if (pipelineFilter === '__complete__') {
             return !!p.completion_date;
         }

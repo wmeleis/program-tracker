@@ -234,7 +234,15 @@
 
     <!-- Pipeline Summary -->
     <section id="pipeline" class="pipeline-section">
-        <h2>Pipeline Summary</h2>
+        <div class="pipeline-header-row">
+            <h2>Pipeline Summary</h2>
+            <div id="perspective-bar" class="perspective-bar">
+                <span class="perspective-label">Perspective:</span>
+                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">OTP</button>
+                <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
+                <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
+            </div>
+        </div>
         <div id="pipeline-bar" class="pipeline-bar">
             <!-- Populated by JS -->
         </div>
