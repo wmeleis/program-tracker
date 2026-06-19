@@ -1440,14 +1440,32 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
                 <span class="step-name">${escapeHtml(collegeRoleShort(role))}</span>
             </div>`;
     }).join('');
-    const dsActive = pipelineFilter === '__downstream__' ? ' active' : '';
-    html += `
-        <div class="pipeline-step ${downstream > 0 ? 'has-items' : 'empty'}${dsActive}"
-             onclick="togglePipelineFilter('__downstream__')"
-             title="Past the college (Provost / University): ${downstream}">
-            <span class="step-count">${downstream}</span>
-            <span class="step-name">→ Provost</span>
-        </div>`;
+    // After the college's own roles, show the actual UNIVERSITY (OTP) pipeline
+    // stages — scoped to this college — as individual tiles, rather than one
+    // lumped "→ Provost". A divider marks the hand-off out of the college.
+    const stages = isCourseView ? collapseCoursePipeline(cachedCoursePipeline || []) : (cachedPipeline || []);
+    const stageCount = (role) => {
+        if (isCourseView) {
+            const bd = COURSE_BUCKETS.find(b => b.role === role);
+            return source.filter(p => p.current_step && (bd ? bd.match(p.current_step) : p.current_step === role)).length;
+        }
+        return source.filter(p => p.current_step && canonicalStep(p.current_step) === role).length;
+    };
+    if (stages.length) {
+        html += '<div class="pipeline-divider" title="University pipeline (after the college)">→</div>';
+        html += stages.map(st => {
+            const cnt = stageCount(st.role);
+            const active = pipelineFilter === st.role ? ' active' : '';
+            const roleArg = st.role.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return `
+                <div class="pipeline-step ${cnt > 0 ? 'has-items' : 'empty'}${active}"
+                     onclick="togglePipelineFilter('${roleArg}')"
+                     title="${escapeHtml(st.role)}: ${cnt}">
+                    <span class="step-count">${cnt}</span>
+                    <span class="step-name">${escapeHtml(st.short_name)}</span>
+                </div>`;
+        }).join('');
+    }
     bar.innerHTML = html;
 }
 
