@@ -1274,13 +1274,21 @@ async function loadScanStatus() {
 function updatePipelineCounts(baseFiltered) {
     const pipeline = currentView === 'courses' ? cachedCoursePipeline : cachedPipeline;
     if (!pipeline.length) return;
-    // Recount each pipeline step from filtered data
+    const isCourses = currentView === 'courses';
+    // Recount each pipeline step from filtered data. Program tiles use canonical
+    // stage names (e.g. "Program Setup" covers Catalog Setup / Editor / Banner /
+    // Degree Audit; "Program GRA Regulatory" covers the Modifications-Submitted
+    // variants), so the raw current_step MUST be canonicalized before matching
+    // to a tile — otherwise a searched/filtered program sitting at a folded step
+    // (Catalog Setup, Degree Audit, GRA Modifications) lands in no tile and the
+    // pipeline summary shows 0s. Courses match raw steps via bucket .match below.
     const stepCounts = {};
     baseFiltered.forEach(item => {
-        const step = item.current_step;
-        if (step) stepCounts[step] = (stepCounts[step] || 0) + 1;
+        const raw = item.current_step;
+        if (!raw) return;
+        const key = isCourses ? raw : canonicalStep(raw);
+        stepCounts[key] = (stepCounts[key] || 0) + 1;
     });
-    const isCourses = currentView === 'courses';
     const updated = pipeline.map(step => {
         let count;
         if (isCourses && step._bucket) {
