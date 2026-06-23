@@ -1332,11 +1332,8 @@ function renderPipeline(pipeline, baseFiltered) {
         if (cBtn) { cBtn.classList.toggle('active-complete', pipelineFilter === '__complete__'); cBtn.style.display = ''; }
         return;
     }
-    // Central perspective: static "Pipeline Summary" heading, no panel arrow.
-    const _tog = document.getElementById('pipeline-panel-toggle');
-    if (_tog) _tog.style.display = 'none';
-    const _h2 = document.querySelector('#pipeline h2');
-    if (_h2) _h2.style.display = '';
+    // University perspective: single pipeline, no panel arrows.
+    _setPanelArrows(false);
     // Add College Review as the first step in the pipeline
     const source = baseFiltered || (isCourseView ? allCourses : allPrograms);
     const detector = isCourseView ? isCourseCollegeStep : isCollegeStep;
@@ -1490,17 +1487,30 @@ function renderCollegePipeline(baseFiltered, isCourseView) {
     _collegePipeArgs = { baseFiltered: raw, isCourseView };
     bar.innerHTML = (collegePanel === 'downstream') ? downHtml : collegeHtml;
     bar.classList.remove('pipe-slide-in'); void bar.offsetWidth; bar.classList.add('pipe-slide-in');
-    // Static "Pipeline Summary" heading stays; a small arrow next to it flips
-    // between the college-steps and university-stages panels (▸ forward, ◂ back).
-    const h2 = document.querySelector('#pipeline h2');
-    if (h2) h2.style.display = '';
-    const tog = document.getElementById('pipeline-panel-toggle');
-    if (tog) {
-        tog.style.display = '';
-        const toDownstream = collegePanel !== 'downstream';
-        tog.innerHTML = toDownstream ? '▸' : '◂';
-        tog.title = toDownstream ? 'Show university pipeline' : 'Back to college steps';
-        tog.onclick = () => setCollegePanel(toDownstream ? 'downstream' : 'college');
+    // Flanking arrows on the pipeline row flip between panels: college sits
+    // before university, so the college-steps panel shows a RIGHT arrow (▸ →
+    // forward to university) and the university panel shows a LEFT arrow (◂ →
+    // back to college). The arrows live outside the scrollable bar so they
+    // never scroll off.
+    _setPanelArrows(true, collegePanel);
+}
+
+// Show/hide the two flanking pipeline arrows. show=false hides both (University
+// perspective / non-CIM views). When shown: college panel → right arrow only;
+// university panel → left arrow only.
+function _setPanelArrows(show, panel) {
+    const L = document.getElementById('pipeline-arrow-left');
+    const R = document.getElementById('pipeline-arrow-right');
+    if (!L || !R) return;
+    if (!show) { L.style.display = 'none'; R.style.display = 'none'; return; }
+    if (panel === 'downstream') {
+        R.style.display = 'none';
+        L.style.display = '';
+        L.onclick = () => setCollegePanel('college');
+    } else {
+        L.style.display = 'none';
+        R.style.display = '';
+        R.onclick = () => setCollegePanel('downstream');
     }
 }
 
@@ -1549,12 +1559,7 @@ function syncPerspectiveUI() {
     // The panel toggle only applies in College perspective on a CIM view; hide
     // it elsewhere (renderPipeline also hides it on the Central path, but
     // catalog/portfolio don't call renderPipeline at all).
-    const tog = document.getElementById('pipeline-panel-toggle');
-    if (tog && !(cimPerspective === 'college' && onCimView)) {
-        tog.style.display = 'none';
-        const h2 = document.querySelector('#pipeline h2');
-        if (h2) h2.style.display = '';
-    }
+    if (!(cimPerspective === 'college' && onCimView)) _setPanelArrows(false);
 }
 
 function populateCampusFilter() {

@@ -127,20 +127,26 @@ header h1 {
     gap: 16px;
     margin-bottom: 12px;
 }
-/* In college perspective a small arrow next to the "Pipeline Summary" heading
-   flips between the college-steps and university-stages panels. Lives in the
-   header so it never scrolls off the (horizontally scrollable) bar. */
+/* College perspective: arrows flank the pipeline bar (left = back to college,
+   right = forward to university). They sit OUTSIDE the scrollable bar so they
+   stay pinned at the edges and never scroll off. */
+.pipeline-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+.pipeline-row .pipeline-bar { flex: 1 1 auto; min-width: 0; }
 .panel-arrow {
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 28px;
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface);
     color: var(--accent);
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1;
     cursor: pointer;
 }
