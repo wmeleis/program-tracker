@@ -4678,9 +4678,47 @@ function renderConsoleContent(data) {
     const otpMismatches = mm.otp_mismatches || [];
     const glsMismatches = mm.gls_mismatches || [];
 
+    // ---- Portfolio feed health ----
+    const feedHealth = data.feed_health || {};
+    let html = '';
+    const feedNames = Object.keys(feedHealth);
+    if (feedNames.length) {
+        const fmtTs = s => { try { return new Date(s).toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) + ' ET'; } catch(_) { return s || '—'; } };
+        const now = Date.now();
+        const STALE_MS = 36 * 3600 * 1000;   // flag a feed with no success in 36h
+        let anyBad = false;
+        let rows = '';
+        for (const name of feedNames.sort()) {
+            const f = feedHealth[name] || {};
+            const lastOkMs = f.last_success ? new Date(f.last_success).getTime() : 0;
+            const stale = !lastOkMs || (now - lastOkMs) > STALE_MS;
+            const bad = !f.ok || stale;
+            if (bad) anyBad = true;
+            const color = bad ? '#b91c1c' : '#15803d';
+            const statusTxt = f.ok ? 'OK' : 'FAILED';
+            rows += `<tr style="border-top:1px solid #e2e8f0;background:${bad ? '#fff5f5' : ''}">
+                <td style="padding:5px 8px">${escapeHtml(name)}</td>
+                <td style="padding:5px 8px;color:${color}">${(bad ? '✗ ' : '✓ ') + statusTxt}</td>
+                <td style="padding:5px 8px;white-space:nowrap">${fmtTs(f.last_success)}</td>
+                <td style="padding:5px 8px;white-space:nowrap">${fmtTs(f.last_attempt)}</td>
+                <td style="padding:5px 8px;color:#64748b">${escapeHtml(f.detail || '')}</td>
+            </tr>`;
+        }
+        html += `<h3 style="margin:0 0 6px">Feed Health${anyBad ? ' <span style="color:#b91c1c">⚠ attention needed</span>' : ''}</h3>`;
+        html += '<p style="color:#64748b;font-size:11px;margin:0 0 8px">A feed marked FAILED or with no recent success usually means its source session (SharePoint / Smartsheet) is logged out — the last good copy is kept until it succeeds again.</p>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:20px">'
+             + '<thead><tr style="background:#f1f5f9;text-align:left">'
+             + '<th style="padding:5px 8px">Feed</th>'
+             + '<th style="padding:5px 8px">Status</th>'
+             + '<th style="padding:5px 8px">Last success</th>'
+             + '<th style="padding:5px 8px">Last attempt</th>'
+             + '<th style="padding:5px 8px">Detail</th>'
+             + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
     // ---- Action audit (approve / rollback / comment) ----
     const audit = data.action_audit || [];
-    let html = '<h3 style="margin:0 0 10px">My Actions (approve / rollback / comment)</h3>';
+    html += '<h3 style="margin:0 0 10px">My Actions (approve / rollback / comment)</h3>';
     if (!audit.length) {
         html += '<p class="empty-state">No actions taken yet.</p>';
     } else {

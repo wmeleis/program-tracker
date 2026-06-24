@@ -34,16 +34,33 @@ def _find_db_path():
 import database as _db_module
 _db_module.DB_PATH = _find_db_path()
 
-XLSX_PATH   = os.path.expanduser("~/Downloads/portfolio_sharepoint.xlsx")
-TSV_PATH    = os.path.expanduser("~/Downloads/portfolio_smartsheet.tsv")
-ROSTER_PATH = os.path.expanduser("~/Downloads/portfolio_roster.tsv")
-GLS_PATH    = os.path.expanduser("~/Downloads/portfolio_gls.csv")
+# All feeds are read from the project's data/portfolio_feeds/ directory — the
+# same location fetch_portfolio_data.py writes to. (Previously these pointed at
+# ~/Downloads/, which the fetcher never updated, so OTP/IPD/Roster/GLS silently
+# read months-stale manual copies while only SVT/GTM stayed current.)
+_FEEDS_DIR  = os.path.join(_WORKTREE_DIR, 'data', 'portfolio_feeds')
+XLSX_PATH   = os.path.join(_FEEDS_DIR, "portfolio_sharepoint.xlsx")
+TSV_PATH    = os.path.join(_FEEDS_DIR, "portfolio_smartsheet.tsv")
+ROSTER_PATH = os.path.join(_FEEDS_DIR, "portfolio_roster.tsv")
+GLS_PATH    = os.path.join(_FEEDS_DIR, "portfolio_gls.csv")
 SCORING_2025_PATH = os.path.expanduser(
     "~/committees/nu-docs/Programs/Program review/Program review 2025/"
     "Graduate Program Scoring-Boston-for WM-9-16-25.xlsx"
 )
 OTP_SHEET   = "OTP Program Tracking"
 GTM_PATH    = os.path.join(_WORKTREE_DIR, 'data', 'portfolio_feeds', 'gtm.json')
+
+
+def _safe_parse(label, fn):
+    """Run one feed parser; on any failure (missing file, corrupt/HTML download
+    that slipped past validation, parse error) log it and return [] so the
+    remaining overlays still apply and the prior portfolio values are kept for
+    this feed — one bad feed never aborts the whole ingest."""
+    try:
+        return fn()
+    except Exception as e:
+        print(f"  ⚠ {label} feed unavailable ({e}); skipping its overlay (prior values kept)")
+        return []
 
 # Curated banner codes for the "Exit master's" flag (uppercase). Programs whose
 # CIM banner_code is in this set get exit_masters='Yes'; all others 'No'.
@@ -2376,7 +2393,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # Program Code → CIM banner_code, with Campus disambiguation. Falls
     # back to name parsing (Program Level + Degree Type + Program Name)
     # for rows with no Program Code.
-    svt_rows_data = parse_svt()
+    svt_rows_data = _safe_parse('SVT', parse_svt)
     n_svt_matched = 0
     n_svt_added   = 0
     n_svt_mismatch = 0
@@ -2577,7 +2594,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # so the overlay can be re-enabled by flipping the flag without other
     # code changes, but skipping the entire reconciliation loop.
     IPD_OVERLAY_ENABLED = False
-    ipd_rows_data = parse_smartsheet(tsv_path) if IPD_OVERLAY_ENABLED else []
+    ipd_rows_data = _safe_parse('IPD', lambda: parse_smartsheet(tsv_path)) if IPD_OVERLAY_ENABLED else []
     n_ipd_matched = 0
     n_ipd_added   = 0
     n_ipd_mismatch = 0
@@ -2764,7 +2781,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
           f"{n_ipd_added} added, {n_ipd_mismatch} mismatches, {n_ipd_nonprog} non-programs")
 
     # ── Step 3: Overlay OTP (Boston-only) ────────────────────────────────────
-    otp_rows_data = parse_otp(xlsx_path)
+    otp_rows_data = _safe_parse('OTP', lambda: parse_otp(xlsx_path))
     n_otp_matched  = 0
     n_otp_mismatch = 0
     for p in otp_rows_data:
@@ -2804,7 +2821,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     print(f"  OTP: {len(otp_rows_data)} entries, {n_otp_matched} matched, {n_otp_mismatch} mismatches")
 
     # ── Step 4: Overlay GLS ───────────────────────────────────────────────────
-    gls_data = parse_gls(gls_path)
+    gls_data = _safe_parse('GLS', lambda: parse_gls(gls_path))
     n_gls_matched  = 0
     n_gls_mismatch = 0
     if gls_data:

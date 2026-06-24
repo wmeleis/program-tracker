@@ -69,6 +69,78 @@ _COLLEGE_DASHBOARDS = {
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'portfolio_feeds')
 
+# Per-feed health record (last attempt/success + status) so a silently failing
+# feed (e.g. a logged-out SharePoint/Smartsheet session that returns an HTML
+# login page instead of the file) is visible in the Console instead of quietly
+# rotting. Read by app.py /api/console.
+FEED_HEALTH_PATH = os.path.join(OUTPUT_DIR, 'feed_health.json')
+
+
+def _record_feed_health(name, ok, detail=''):
+    import datetime
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    try:
+        with open(FEED_HEALTH_PATH) as f:
+            h = json.load(f)
+    except Exception:
+        h = {}
+    now = datetime.datetime.now().astimezone().isoformat()
+    entry = h.get(name, {})
+    entry['last_attempt'] = now
+    entry['ok'] = bool(ok)
+    entry['detail'] = detail
+    if ok:
+        entry['last_success'] = now
+    h[name] = entry
+    try:
+        with open(FEED_HEALTH_PATH, 'w') as f:
+            json.dump(h, f, indent=2)
+    except Exception as e:
+        print(f"  (feed_health write failed: {e})")
+
+
+def _looks_valid(kind, data):
+    """Sanity-check downloaded bytes before they overwrite a good feed file.
+    Returns (ok, reason). Catches the common failure: a logged-out session
+    returns an HTML login/redirect page that would otherwise be saved as the
+    feed file and break (xlsx) or corrupt (tsv/csv/json) the next ingest."""
+    if not data or len(data) < 16:
+        return False, 'empty/too small'
+    low = data[:64].lstrip().lower()
+    if low.startswith(b'<!doctype') or low.startswith(b'<html'):
+        return False, 'HTML page (login/redirect?)'
+    if kind == 'xlsx':
+        if not data.startswith(b'PK\x03\x04'):
+            return False, 'not a zip/xlsx'
+    elif kind == 'json':
+        try:
+            json.loads(data)
+        except Exception:
+            return False, 'invalid JSON'
+    return True, ''
+
+
+def _save_validated(name, out_path, data, kind):
+    """Write `data` to out_path only if it validates as `kind`; otherwise keep
+    the existing (last-good) file untouched and record the failure. `data` may
+    be str or bytes. Returns True on a successful (validated) write."""
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    ok, reason = _looks_valid(kind, data)
+    if not ok:
+        had = os.path.exists(out_path)
+        print(f"  ⚠ {name}: download invalid ({reason}); "
+              f"{'kept previous good copy' if had else 'NO previous copy on disk'}")
+        _record_feed_health(name, False, f'invalid download: {reason}')
+        return False
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(out_path, 'wb') as f:
+        f.write(data)
+    _record_feed_health(name, True, f'{len(data):,} bytes')
+    print(f"  Saved: {out_path}  ({len(data):,} bytes)")
+    return True
+
+
 _frontmost_app = None  # cached before any Chrome interaction
 
 
@@ -481,11 +553,13 @@ def fetch_sharepoint():
     meta_raw = poll_div(_sp_fragment, "__xlmeta", timeout=90)
     if not meta_raw:
         print("  Timeout waiting for download")
+        _record_feed_health('OTP (SharePoint)', False, 'timeout waiting for download')
         return
 
     meta = json.loads(meta_raw)
     if 'error' in meta:
         print(f"  Download error: {meta['error']}")
+        _record_feed_health('OTP (SharePoint)', False, f"download error: {meta['error']}")
         return
 
     parts = []
@@ -499,9 +573,7 @@ def fetch_sharepoint():
 
     xlsx_bytes = base64.b64decode(''.join(parts))
     out = os.path.join(OUTPUT_DIR, "portfolio_sharepoint.xlsx")
-    with open(out, 'wb') as f:
-        f.write(xlsx_bytes)
-    print(f"  Saved: {out}  ({len(xlsx_bytes):,} bytes)")
+    _save_validated('OTP (SharePoint)', out, xlsx_bytes, 'xlsx')
 
     # Clean up holder divs
     run_js(_sp_fragment,
@@ -539,14 +611,14 @@ def fetch_smartsheet():
 
     if not raw or not raw.startswith('['):
         print(f"  Failed to extract rows: {(raw or '')[:100]}")
+        _record_feed_health('IPD (Smartsheet)', False, 'failed to extract rows (logged out?)')
+        _restore_focus()
         return
 
     rows = json.loads(raw)
     lines = ['\t'.join(row) for row in rows]
     out = os.path.join(OUTPUT_DIR, "portfolio_smartsheet.tsv")
-    with open(out, 'w') as f:
-        f.write('\n'.join(lines))
-    print(f"  Saved: {out}  ({len(rows)} rows)")
+    _save_validated('IPD (Smartsheet)', out, '\n'.join(lines), 'tsv')
     _restore_focus()
 
 
@@ -589,17 +661,17 @@ def fetch_svt_sheet():
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = r.read()
-        with open(out_path, 'wb') as f:
-            f.write(data)
-        # Quick stats
-        import json as _json
-        d = _json.loads(data)
-        print(f"  Saved: {out_path}  ({d.get('totalRowCount', '?')} rows, "
-              f"{len(d.get('columns', []))} columns)")
+        if _save_validated('SVT (Smartsheet API)', out_path, data, 'json'):
+            import json as _json
+            d = _json.loads(data)
+            print(f"    ({d.get('totalRowCount', '?')} rows, "
+                  f"{len(d.get('columns', []))} columns)")
     except urllib.error.HTTPError as e:
         print(f"  ERROR HTTP {e.code}: {e.reason}")
+        _record_feed_health('SVT (Smartsheet API)', False, f'HTTP {e.code}: {e.reason}')
     except Exception as e:
         print(f"  ERROR: {e}")
+        _record_feed_health('SVT (Smartsheet API)', False, str(e))
 
 
 def fetch_gtm_sheet():
@@ -630,16 +702,17 @@ def fetch_gtm_sheet():
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = r.read()
-        with open(out_path, 'wb') as f:
-            f.write(data)
-        import json as _json
-        d = _json.loads(data)
-        print(f"  Saved: {out_path}  ({d.get('totalRowCount', '?')} rows, "
-              f"{len(d.get('columns', []))} columns)")
+        if _save_validated('GTM (Smartsheet API)', out_path, data, 'json'):
+            import json as _json
+            d = _json.loads(data)
+            print(f"    ({d.get('totalRowCount', '?')} rows, "
+                  f"{len(d.get('columns', []))} columns)")
     except urllib.error.HTTPError as e:
         print(f"  ERROR HTTP {e.code}: {e.reason}")
+        _record_feed_health('GTM (Smartsheet API)', False, f'HTTP {e.code}: {e.reason}')
     except Exception as e:
         print(f"  ERROR: {e}")
+        _record_feed_health('GTM (Smartsheet API)', False, str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -768,9 +841,7 @@ def fetch_roster_dashboards():
 
     _restore_focus()
     out = os.path.join(OUTPUT_DIR, "portfolio_roster.tsv")
-    with open(out, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(all_lines))
-    print(f"  Saved: {out}  ({len(all_lines)} total rows from {len(all_dashboards)} dashboards)")
+    _save_validated('SVT Roster (Tableau)', out, '\n'.join(all_lines), 'tsv')
 
 
 # ---------------------------------------------------------------------------
@@ -860,13 +931,11 @@ def fetch_gls_tableau():
         status, raw = _req('GET', data_url, token=auth_token, accept='*/*', timeout=120)
         if status != 200:
             print(f"  CSV download failed (HTTP {status}): {raw[:200]}")
+            _record_feed_health('GLS (Tableau)', False, f'CSV download failed HTTP {status}')
             return
         csv_text = raw.decode('utf-8-sig')  # strip BOM if present
         out = os.path.join(OUTPUT_DIR, "portfolio_gls.csv")
-        with open(out, 'w', encoding='utf-8') as f:
-            f.write(csv_text)
-        lines = csv_text.count('\n')
-        print(f"  Saved: {out}  ({lines} rows, {len(csv_text):,} chars)")
+        _save_validated('GLS (Tableau)', out, csv_text, 'csv')
 
     finally:
         # Sign out

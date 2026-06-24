@@ -1633,8 +1633,19 @@ def api_console():
         pass
     except Exception:
         pass
+    # Portfolio feed health (per-feed last attempt/success + status) so a
+    # silently failing feed (logged-out SharePoint/Smartsheet → HTML login page)
+    # is visible instead of quietly going stale. Written by fetch_portfolio_data.
+    feed_health = {}
+    _FEED_HEALTH_PATH = os.path.join(_DATA_DIR, 'portfolio_feeds', 'feed_health.json')
+    try:
+        with open(_FEED_HEALTH_PATH) as f:
+            feed_health = _json.load(f)
+    except Exception:
+        pass
     return jsonify({'scan_log': scan_log, 'mismatches': mismatches,
-                    'mismatch_report': mismatch_report, 'action_audit': action_audit})
+                    'mismatch_report': mismatch_report, 'action_audit': action_audit,
+                    'feed_health': feed_health})
 
 
 @app.route('/api/colleges')
