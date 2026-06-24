@@ -1311,6 +1311,7 @@ def init_portfolio_tables(conn):
             otp_internal_performance TEXT DEFAULT '',
             otp_q3_status TEXT DEFAULT '',
             otp_effective_term TEXT DEFAULT '',
+            otp_notes TEXT DEFAULT '',
             ipd_status TEXT DEFAULT '',
             ipd_proposal_type TEXT DEFAULT '',
             ipd_additional_college TEXT DEFAULT '',
@@ -1363,7 +1364,7 @@ def init_portfolio_tables(conn):
                 'market_score_2025', 'performance_score_2025', 'cim_change_type',
                 'inactivation_admission', 'proposal_stage',
                 'gtm_type', 'gtm_date', 'gtm_first_term', 'gtm_last_term', 'gtm_intake_terms',
-                'exit_masters'):
+                'exit_masters', 'otp_notes'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1382,7 +1383,7 @@ def upsert_portfolio_program(row):
                 (id, program_name, college, campus,
                  otp_status, otp_sub_status, otp_market_potential,
                  otp_market_signal, otp_internal_performance,
-                 otp_q3_status, otp_effective_term,
+                 otp_q3_status, otp_effective_term, otp_notes,
                  ipd_status, ipd_proposal_type, ipd_additional_college,
                  svt_status, roster_sub_status, roster_proposal_type, roster_launch_date, speed_to_market,
                  gls_status,
@@ -1397,7 +1398,7 @@ def upsert_portfolio_program(row):
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
                  :otp_market_signal, :otp_internal_performance,
-                 :otp_q3_status, :otp_effective_term,
+                 :otp_q3_status, :otp_effective_term, :otp_notes,
                  :ipd_status, :ipd_proposal_type, :ipd_additional_college,
                  :svt_status, :roster_sub_status, :roster_proposal_type, :roster_launch_date, :speed_to_market,
                  :gls_status,
@@ -1419,6 +1420,7 @@ def upsert_portfolio_program(row):
                 otp_internal_performance=excluded.otp_internal_performance,
                 otp_q3_status=excluded.otp_q3_status,
                 otp_effective_term=excluded.otp_effective_term,
+                otp_notes=excluded.otp_notes,
                 ipd_status=excluded.ipd_status,
                 ipd_proposal_type=excluded.ipd_proposal_type,
                 ipd_additional_college=excluded.ipd_additional_college,

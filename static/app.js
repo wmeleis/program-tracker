@@ -5087,6 +5087,8 @@ const PORTFOLIO_COLUMNS = [
         help: "Whether the program is a designated exit-master's-only program (curated by banner code)."},
     {key: 'notes',        label: 'Notes',
         help: 'Free-form notes from the source feeds (CIM justification, IPD comments, etc.).'},
+    {key: 'emplreview',   label: 'April 2026 EMPL Review',
+        help: 'Notes (column M) from the "OTP Program Tracking" sheet of the Optimization, Withdrawal, and Deactivation Tracker — the April 2026 EMPL review notes (Boston-only).'},
 ];
 
 // Tracks which column keys have ever existed in PORTFOLIO_COLUMNS at the
@@ -7010,6 +7012,7 @@ function renderPortfolioTable() {
             case 'gtmlast':     av = a.gtm_last_term || '';   bv = b.gtm_last_term || '';   break;
             case 'gtmintake':   av = a.gtm_intake_terms || ''; bv = b.gtm_intake_terms || ''; break;
             case 'exitmasters': av = a.exit_masters || '';     bv = b.exit_masters || '';     break;
+            case 'emplreview':  av = a.otp_notes || '';        bv = b.otp_notes || '';        break;
             case 'market2025':    av = a.market_2025 || '';    bv = b.market_2025 || '';    break;
             case 'perf2025':      av = a.performance_2025 || ''; bv = b.performance_2025 || ''; break;
             case 'marketscore2025': av = parseFloat(a.market_score_2025) || 0; bv = parseFloat(b.market_score_2025) || 0;
@@ -7341,6 +7344,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('gtmintake', escapeHtml(p.gtm_intake_terms || ''))}
         ${_pc('exitmasters', escapeHtml(p.exit_masters || ''))}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
+        ${_pc('emplreview', escapeHtml(p.otp_notes || ''))}
     </tr>`;
 }
 
@@ -7396,6 +7400,7 @@ function exportPortfolioCsv() {
             case 'marketscore2025': return p.market_score_2025 != null ? String(p.market_score_2025) : '';
             case 'perfscore2025':   return p.performance_score_2025 != null ? String(p.performance_score_2025) : '';
             case 'notes':       return p.note || '';
+            case 'emplreview':  return p.otp_notes || '';
             default:            return '';
         }
     }

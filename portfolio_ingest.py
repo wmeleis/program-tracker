@@ -156,6 +156,8 @@ def parse_otp(path=XLSX_PATH):
             'otp_internal_performance':    row.get('G', '').strip(),
             'otp_q3_status':               row.get('J', '').strip(),
             'otp_effective_term':          row.get('K', '').strip(),
+            # Column M = "Notes" (col L = "Review Period", not captured).
+            'otp_notes':                   row.get('M', '').strip(),
         })
     return programs
 
@@ -1923,7 +1925,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     _EMPTY_TRACKING = {
         'otp_status': '', 'otp_sub_status': '', 'otp_market_potential': '',
         'otp_market_signal': '', 'otp_internal_performance': '',
-        'otp_q3_status': '', 'otp_effective_term': '',
+        'otp_q3_status': '', 'otp_effective_term': '', 'otp_notes': '',
         'ipd_status': '', 'ipd_proposal_type': '', 'ipd_additional_college': '',
         'svt_status': '', 'roster_sub_status': '', 'roster_proposal_type': '',
         'roster_launch_date': '',
@@ -2806,6 +2808,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 row['otp_internal_performance'] = p['otp_internal_performance']
                 row['otp_q3_status']            = p['otp_q3_status']
                 row['otp_effective_term']       = p['otp_effective_term']
+                row['otp_notes']                = p['otp_notes']
             if not row.get('college') and p.get('college'):
                 row['college'] = p['college']
         else:
@@ -2999,6 +3002,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     'ipd_additional_college','otp_status','otp_sub_status',
                     'otp_market_potential','otp_market_signal',
                     'otp_internal_performance','otp_q3_status','otp_effective_term',
+                    'otp_notes',
                     'gls_status'):
             if not t.get(fld) and source_row.get(fld):
                 t[fld] = source_row[fld]
