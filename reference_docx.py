@@ -1,123 +1,169 @@
-"""Generate a clean, standardized Word (.docx) document from a parsed
-reference curriculum.
+"""Generate a clean, shareable Word (.docx) document from a parsed reference
+curriculum.
 
-The custom_references table stores each uploaded reference as `sections_json`
-(produced by docx_parser / pdf_parser) — a list of:
+The custom_references table stores each reference as `sections_json` — a list of:
 
     {"heading": "<section name>",
      "courses": [
-        {"is_header": true,  "text": "<sub-header>"},
+        {"is_header": true,  "text": "<sub-header or instruction>", "level": "block|area|inst"},
         {"is_header": false, "code": "BINF 6200", "title": "...", "hours": "4"},
         ...
      ]}
 
-This module renders that structure into a consistently formatted .docx:
-a document title, each section as a Heading, and a 3-column course table
-(Course / Title / Hours) with sub-headers shown as bold full-width rows.
-The output is intentionally uniform across references regardless of how
-messy the original upload was — that's the "standard, organized format".
+`level` is optional. When present it controls styling precisely; when absent
+(e.g. parser-produced references) it's inferred heuristically. Output layout:
+
+  • document title (Heading 0)
+  • "block" headers  -> Heading 1   (e.g. concentration names, "Core Requirements")
+  • "area" headers   -> bold line    (e.g. "Business Management", "Technical")
+  • "inst" headers   -> italic line   (e.g. "Complete two of the following: (6 SH)")
+  • a "Total credit hours: …" header -> bold summary line at the bottom
+  • course rows       -> 3-column table (Course / Title / Hours)
+
+This is the same content that drives the dashboard Compare/Reference tabs, so
+clicking Download yields the shareable document — one source of truth.
 """
 
 import re
 from io import BytesIO
 
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# CourseLeaf wrapper headings that carry no real meaning — they label the whole
-# curriculum block, not a distinct section, and the source docs repeat them.
-# Dropped from the output (the courses underneath still render).
 _BOILERPLATE_HEADINGS = {
     'catalog presentation of this program',
+    'course list',
 }
 
+# A header row that reads as an instruction (rendered italic, above its table)
+# rather than a section/area label.
+_INST_RE = re.compile(
+    r'(following:|prerequisite|in place of'
+    r'|^\s*complete\b|^\s*select\b|^\s*registration\b|^\s*then complete'
+    r'|^\s*note\b|^\s*a concentration is required|^\s*thesis topic approval'
+    r'|\bSH\))',
+    re.I,
+)
+# A header row that should be a top-level Heading (concentration block, etc.).
+_BLOCK_RE = re.compile(
+    r'(concentration\s*$|without concentration|^\s*core requirements\s*$'
+    r'|^\s*pathway differences)',
+    re.I,
+)
 
-def _norm_heading(h):
+
+def _norm(h):
     return re.sub(r'\s+', ' ', (h or '').replace('\xa0', ' ')).strip()
 
 
+def _classify(text, level):
+    """Return 'block' | 'area' | 'inst' | 'total' for a header row."""
+    if level in ('block', 'area', 'inst'):
+        return level
+    t = _norm(text)
+    if re.match(r'(?i)^total credit hours', t):
+        return 'total'
+    if _INST_RE.search(t):
+        return 'inst'
+    if _BLOCK_RE.search(t):
+        return 'block'
+    return 'area'
+
+
 def _course_sig(courses):
-    """Signature of a section's course rows (code+title), for de-duplication."""
     return tuple(
         ((c.get('code') or '').strip().lower(), (c.get('title') or '').strip().lower())
         for c in (courses or []) if not c.get('is_header')
     )
 
 
-def _set_cell_text(cell, text, bold=False):
-    cell.text = ''
-    para = cell.paragraphs[0]
-    run = para.add_run(text or '')
-    run.bold = bold
-    run.font.size = Pt(10)
+def _sp(p, before, after):
+    pf = p.paragraph_format
+    pf.space_before = Pt(before)
+    pf.space_after = Pt(after)
+    return p
 
 
 def build_reference_docx(name, sections, notes='', title=''):
-    """Return .docx bytes for a parsed reference curriculum.
-
-    `sections` is the decoded sections_json list. `name`/`title` head the
-    document; `notes` (if any) appear under the title.
-    """
+    """Return .docx bytes for a parsed reference curriculum."""
     doc = Document()
+    doc.styles['Normal'].font.name = 'Calibri'
+    doc.styles['Normal'].font.size = Pt(10.5)
 
-    # Document title
     heading_text = (title or name or 'Reference Curriculum').strip()
-    h = doc.add_heading(heading_text, level=0)
-    h.alignment = WD_ALIGN_PARAGRAPH.LEFT
-
+    doc.add_heading(heading_text, level=0)
     if notes:
         p = doc.add_paragraph()
-        run = p.add_run(notes.strip())
-        run.italic = True
-        run.font.size = Pt(10)
-        run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+        r = p.add_run(_norm(notes))
+        r.italic = True
+        r.font.size = Pt(10)
+        r.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+        _sp(p, 0, 8)
 
-    seen_sigs = set()        # (heading_lower, course_sig) already rendered → drop exact dups
-    prev_heading_lower = None  # suppress a heading that just repeats the one above
+    tbl = [None]   # current open course table (mutable holder)
+
+    def new_table():
+        t = doc.add_table(rows=0, cols=3)
+        try:
+            t.style = 'Light Grid Accent 1'
+        except Exception:
+            t.style = 'Table Grid'
+        return t
+
+    def add_course(code, title_, hours):
+        if tbl[0] is None:
+            tbl[0] = new_table()
+        cells = tbl[0].add_row().cells
+        cells[0].paragraphs[0].add_run(code or '')
+        cells[1].paragraphs[0].add_run(title_ or '')
+        cells[2].paragraphs[0].add_run(hours or '')
+        for c, w in zip(cells, (1.5, 4.7, 0.5)):
+            c.width = Inches(w)
+            for para in c.paragraphs:
+                for run in para.runs:
+                    run.font.size = Pt(10)
+
+    def add_header(text, kind):
+        tbl[0] = None  # close any open table
+        text = _norm(text)
+        if not text:
+            return
+        if kind == 'block':
+            _sp(doc.add_heading(text, level=1), 18, 4)
+        elif kind == 'inst':
+            p = doc.add_paragraph()
+            p.add_run(text).italic = True
+            _sp(p, 2, 2)
+        elif kind == 'total':
+            p = doc.add_paragraph()
+            p.add_run(text).bold = True
+            _sp(p, 18, 0)
+        else:  # area
+            p = doc.add_paragraph()
+            p.add_run(text).bold = True
+            _sp(p, 10, 2)
+
+    seen = set()
+    prev_heading = None
     for section in (sections or []):
-        sec_heading = _norm_heading(section.get('heading'))
+        sec_heading = _norm(section.get('heading'))
         courses = section.get('courses') or []
-        heading_lower = sec_heading.lower()
+        hl = sec_heading.lower()
         sig = _course_sig(courses)
-
-        # Drop a section that exactly repeats an earlier one (same heading +
-        # identical course list) — e.g. CGT's duplicated "Program Credit/GPA
-        # Requirements" modality tables.
-        if (heading_lower, sig) in seen_sigs and sig:
+        if (hl, sig) in seen and sig:
             continue
-        seen_sigs.add((heading_lower, sig))
-
-        # Show the heading unless it's boilerplate or it just repeats the
-        # heading immediately above (a near-duplicate variant of the same
-        # section). The courses still render either way.
-        show_heading = bool(sec_heading) \
-            and heading_lower not in _BOILERPLATE_HEADINGS \
-            and heading_lower != prev_heading_lower
-        prev_heading_lower = heading_lower
-        if show_heading:
-            doc.add_heading(sec_heading, level=2)
-        if not courses:
-            continue
-
-        table = doc.add_table(rows=1, cols=3)
-        table.style = 'Table Grid'
-        hdr = table.rows[0].cells
-        _set_cell_text(hdr[0], 'Course', bold=True)
-        _set_cell_text(hdr[1], 'Title', bold=True)
-        _set_cell_text(hdr[2], 'Hours', bold=True)
-
+        seen.add((hl, sig))
+        if sec_heading and hl not in _BOILERPLATE_HEADINGS and hl != prev_heading:
+            add_header(sec_heading, _classify(sec_heading, None))
+        prev_heading = hl
         for c in courses:
             if c.get('is_header'):
-                row = table.add_row().cells
-                # Sub-header: merge the three cells into one bold full-width row.
-                merged = row[0].merge(row[1]).merge(row[2])
-                _set_cell_text(merged, (c.get('text') or '').strip(), bold=True)
+                add_header(c.get('text'), _classify(c.get('text'), c.get('level')))
             else:
-                row = table.add_row().cells
-                _set_cell_text(row[0], (c.get('code') or '').strip())
-                _set_cell_text(row[1], (c.get('title') or '').strip())
-                _set_cell_text(row[2], (c.get('hours') or '').strip())
+                add_course((c.get('code') or '').strip(),
+                           (c.get('title') or '').strip(),
+                           (c.get('hours') or '').strip())
 
     buf = BytesIO()
     doc.save(buf)
