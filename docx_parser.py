@@ -66,8 +66,17 @@ def _cell_paragraphs(cell):
 
 
 def _normalize_code(text):
-    """Normalize 'BIOT\xa05120' or 'BIOT 5120' to 'BIOT 5120' (with a regular space)."""
-    return text.replace('\xa0', ' ').strip()
+    """Normalize 'BIOT\xa05120' or 'BIOT 5120' to 'BIOT 5120' (with a regular space).
+
+    Also re-inserts a missing space when a course code's alpha prefix and number
+    arrive glued together — this happens when Word splits them across separate
+    runs (e.g. <w:r>BINF</w:r><w:r>7700</w:r>), which our run-concatenation joins
+    as 'BINF7700'. Without this the code renders mangled and won't match in the
+    Compare diff.
+    """
+    text = re.sub(r'\s+', ' ', text.replace('\xa0', ' ')).strip()
+    text = re.sub(r'^([A-Za-z]{2,5})(\d{4})\b', r'\1 \2', text)
+    return text
 
 
 def _is_course_code(text):
@@ -140,12 +149,19 @@ def _parse_table(tbl):
 
         if _is_course_code(code_cell):
             title = cells[1] if len(cells) > 1 else ''
-            hours = cells[2] if len(cells) > 2 else ''
+            hours = (cells[2] if len(cells) > 2 else '').strip()
+            # When there's no separate hours cell, the SH value is sometimes
+            # tacked onto the end of the title after a run of spaces
+            # (e.g. "Bioinformatics Research Directions        4"). Split it out.
+            if not hours:
+                m = re.search(r'^(.*?\S)\s{2,}(\d{1,2})\s*$', title)
+                if m:
+                    title, hours = m.group(1), m.group(2)
             rows.append({
                 'is_header': False,
                 'code': code_cell,
-                'title': title,
-                'hours': hours.strip(),
+                'title': re.sub(r'\s+', ' ', title).strip(),
+                'hours': hours,
             })
         elif (m := OR_COURSE_CODE_RE.match(code_cell)):
             prefix = m.group(1).lower()
