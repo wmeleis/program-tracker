@@ -1460,22 +1460,25 @@ function renderEMPipeline(baseFiltered) {
     const bar = document.getElementById('pipeline-bar');
     const source = baseFiltered || allPrograms;
     const TILES = [
-        ['__em_college__',       'College'],
-        ['__em_ugcc__',          'UGCC'],
-        ['__em_registrar__',     'Registrar'],
-        ['__em_gtm__',           'GTM add'],
-        ['__em_inactivations__', 'GTM inactivation'],
+        ['__em_college__',       'College',          'Graduate new offerings or inactivations at a college-level step (department chair, college dean, or college curriculum committee).'],
+        ['__em_ugcc__',          'UGCC',             'Graduate new offerings or inactivations currently at the Graduate Curriculum Committee step.'],
+        ['__em_registrar__',     'Registrar',        'Graduate new offerings or inactivations currently at the Program Setup (Registrar) step.'],
+        ['__em_gtm__',           'GTM add',          'New graduate concentrations and certificates that have passed the Graduate Curriculum Committee, and new degrees that have passed the Board of Trustees — plus those completed effective in the 2025-2026 catalog or later.'],
+        ['__em_inactivations__', 'GTM inactivation', 'Graduate programs with an inactivation proposal (whole-program deactivation).'],
     ];
-    bar.innerHTML = TILES.map(([key, label]) => {
+    bar.innerHTML = TILES.map(([key, label, tip]) => {
         const count = source.filter(p => emBucketMatch(p, key)).length;
         const active = pipelineFilter === key ? ' active' : '';
         const gtm = key === '__em_gtm__' ? ' em-gtm' : (key === '__em_inactivations__' ? ' em-inact' : '');
+        const tipHtml = tip
+            ? `<span class="info-tip" onclick="event.stopPropagation()"><i class="tip-icon">i</i><span class="tip-bubble">${escapeHtml(tip)}</span></span>`
+            : '';
         return `
             <div class="pipeline-step ${count > 0 ? 'has-items' : 'empty'}${active}${gtm}"
                  onclick="togglePipelineFilter('${key}')"
                  title="${escapeHtml(label)}: ${count} programs">
                 <span class="step-count">${count}</span>
-                <span class="step-name">${escapeHtml(label)}</span>
+                <span class="step-name">${escapeHtml(label)}${tipHtml}</span>
             </div>`;
     }).join('');
     const completeBtn = document.getElementById('btn-proposal-complete');
