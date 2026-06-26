@@ -576,6 +576,17 @@ def _xml_tag(xml, tag):
     return val.strip()
 
 
+def _xml_tags_all(xml, tag):
+    """All values for a repeated tag, '|'-joined (e.g. existing_concentration)."""
+    out = []
+    for m in re.finditer(r'<' + tag + r'\b[^>]*>(.*?)</' + tag + r'>', xml, re.S):
+        v = re.sub(r'^\s*<!\[CDATA\[', '', m.group(1))
+        v = re.sub(r'\]\]>\s*$', '', v).strip()
+        if v:
+            out.append(v)
+    return '|'.join(out)
+
+
 def parse_program_xml(xml):
     """Extract program metadata from the CIM XML API (mirrors the JS getXml)."""
     statustype = _xml_tag(xml, 'statustype')
@@ -603,7 +614,24 @@ def parse_program_xml(xml):
         'curriculum_html': _xml_tag(xml, 'body'),
         'proposal_type': proposal_type,
         'delete_justification': delete_justification,
+        # New/removed offering signals (for the EM perspective). Derived from
+        # CIM-native fields; parse_new_offerings lives in scraper (lazy import to
+        # avoid the scraper<->cim_http import cycle).
+        **_new_offering_fields(xml),
     }
+
+
+def _new_offering_fields(xml):
+    from scraper import parse_new_offerings
+    return parse_new_offerings({
+        'existing_concentration': _xml_tags_all(xml, 'existing_concentration'),
+        'concentration_subscreen': _xml_tag(xml, 'concentration_subscreen'),
+        'new_degree_type': _xml_tag(xml, 'new_degree_type'),
+        'gr_cert_cags': _xml_tag(xml, 'gr_cert_cags'),
+        'gr_cert_cags_conctitle': _xml_tag(xml, 'gr_cert_cags_conctitle'),
+        'delete_rec': _xml_tag(xml, 'deleterec'),
+        'delete_status': _xml_tag(xml, 'deletestatus'),
+    })
 
 
 def _xml_first(xml, *tags):

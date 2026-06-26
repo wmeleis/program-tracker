@@ -103,9 +103,11 @@ def parse_new_offerings(meta):
         record (deleterec=true / deletestatus=Deactivated).
     """
     # Raw subscreen has each field on its own line with empty cells between
-    # (e.g. "8-1\n\tNo\n\t\n\t\n\tMedical Affairs… (MASL)\n\tYes"); collapse
-    # whitespace so entries read "8-1 No <Title> Yes" / "1-1 Yes HEIN Yes".
-    sub = re.sub(r'\s+', ' ', (meta.get('concentration_subscreen') or '')).strip()
+    # (e.g. "8-1\n\tNo\n\t\n\t\n\tMedical Affairs… (MASL)\n\tYes"); the HTTP path
+    # may also include inner XML tags. Strip tags, then collapse whitespace so
+    # entries read "8-1 No <Title> Yes" / "1-1 Yes HEIN Yes".
+    sub = re.sub(r'<[^>]+>', ' ', (meta.get('concentration_subscreen') or ''))
+    sub = re.sub(r'\s+', ' ', sub).strip()
     new_concs = []
     # subscreen entries look like: "<row> <Yes|No> <code-or-title ...> <atadmit Yes|No>"
     # e.g. "8-1 No Medical Affairs/Medical Science Liaison (MASL) Yes"
@@ -2649,6 +2651,9 @@ def run_full_scan(force_fetch_only=False):
             'completion_date': completion_date,
             'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            'new_concentrations': meta.get('new_concentrations', ''),
+            'new_offering': meta.get('new_offering', ''),
+            'inactivates': meta.get('inactivates', ''),
         }
 
         # Detect changes
@@ -2965,6 +2970,9 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
             'completion_date': completion_date,
             'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            'new_concentrations': meta.get('new_concentrations', ''),
+            'new_offering': meta.get('new_offering', ''),
+            'inactivates': meta.get('inactivates', ''),
         }
 
         upsert_program(program_data)
@@ -3354,6 +3362,9 @@ def heal_stale_program_steps(log=False, active_only=True):
                 'completion_date': '',
                 'campus': meta.get('campus', ''),
                 'eff_cat': meta.get('eff_cat', ''),
+                'new_concentrations': meta.get('new_concentrations', ''),
+                'new_offering': meta.get('new_offering', ''),
+                'inactivates': meta.get('inactivates', ''),
             }
             upsert_program(program_data)
             if steps:
