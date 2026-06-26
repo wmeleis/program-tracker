@@ -117,14 +117,17 @@ def parse_new_offerings(meta):
             if title:
                 new_concs.append(title)
     new_degree = bool((meta.get('new_degree_type') or '').strip())
-    new_cert = bool((meta.get('gr_cert_cags_conctitle') or '').strip()) \
-        or bool((meta.get('gr_cert_cags') or '').strip())
+    # NOTE: new_cert is intentionally NOT derived here. `gr_cert_cags` is just a
+    # "does this program have cert/CAGS concentrations?" Yes/No flag and
+    # `gr_cert_cags_conctitle` holds EXISTING titles — neither marks a *new*
+    # cert (they over-flagged 343 grad programs). A genuinely new standalone
+    # certificate proposal surfaces via proposal_type='New Program Proposal';
+    # new cert-style concentrations surface via existing_concentration='No'.
     inactivates = (meta.get('delete_rec') or '').strip().lower() == 'true' \
         or (meta.get('delete_status') or '').strip().lower() == 'deactivated'
     parts = []
     if new_concs:  parts.append('new_concentration')
     if new_degree: parts.append('new_degree')
-    if new_cert:   parts.append('new_cert')
     return {
         'new_concentrations': '; '.join(new_concs),
         'new_offering': ','.join(parts),
