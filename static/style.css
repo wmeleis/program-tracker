@@ -210,6 +210,10 @@ header h1 {
 @keyframes pipeSlideIn { from { opacity: 0.3; transform: translateX(14px); } to { opacity: 1; transform: translateX(0); } }
 .pipeline-bar.pipe-slide-in { animation: pipeSlideIn 0.18s ease; }
 .pipeline-step.has-items { background: #eff6ff; }
+/* EM "Ready for GTM" tile — green to read as the go signal. */
+.pipeline-step.em-gtm.has-items { background: #ecfdf5; }
+.pipeline-step.em-gtm .step-count { color: #15803d; }
+.pipeline-step.em-gtm.active { border-color: #15803d; }
 .pipeline-step.has-items .step-count { color: var(--accent); }
 .pipeline-step.empty { background: #f8fafc; }
 .pipeline-step.empty .step-count { color: var(--pending); }

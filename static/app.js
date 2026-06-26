@@ -700,6 +700,58 @@ function _cimCollegeDetector() {
     return isCourse ? isCourseCollegeStep : isCollegeStep;
 }
 
+// ── EM (Enrollment Management) perspective ──────────────────────────────────
+// Programs only, university-wide. Tracks new offerings (Added) and inactivations
+// (Deactivated); ignores plain edits to existing programs. The key derived
+// signal is "Ready for GTM" — governance cleared so enrollment/marketing can act.
+// Canonical-stage ordinal (College=0 … Teach-Out=13) used to test "past stage X".
+const EM_STAGE_ORD = {
+    "Program PR Graduate Dean's Office": 1,
+    "Provost Initial Review": 2,
+    "Program Review 2": 3,
+    "Program Graduate Provost Review": 4,
+    "Program GRA Regulatory": 5,
+    "Program Graduate Curriculum Committee": 6,                       // UGCC gate (grad)
+    "Program Undergraduate Curriculum Committee - Tabled Proposals": 7,
+    "Program Provost Administrative and Budgetary Review": 8,
+    "Program Provost Approval": 9,
+    "Program Faculty Senate": 10,
+    "Program University Board of Trustees": 11,                       // BOT gate
+    "Program Setup": 12,                                              // Registrar
+    "Program Teach-Out": 13,
+};
+const EM_UGCC_STEP = "Program Graduate Curriculum Committee";  // grad-focused gate
+const EM_UGCC_ORD = 6, EM_BOT_ORD = 11;
+
+function emStageOrd(step) {
+    if (!step) return -1;
+    if (isCollegeStep(step)) return 0;
+    return EM_STAGE_ORD[canonicalStep(step)] ?? -1;
+}
+// EM tracks new offerings + inactivations; ignores plain edits to existing programs.
+function emIncluded(p) {
+    return p && (p.status === 'Added' || p.status === 'Deactivated');
+}
+// Ready for GTM = governance cleared: concentrations/certs past the (grad)
+// curriculum committee; everything else past the Board of Trustees; or completed.
+function emReadyForGTM(p) {
+    if (!p) return false;
+    if (p.completion_date && !p.current_step) return true;   // approved/historical
+    if (!p.current_step) return false;
+    const kind = classifyProgramKind(p);
+    const gate = (kind === 'concentration' || kind === 'certificate') ? EM_UGCC_ORD : EM_BOT_ORD;
+    return emStageOrd(p.current_step) > gate;
+}
+// EM tile membership (overlapping: a program can be e.g. both Registrar and GTM).
+function emBucketMatch(p, bucket) {
+    if (!emIncluded(p)) return false;
+    if (bucket === '__em_gtm__')       return emReadyForGTM(p);
+    if (bucket === '__em_college__')   return isCollegeStep(p.current_step);
+    if (bucket === '__em_ugcc__')      return canonicalStep(p.current_step) === EM_UGCC_STEP;
+    if (bucket === '__em_registrar__') return canonicalStep(p.current_step) === 'Program Setup';
+    return false;
+}
+
 // Course pipeline steps (centralized, non-college course workflow roles)
 const COURSE_PIPELINE_STEPS = new Set([
     "Checkpoint",
@@ -1152,6 +1204,7 @@ function updateProgramKindCounts() {
     // Apply the active pipeline-tile filter so kind counts match what's shown.
     if (pipelineFilter) {
         baseExclKind = baseExclKind.filter(p => {
+            if (typeof pipelineFilter === 'string' && pipelineFilter.startsWith('__em_')) return emBucketMatch(p, pipelineFilter);
             if (pipelineFilter === '__college__') return isCollegeStep(p.current_step);
             if (pipelineFilter === '__downstream__') { const d = _cimCollegeDetector(); return !!p.current_step && !d(p.current_step); }
             if (pipelineFilter === '__complete__') return !!p.completion_date;
@@ -1332,6 +1385,12 @@ function renderPipeline(pipeline, baseFiltered) {
         if (cBtn) { cBtn.classList.toggle('active-complete', pipelineFilter === '__complete__'); cBtn.style.display = ''; }
         return;
     }
+    // EM perspective (programs only): four overlapping enrollment-management
+    // buckets — College / UGCC / Registrar / Ready for GTM.
+    if (cimPerspective === 'em' && !isCourseView) {
+        renderEMPipeline(baseFiltered);
+        return;
+    }
     // University perspective: single pipeline, no panel arrows.
     _setPanelArrows(false);
     // Add College Review as the first step in the pipeline
@@ -1370,6 +1429,37 @@ function renderPipeline(pipeline, baseFiltered) {
     // pipeline bar) — keep its active state in sync with pipelineFilter.
     // Shown on both Programs and Courses views; the row-render logic handles
     // the different table shapes.
+    const completeBtn = document.getElementById('btn-proposal-complete');
+    if (completeBtn) {
+        completeBtn.classList.toggle('active-complete', pipelineFilter === '__complete__');
+        completeBtn.style.display = '';
+    }
+}
+
+// EM perspective pipeline: four overlapping enrollment-management buckets.
+// `baseFiltered` is already scoped to EM-included programs by getBaseFiltered.
+function renderEMPipeline(baseFiltered) {
+    _setPanelArrows(false);
+    const bar = document.getElementById('pipeline-bar');
+    const source = baseFiltered || allPrograms;
+    const TILES = [
+        ['__em_college__',   'College'],
+        ['__em_ugcc__',      'UGCC'],
+        ['__em_registrar__', 'Registrar'],
+        ['__em_gtm__',       'Ready for GTM'],
+    ];
+    bar.innerHTML = TILES.map(([key, label]) => {
+        const count = source.filter(p => emBucketMatch(p, key)).length;
+        const active = pipelineFilter === key ? ' active' : '';
+        const gtm = key === '__em_gtm__' ? ' em-gtm' : '';
+        return `
+            <div class="pipeline-step ${count > 0 ? 'has-items' : 'empty'}${active}${gtm}"
+                 onclick="togglePipelineFilter('${key}')"
+                 title="${escapeHtml(label)}: ${count} programs">
+                <span class="step-count">${count}</span>
+                <span class="step-name">${escapeHtml(label)}</span>
+            </div>`;
+    }).join('');
     const completeBtn = document.getElementById('btn-proposal-complete');
     if (completeBtn) {
         completeBtn.classList.toggle('active-complete', pipelineFilter === '__complete__');
@@ -1515,7 +1605,7 @@ function _setPanelArrows(show, panel) {
 }
 
 function setCimPerspective(mode) {
-    cimPerspective = (mode === 'college') ? 'college' : 'otp';
+    cimPerspective = (mode === 'college' || mode === 'em') ? mode : 'otp';
     pipelineFilter = null;   // stage tiles differ between perspectives
     collegePanel = 'college';
     _saveCimPerspective();
@@ -1550,6 +1640,9 @@ function syncPerspectiveUI() {
         b.classList.toggle('active', b.dataset.persp === cimPerspective));
     const sel = document.getElementById('perspective-college');
     if (sel) sel.style.display = (cimPerspective === 'college' && onCimView) ? '' : 'none';
+    // EM is grad-focused & university-wide: hide the Grad/UG level switch.
+    const lvl = document.getElementById('level-filter-group');
+    if (lvl) lvl.style.display = (cimPerspective === 'em') ? 'none' : '';
     // In College perspective the standalone College filter is redundant (scope
     // is set by the perspective college), so hide it to avoid a conflicting
     // double-filter that could blank the table.
@@ -1608,6 +1701,8 @@ function getBaseFiltered(approverProgramIds, exclude) {
         if (currentView === 'programs' && isTemplateProgram(item)) return false;
         // College perspective scopes everything to the selected college.
         if (collegeScope && item.college !== collegeScope) return false;
+        // EM perspective (programs only): only new offerings + inactivations.
+        if (cimPerspective === 'em' && currentView === 'programs' && !emIncluded(item)) return false;
         // Smart-view definitions:
         //   new    = submitted in the last 30 days (no other qualifier)
         //   recent = step advanced in the last 14 days BUT NOT a new submission
@@ -1665,7 +1760,9 @@ function getBaseFiltered(approverProgramIds, exclude) {
         // Showing completed requires either the "Complete" proposal-row
         // button OR the legacy '__complete__' pipeline tile (kept for
         // backward compat in case anything still triggers it).
-        const completedShown = proposalFilter.has('__complete__') || pipelineFilter === '__complete__';
+        // EM perspective keeps completed programs visible — they're "Ready for GTM".
+        const completedShown = proposalFilter.has('__complete__') || pipelineFilter === '__complete__'
+            || (cimPerspective === 'em' && currentView === 'programs');
         if (!completedShown && item.completion_date && !item.current_step) return false;
         return true;
     });
@@ -1733,6 +1830,7 @@ async function applyFilters() {
     const collegeBase = getBaseFiltered(approverProgramIds, {college: true});
     const collegeDetectorForCounts = _cimCollegeDetector();
     const collegeBaseAfterPipeline = pipelineFilter ? collegeBase.filter(p => {
+        if (typeof pipelineFilter === 'string' && pipelineFilter.startsWith('__em_')) return emBucketMatch(p, pipelineFilter);
         if (pipelineFilter === '__college__') return collegeDetectorForCounts(p.current_step);
         if (pipelineFilter === '__downstream__') return !!p.current_step && !collegeDetectorForCounts(p.current_step);
         if (pipelineFilter === '__complete__') return !!p.completion_date;
@@ -1749,6 +1847,7 @@ async function applyFilters() {
     function applyPipelineTo(set) {
         if (!pipelineFilter) return set;
         return set.filter(p => {
+            if (typeof pipelineFilter === 'string' && pipelineFilter.startsWith('__em_')) return emBucketMatch(p, pipelineFilter);
             if (pipelineFilter === '__college__') return collegeDetectorForCounts(p.current_step);
             if (pipelineFilter === '__downstream__') return !!p.current_step && !collegeDetectorForCounts(p.current_step);
             if (pipelineFilter === '__complete__') return !!p.completion_date;
@@ -1771,6 +1870,9 @@ async function applyFilters() {
         ? COURSE_BUCKETS.find(b => b.role === pipelineFilter)
         : null;
     let filtered = baseFiltered.filter(p => {
+        if (typeof pipelineFilter === 'string' && pipelineFilter.startsWith('__em_')) {
+            return emBucketMatch(p, pipelineFilter);
+        }
         if (pipelineFilter === '__college__' && !collegeDetector(p.current_step)) return false;
         if (pipelineFilter === '__downstream__') return !!p.current_step && !collegeDetector(p.current_step);
         if (pipelineFilter === '__complete__') {
