@@ -62,6 +62,9 @@ def init_db():
                 completion_date TEXT DEFAULT '',
                 campus TEXT DEFAULT '',
                 eff_cat TEXT DEFAULT '',
+                new_concentrations TEXT DEFAULT '',
+                new_offering TEXT DEFAULT '',
+                inactivates TEXT DEFAULT '',
                 first_seen TIMESTAMP,
                 last_updated TIMESTAMP
             );
@@ -276,8 +279,9 @@ def upsert_program(program_data):
                     total_steps, completed_steps, current_approver_emails,
                     program_type, college, department, degree, date_submitted,
                     step_entered_date, curriculum_html, completion_date, campus, eff_cat,
+                    new_concentrations, new_offering, inactivates,
                     first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 program_data['id'],
                 program_data.get('banner_code', ''),
@@ -297,6 +301,9 @@ def upsert_program(program_data):
                 program_data.get('completion_date', ''),
                 program_data.get('campus', ''),
                 program_data.get('eff_cat', ''),
+                program_data.get('new_concentrations', ''),
+                program_data.get('new_offering', ''),
+                program_data.get('inactivates', ''),
                 now, now
             ))
             changed = True
@@ -345,6 +352,7 @@ def upsert_program(program_data):
                     date_submitted = ?, step_entered_date = ?,
                     curriculum_html = ?,
                     completion_date = ?, campus = ?, eff_cat = ?,
+                    new_concentrations = ?, new_offering = ?, inactivates = ?,
                     last_updated = ?
                 WHERE id = ?
             """, (
@@ -365,6 +373,11 @@ def upsert_program(program_data):
                 completion_val,
                 keep('campus'),
                 keep('eff_cat'),
+                # New-offering signals: preserve when a fetch didn't supply them
+                # (transient/no-XML), like other metadata.
+                keep('new_concentrations'),
+                keep('new_offering'),
+                keep('inactivates'),
                 now,
                 program_data['id']
             ))
@@ -1529,6 +1542,9 @@ def migrate_db():
             'completion_date': 'TEXT DEFAULT ""',   # last approval date once fully approved; empty while in pipeline
             'campus': 'TEXT DEFAULT ""',            # XML campus code (e.g. BOS, VAN); parsed from program name otherwise
             'eff_cat': 'TEXT DEFAULT ""',           # XML <eff_cat> e.g. "2026-2027"; set for both active and completed
+            'new_concentrations': 'TEXT DEFAULT ""', # '; '-joined titles of NEW concentrations (existing_concentration=No)
+            'new_offering': 'TEXT DEFAULT ""',       # comma list: new_concentration / new_degree / new_cert (from CIM XML)
+            'inactivates': 'TEXT DEFAULT ""',        # 'Yes' if proposal removes/inactivates the program (deleterec/deletestatus)
         }
         for col, typedef in new_cols.items():
             if col not in existing_cols:

@@ -89,6 +89,43 @@ def canonical_program_step(step):
         return "Program Setup"
     return step
 
+
+def parse_new_offerings(meta):
+    """Derive new/removed-offering signals from CIM XML fields (captured in
+    batch_fetch_program_details). CIM is the system of record for creating
+    certs/concs/degrees, so these come straight from CIM, not heuristics.
+
+    Returns {'new_concentrations', 'new_offering', 'inactivates'}:
+      - new_concentrations: '; '-joined titles of concentrations flagged
+        "Is this an existing concentration? No" (the proposal is ADDING them).
+      - new_offering: comma list of {new_concentration, new_degree, new_cert}.
+      - inactivates: 'Yes' when the proposal removes/inactivates the program
+        record (deleterec=true / deletestatus=Deactivated).
+    """
+    sub = (meta.get('concentration_subscreen') or '')
+    new_concs = []
+    # subscreen entries look like: "<row> <Yes|No> <code-or-title ...> <atadmit Yes|No>"
+    # e.g. "8-1 No Medical Affairs/Medical Science Liaison (MASL) Yes"
+    for m in re.finditer(r'(\d+-\d+)\s+(Yes|No)\s+(.*?)(?=\s+\d+-\d+\s+(?:Yes|No)\b|$)', sub):
+        if m.group(2).lower() == 'no':
+            title = re.sub(r'\s+(Yes|No)\s*$', '', m.group(3)).strip()
+            if title:
+                new_concs.append(title)
+    new_degree = bool((meta.get('new_degree_type') or '').strip())
+    new_cert = bool((meta.get('gr_cert_cags_conctitle') or '').strip()) \
+        or bool((meta.get('gr_cert_cags') or '').strip())
+    inactivates = (meta.get('delete_rec') or '').strip().lower() == 'true' \
+        or (meta.get('delete_status') or '').strip().lower() == 'deactivated'
+    parts = []
+    if new_concs:  parts.append('new_concentration')
+    if new_degree: parts.append('new_degree')
+    if new_cert:   parts.append('new_cert')
+    return {
+        'new_concentrations': '; '.join(new_concs),
+        'new_offering': ','.join(parts),
+        'inactivates': 'Yes' if inactivates else '',
+    }
+
 # College-level roles (department chairs, college deans, program directors)
 COLLEGE_ROLES = [
     "Program AFCS Program Director",
@@ -745,6 +782,22 @@ def batch_fetch_program_details(program_ids, batch_size=25):
                 if (dj) {{
                     result.meta.delete_justification = dj;
                 }}
+                // New/removed offering signals (CIM-native). new concentration =
+                // existing_concentration "No"; title sits in concentration_subscreen.
+                // deleterec/deletestatus mark a whole-program inactivation.
+                result.meta.new_degree_type = getXml("new_degree_type");
+                result.meta.gr_cert_cags = getXml("gr_cert_cags");
+                result.meta.gr_cert_cags_conctitle = getXml("gr_cert_cags_conctitle");
+                result.meta.delete_rec = getXml("deleterec");
+                result.meta.delete_status = getXml("deletestatus");
+                result.meta.concentration_subscreen = getXml("concentration_subscreen");
+                var _ec = xmlDoc.getElementsByTagName("existing_concentration");
+                var _ecv = [];
+                for (var _i = 0; _i < _ec.length; _i++) {{
+                    var _t = (_ec[_i].textContent || "").trim();
+                    if (_t) _ecv.push(_t);
+                }}
+                result.meta.existing_concentration = _ecv.join("|");
             }})
             .catch(function(e) {{ result.xml_error = e.message || String(e); }});
 
@@ -1268,6 +1321,7 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True,
             'step_entered_date': sed, 'curriculum_html': curriculum_html,
             'completion_date': completion_date, 'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            **parse_new_offerings(meta),
         }
         old_step = prev.get('current_step') or ''
         if old_step != current_step:
@@ -1799,6 +1853,7 @@ def refresh_program_http(pid, sess=None, log=False):
                            .replace('<![CDATA[', '').replace(']]>', '').strip(),
         'completion_date': completion_date, 'campus': meta.get('campus', ''),
         'eff_cat': meta.get('eff_cat', ''),
+        **parse_new_offerings(meta),
     })
     if steps:
         upsert_workflow_steps(pid, steps)
@@ -1895,6 +1950,7 @@ def sweep_program_ids_http(start_id=1, end_id=2100, max_workers=16, log=True,
                                .replace('<![CDATA[', '').replace(']]>', '').strip(),
             'completion_date': completion_date, 'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            **parse_new_offerings(meta),
         })
         if steps:
             upsert_workflow_steps(pid, steps)
