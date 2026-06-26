@@ -102,7 +102,10 @@ def parse_new_offerings(meta):
       - inactivates: 'Yes' when the proposal removes/inactivates the program
         record (deleterec=true / deletestatus=Deactivated).
     """
-    sub = (meta.get('concentration_subscreen') or '')
+    # Raw subscreen has each field on its own line with empty cells between
+    # (e.g. "8-1\n\tNo\n\t\n\t\n\tMedical Affairs… (MASL)\n\tYes"); collapse
+    # whitespace so entries read "8-1 No <Title> Yes" / "1-1 Yes HEIN Yes".
+    sub = re.sub(r'\s+', ' ', (meta.get('concentration_subscreen') or '')).strip()
     new_concs = []
     # subscreen entries look like: "<row> <Yes|No> <code-or-title ...> <atadmit Yes|No>"
     # e.g. "8-1 No Medical Affairs/Medical Science Liaison (MASL) Yes"
