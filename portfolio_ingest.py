@@ -1988,6 +1988,24 @@ def compute_ready_for_gtm(new_offering, current_step, completion_date):
     gate = _EM_BOT_ORD if 'new_degree' in new_offering else _EM_UGCC_ORD
     return 'Yes' if _em_stage_ord(current_step) > gate else ''
 
+def _to_iso_date(s):
+    """Normalize a CIM date (RFC-822 GMT or ISO) to 'YYYY-MM-DD'. '' on failure."""
+    if not s:
+        return ''
+    s = s.strip()
+    try:
+        return datetime.fromisoformat(s).date().isoformat()
+    except Exception:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(s)
+        if dt is not None:
+            return dt.date().isoformat()
+    except Exception:
+        pass
+    return ''
+
 def compute_gtm_inactivation(inactivates, current_step, completion_date):
     """'Yes' for a grad inactivation that is in workflow or completed
     in the current/upcoming catalog (mirrors the GTM current/upcoming window)."""
@@ -2010,6 +2028,20 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         raise FileNotFoundError(f"OTP Excel not found: {xlsx_path}")
 
     now = datetime.now().isoformat()
+    today = datetime.now().date().isoformat()
+
+    # Prior GTM-entry state, so we can preserve / stamp `gtm_entered_date` across
+    # the full-table rebuild. id → (gtm_entered_date, was_gtm_relevant).
+    prior_gtm = {}
+    try:
+        with get_db() as _c:
+            for _r in _c.execute(
+                "SELECT id, gtm_entered_date, ready_for_gtm, gtm_inactivation "
+                "FROM portfolio_programs"):
+                rel = (_r['ready_for_gtm'] == 'Yes') or (_r['gtm_inactivation'] == 'Yes')
+                prior_gtm[_r['id']] = (_r['gtm_entered_date'] or '', rel)
+    except Exception:
+        prior_gtm = {}
 
     _EMPTY_TRACKING = {
         'otp_status': '', 'otp_sub_status': '', 'otp_market_potential': '',
@@ -2032,6 +2064,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         'new_offering': '',
         'ready_for_gtm': '',
         'gtm_inactivation': '',
+        'gtm_entered_date': '',
         'last_refreshed': now,
     }
 
@@ -2056,7 +2089,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     with get_db() as conn:
         raw_rows = conn.execute("""
             SELECT id, name, college, current_step, completion_date, status, eff_cat,
-                   banner_code, program_type, new_offering, inactivates
+                   banner_code, program_type, new_offering, inactivates, step_entered_date
             FROM programs
             WHERE (current_step IS NOT NULL AND current_step != '')
                OR (completion_date IS NOT NULL AND completion_date != '')
@@ -2134,6 +2167,20 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             row['new_offering']     = new_off
             row['ready_for_gtm']    = compute_ready_for_gtm(new_off, cur_step, comp_date)
             row['gtm_inactivation'] = compute_gtm_inactivation(r['inactivates'] or '', cur_step, comp_date)
+            # Stamp the date the record entered the GTM stage (first became
+            # GTM-relevant), preserved across rebuilds. Going forward a brand-new
+            # transition is stamped with the scan date. On the first run (no prior
+            # date) we seed in-pipeline records from their CIM step-entered date as
+            # the best available approximation; completed records seed empty.
+            relevant = (row['ready_for_gtm'] == 'Yes') or (row['gtm_inactivation'] == 'Yes')
+            if relevant:
+                prev_date, prev_rel = prior_gtm.get(pid, ('', False))
+                if prev_date:
+                    row['gtm_entered_date'] = prev_date            # already stamped → preserve
+                elif prev_rel:
+                    row['gtm_entered_date'] = _to_iso_date(r['step_entered_date'] or '') if cur_step else ''
+                else:
+                    row['gtm_entered_date'] = today                # new transition into GTM
         tracker[pid] = row
 
         # Index by (subj, deg, campus)

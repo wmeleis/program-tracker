@@ -5079,6 +5079,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Yes if the program is admitting students this term, No if its Inactivation of Admission term has already started.'},
     {key: 'offering',    label: 'New Offering', defaultHidden: true,
         help: 'Whether this graduate program is a new offering or an inactivation, derived from CIM proposal fields: New concentration (a concentration marked not-existing in the proposal), New degree (a new degree type), or Inactivation (whole-program deactivation).'},
+    {key: 'gtmentered',  label: 'GTM Entered', defaultHidden: true,
+        help: 'Date the record entered the GTM stage — when it first became GTM-relevant (a new offering cleared its governance gate, or an inactivation began). Preserved across scans; existing records at launch were seeded from their CIM step-entered date.'},
     {key: 'gtmtype',     label: 'GTM Type', defaultHidden: true,
         help: 'Type from the Go To Market Roster 2.0 (Net new, Redeployment, Major Program Update, Inactivation, etc.). Joined to CIM by the roster’s CIM url + Banner Code.'},
     {key: 'gtmdate',     label: 'GTM Date', defaultHidden: true,
@@ -5371,6 +5373,21 @@ const GTM_NEEDS_ACTION_VIEW = {
         },
     },
 };
+// "GTM — New This Period" — records that entered the GTM stage in the last 14 days.
+const GTM_RECENT_VIEW = {
+    id: 'gtm_recent', name: 'GTM — New (14d)', team: true, system: true,
+    tip: 'Graduate records that entered the GTM stage in the last 14 days — i.e. first became GTM-relevant (a new offering cleared its governance gate, or an inactivation began) within the past two weeks, by GTM Entered date.',
+    state: {
+        visibleCols: ['degree', 'college', 'campus', 'offering', 'gtmentered', 'cim',
+            'svt', 'gtmtype', 'gtmdate', 'gtmfirst', 'gtmlast', 'gtmintake'],
+        filters: {},
+        tree: {
+            type: 'group', conj: 'all', children: [
+                { type: 'rule', field: 'gtm_recent', op: 'in', value: ['Y'] },
+            ],
+        },
+    },
+};
 
 // State
 let portfolioActiveViewId = null;
@@ -5385,7 +5402,7 @@ function setPortfolioPersonalViews(views) {
     try { localStorage.setItem(_PORTFOLIO_VIEWS_LS, JSON.stringify(views)); } catch(_) {}
 }
 function getAllPortfolioViews() {
-    return [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW,
+    return [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW, GTM_RECENT_VIEW,
             ...getPortfolioTeamViews(), ...getPortfolioPersonalViews()];
 }
 function getPortfolioViewById(id) {
@@ -5521,6 +5538,18 @@ function portfolioOfferingLabel(p) {
     return p.gtm_inactivation === 'Yes' ? 'Inactivation' : '';
 }
 
+// True if the record entered the GTM stage (gtm_entered_date) within the last
+// `days` days. Computed live so the window is accurate at view time.
+function _gtmEnteredRecent(p, days = 14) {
+    const s = p && p.gtm_entered_date;
+    if (!s) return false;
+    const d = new Date(s + 'T00:00:00');
+    if (isNaN(d)) return false;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return d >= cutoff;
+}
+
 const PORTFOLIO_FILTER_FIELDS = [
     {key: 'program',     label: 'Program',          type: 'text',   value: p => p.program_name || ''},
     {key: 'level',       label: 'Level',            type: 'select', value: p => classifyPortfolioLevel(p.program_name) || ''},
@@ -5540,6 +5569,8 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'offering',    label: 'New Offering',     type: 'select', value: p => portfolioOfferingLabel(p)},
     {key: 'ready_gtm',   label: 'Ready for GTM',    type: 'boolean', value: p => p.ready_for_gtm === 'Yes' ? 'Y' : 'N'},
     {key: 'gtm_inact',   label: 'GTM Inactivation', type: 'boolean', value: p => p.gtm_inactivation === 'Yes' ? 'Y' : 'N'},
+    {key: 'gtm_entered', label: 'GTM Entered Date', type: 'text',   value: p => p.gtm_entered_date || ''},
+    {key: 'gtm_recent',  label: 'Entered GTM ≤14 days', type: 'boolean', value: p => _gtmEnteredRecent(p) ? 'Y' : 'N'},
     {key: 'gtm_type',    label: 'GTM Type',         type: 'select', value: p => p.gtm_type || ''},
     {key: 'gtm_date',    label: 'GTM Date',         type: 'text',   value: p => p.gtm_date || ''},
     {key: 'gtm_first',   label: 'GTM First Intake', type: 'select', value: p => p.gtm_first_term || ''},
@@ -5757,6 +5788,7 @@ function _renderPvSidebar() {
     html += item(ALL_PROGRAMS_VIEW);
     html += item(GTM_VIEW);
     html += item(GTM_NEEDS_ACTION_VIEW);
+    html += item(GTM_RECENT_VIEW);
     html += team.length ? team.map(item).join('') : '';
     html += `<div class="pv-side-section">Personal</div>`;
     html += personal.length ? personal.map(item).join('') : '<div class="pv-side-empty">None saved yet</div>';
@@ -6089,7 +6121,7 @@ function renderPortfolioViewTiles() {
     // personal views. The bar is therefore always visible.
     const starredViews = [...getPortfolioTeamViews(), ...getPortfolioPersonalViews()]
                             .filter(v => stars.has(v.id));
-    const tileViews = [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW, ...starredViews];
+    const tileViews = [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW, GTM_RECENT_VIEW, ...starredViews];
     bar.style.display = 'flex';
 
     // Count of TOP-LEVEL programs matching a view's saved tree + filters — same
@@ -7074,6 +7106,7 @@ function renderPortfolioTable() {
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
             case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
             case 'offering':    av = portfolioOfferingLabel(a); bv = portfolioOfferingLabel(b); break;
+            case 'gtmentered':  av = a.gtm_entered_date || '';  bv = b.gtm_entered_date || '';  break;
             case 'gtmtype':     av = a.gtm_type || '';        bv = b.gtm_type || '';        break;
             case 'gtmdate':     av = a.gtm_date || '';        bv = b.gtm_date || '';        break;
             case 'gtmfirst':    av = a.gtm_first_term || '';  bv = b.gtm_first_term || '';  break;
@@ -7406,6 +7439,7 @@ function renderPortfolioRow(p, opts = {}) {
             return `<span class="portfolio-badge ${v === 'Yes' ? 'badge-good' : 'badge-bad'}">${v}</span>`;
         })())}
         ${_pc('offering',  escapeHtml(portfolioOfferingLabel(p)))}
+        ${_pc('gtmentered', escapeHtml(p.gtm_entered_date || ''))}
         ${_pc('gtmtype',   escapeHtml(p.gtm_type || ''))}
         ${_pc('gtmdate',   escapeHtml(p.gtm_date || ''))}
         ${_pc('gtmfirst',  escapeHtml(p.gtm_first_term || ''))}
@@ -7459,6 +7493,7 @@ function exportPortfolioCsv() {
             case 'inactadmit':  return p.inactivation_admission || '';
             case 'inacttoday':  return _inactAdmittingToday(p) || '';
             case 'offering':    return portfolioOfferingLabel(p);
+            case 'gtmentered':  return p.gtm_entered_date || '';
             case 'gtmtype':     return p.gtm_type || '';
             case 'gtmdate':     return p.gtm_date || '';
             case 'gtmfirst':    return p.gtm_first_term || '';
