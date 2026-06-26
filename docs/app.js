@@ -5373,17 +5373,19 @@ const GTM_NEEDS_ACTION_VIEW = {
         },
     },
 };
-// "GTM — New This Period" — records that entered the GTM stage in the last 14 days.
+// "GTM — New This Period" — records that entered the GTM stage recently, by the
+// GTM Entered date field. Default window 30 days; editable via the view's filter
+// (GTM Entered Date · in the last … days).
 const GTM_RECENT_VIEW = {
-    id: 'gtm_recent', name: 'GTM — New (14d)', team: true, system: true,
-    tip: 'Graduate records that entered the GTM stage in the last 14 days — i.e. first became GTM-relevant (a new offering cleared its governance gate, or an inactivation began) within the past two weeks, by GTM Entered date.',
+    id: 'gtm_recent', name: 'GTM — New (30d)', team: true, system: true,
+    tip: 'Graduate records that entered the GTM stage in the last 30 days — i.e. first became GTM-relevant (a new offering cleared its governance gate, or an inactivation began) within the window, by GTM Entered date. Adjust the day count in the view’s filter.',
     state: {
         visibleCols: ['degree', 'college', 'campus', 'offering', 'gtmentered', 'cim',
             'svt', 'gtmtype', 'gtmdate', 'gtmfirst', 'gtmlast', 'gtmintake'],
         filters: {},
         tree: {
             type: 'group', conj: 'all', children: [
-                { type: 'rule', field: 'gtm_recent', op: 'in', value: ['Y'] },
+                { type: 'rule', field: 'gtm_entered', op: 'within_days', value: '30' },
             ],
         },
     },
@@ -5538,18 +5540,6 @@ function portfolioOfferingLabel(p) {
     return p.gtm_inactivation === 'Yes' ? 'Inactivation' : '';
 }
 
-// True if the record entered the GTM stage (gtm_entered_date) within the last
-// `days` days. Computed live so the window is accurate at view time.
-function _gtmEnteredRecent(p, days = 14) {
-    const s = p && p.gtm_entered_date;
-    if (!s) return false;
-    const d = new Date(s + 'T00:00:00');
-    if (isNaN(d)) return false;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    return d >= cutoff;
-}
-
 const PORTFOLIO_FILTER_FIELDS = [
     {key: 'program',     label: 'Program',          type: 'text',   value: p => p.program_name || ''},
     {key: 'level',       label: 'Level',            type: 'select', value: p => classifyPortfolioLevel(p.program_name) || ''},
@@ -5569,8 +5559,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'offering',    label: 'New Offering',     type: 'select', value: p => portfolioOfferingLabel(p)},
     {key: 'ready_gtm',   label: 'Ready for GTM',    type: 'boolean', value: p => p.ready_for_gtm === 'Yes' ? 'Y' : 'N'},
     {key: 'gtm_inact',   label: 'GTM Inactivation', type: 'boolean', value: p => p.gtm_inactivation === 'Yes' ? 'Y' : 'N'},
-    {key: 'gtm_entered', label: 'GTM Entered Date', type: 'text',   value: p => p.gtm_entered_date || ''},
-    {key: 'gtm_recent',  label: 'Entered GTM ≤14 days', type: 'boolean', value: p => _gtmEnteredRecent(p) ? 'Y' : 'N'},
+    {key: 'gtm_entered', label: 'GTM Entered Date', type: 'date',   value: p => p.gtm_entered_date || ''},
     {key: 'gtm_type',    label: 'GTM Type',         type: 'select', value: p => p.gtm_type || ''},
     {key: 'gtm_date',    label: 'GTM Date',         type: 'text',   value: p => p.gtm_date || ''},
     {key: 'gtm_first',   label: 'GTM First Intake', type: 'select', value: p => p.gtm_first_term || ''},
@@ -5612,6 +5601,21 @@ function evalPortfolioRule(p, rule) {
     const op = rule.op || '';
     if (op === 'is_set')   return v !== '';
     if (op === 'is_empty') return v === '';
+    if (f.type === 'date') {
+        const d = v.slice(0, 10);                 // YYYY-MM-DD
+        if (!d) return false;
+        if (op === 'within_days') {
+            const n = parseInt(rule.value, 10);
+            if (!(n > 0)) return true;            // no window set yet → don't restrict
+            const cutoff = new Date(); cutoff.setHours(0, 0, 0, 0);
+            cutoff.setDate(cutoff.getDate() - n);
+            const dv = new Date(d + 'T00:00:00');
+            return !isNaN(dv) && dv >= cutoff;
+        }
+        if (op === 'on_after')  return rule.value ? d >= rule.value : true;
+        if (op === 'on_before') return rule.value ? d <= rule.value : true;
+        return true;
+    }
     if (f.type === 'text') {
         if (!rule.value) return true;
         const q = String(rule.value).toLowerCase(), hay = v.toLowerCase();
@@ -5629,12 +5633,14 @@ function evalPortfolioRule(p, rule) {
 function _opsForPvType(t) {
     if (t === 'text')    return [['contains','contains'],['equals','equals'],['starts_with','starts with'],['is_set','is set'],['is_empty','is not set']];
     if (t === 'boolean') return [['in','is'],['is_set','is set'],['is_empty','is not set']];
+    if (t === 'date')    return [['within_days','in the last … days'],['on_after','on or after'],['on_before','on or before'],['is_set','is set'],['is_empty','is not set']];
     return [['in','is one of'],['not_in','is not one of'],['is_set','is set'],['is_empty','is not set']];
 }
 function _defaultPvRule(key) {
     const f = _pvField(key) || PORTFOLIO_FILTER_FIELDS[0];
     if (f.type === 'text')    return {type:'rule', field:f.key, op:'contains', value:''};
     if (f.type === 'boolean') return {type:'rule', field:f.key, op:'in', value:['Y']};
+    if (f.type === 'date')    return {type:'rule', field:f.key, op:'within_days', value:'30'};
     return {type:'rule', field:f.key, op:'in', value:[]};
 }
 
@@ -5841,6 +5847,14 @@ function _renderPvRuleValue(rule, f, path) {
         return `<input type="text" class="pvb-text" value="${escapeHtml(rule.value || '')}"
                  oninput="pvbSetValue('${path}', this.value)" placeholder="search…">`;
     }
+    if (f.type === 'date') {
+        if (rule.op === 'within_days') {
+            return `<input type="number" min="1" class="pvb-text" style="width:72px" value="${escapeHtml(rule.value || '')}"
+                     oninput="pvbSetValue('${path}', this.value)" placeholder="days"> days`;
+        }
+        return `<input type="date" class="pvb-text" value="${escapeHtml(rule.value || '')}"
+                 oninput="pvbSetValue('${path}', this.value)">`;
+    }
     if (f.type === 'boolean') {
         const vals = Array.isArray(rule.value) ? rule.value : (rule.value ? [rule.value] : []);
         return `<label class="pvb-bool"><input type="checkbox" ${vals.includes('Y') ? 'checked' : ''} onchange="pvbToggleMulti('${path}','Y')"> Yes</label>
@@ -5984,7 +5998,7 @@ function pvbAddGroup(path) { const w = _pvWalk(path); if (w && w.node.type === '
 function pvbRemove(path)   { const w = _pvWalk(path); if (w && w.parent) { w.parent.children.splice(w.index, 1); renderPvModal(); } }
 function pvbSetConj(path, conj) { const w = _pvWalk(path); if (w && w.node.type === 'group') { w.node.conj = conj === 'any' ? 'any' : 'all'; renderPvModal(); } }
 function pvbSetField(path, key) { const w = _pvWalk(path); if (w && w.node.type === 'rule' && w.node.field !== key) { Object.assign(w.node, _defaultPvRule(key)); renderPvModal(); } }
-function pvbSetOp(path, op)      { const w = _pvWalk(path); if (w && w.node.type === 'rule') { w.node.op = op; if (op === 'is_set' || op === 'is_empty') w.node.value = null; else if (!w.node.value) w.node.value = (_pvField(w.node.field) || {}).type === 'text' ? '' : []; renderPvModal(); } }
+function pvbSetOp(path, op)      { const w = _pvWalk(path); if (w && w.node.type === 'rule') { w.node.op = op; const t = (_pvField(w.node.field) || {}).type; if (op === 'is_set' || op === 'is_empty') w.node.value = null; else if (t === 'date') w.node.value = (op === 'within_days') ? '30' : ''; else if (!w.node.value || (Array.isArray(w.node.value) && !w.node.value.length)) w.node.value = (t === 'text') ? '' : []; renderPvModal(); } }
 // Text-input edits: update the model + live count ONLY. Do NOT re-render the
 // builder — rebuilding the DOM would destroy the <input> and drop focus after
 // each keystroke. The input already holds the value visually.
