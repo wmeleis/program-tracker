@@ -5377,7 +5377,7 @@ const GTM_NEEDS_ACTION_VIEW = {
 // GTM Entered date field. Default window 30 days; editable via the view's filter
 // (GTM Entered Date · in the last … days).
 const GTM_RECENT_VIEW = {
-    id: 'gtm_recent', name: 'GTM — New (30d)', team: true, system: true,
+    id: 'gtm_recent', name: 'GTM — Recent (30d)', team: true, system: true,
     tip: 'Graduate records that entered the GTM stage in the last 30 days — i.e. first became GTM-relevant (a new offering completed governance, or an inactivation began) within the window, by GTM Entered date. Adjust the day count in the view’s filter.',
     state: {
         visibleCols: ['degree', 'college', 'campus', 'offering', 'gtmentered', 'cim',
