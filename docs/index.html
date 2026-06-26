@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Program Approval Tracker</title>
+    <link rel="stylesheet" href="style.css?v=1782498278">
+</head>
+<body>
+
+<style>
+  #password-gate {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #f5f5f5;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #password-gate .gate-card {
+    background: white; padding: 2.5rem; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    width: 360px; max-width: 90vw;
+  }
+  #password-gate h1 { margin: 0 0 0.25rem 0; font-size: 1.4rem; color: #333; }
+  #password-gate .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; display: block; }
+  #password-gate form { display: flex; gap: 0.5rem; }
+  #password-gate input {
+    flex: 1; padding: 0.6rem 0.8rem; font-size: 1rem;
+    border: 1px solid #ccc; border-radius: 4px; outline: none;
+  }
+  #password-gate input:focus { border-color: #C8102E; }
+  #password-gate button {
+    padding: 0.6rem 1.2rem; font-size: 1rem; font-weight: 600;
+    background: #C8102E; color: white; border: 0; border-radius: 4px; cursor: pointer;
+  }
+  #password-gate button:disabled { opacity: 0.6; cursor: default; }
+  #password-gate .gate-error { color: #C8102E; font-size: 0.9rem; margin-top: 0.75rem; min-height: 1.2em; }
+  #password-gate .gate-remember { font-size: 0.85rem; color: #666; margin-top: 0.75rem; }
+  #password-gate .gate-remember input { flex: 0; width: auto; margin-right: 0.4rem; vertical-align: middle; }
+</style>
+<div id="password-gate">
+  <div class="gate-card">
+    <h1>Program Approval Tracker</h1>
+    <span class="subtitle">Enter password to access the dashboard.</span>
+    <form id="gate-form" autocomplete="off">
+      <input type="password" id="gate-password" placeholder="Password" autofocus required>
+      <button type="submit" id="gate-submit">Unlock</button>
+    </form>
+    <label class="gate-remember">
+      <input type="checkbox" id="gate-remember" checked>
+      Remember me for 30 days on this device
+    </label>
+    <div id="gate-error" class="gate-error"></div>
+  </div>
+</div>
+<script>
+(function() {
+  const CACHE_BUST = 1782498278;
+  const REMEMBER_KEY = 'cim-tracker-key-v1';
+  const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+  const gate = document.getElementById('password-gate');
+  const form = document.getElementById('gate-form');
+  const input = document.getElementById('gate-password');
+  const submit = document.getElementById('gate-submit');
+  const errEl = document.getElementById('gate-error');
+  const remember = document.getElementById('gate-remember');
+
+  const textDecoder = new TextDecoder();
+
+  const ENC_FILES = new Set([
+    'data.json', 'curriculum.json', 'reference.json', 'history.json', 'campus_groups.json',
+    'regulatory.json',
+  ]);
+
+  let cryptoKey = null;
+  const cache = new Map(); // path -> parsed JSON
+
+  async function loadCryptoParams() {
+    const r = await fetch('crypto.json?v=' + CACHE_BUST);
+    if (!r.ok) throw new Error('crypto.json missing');
+    return r.json();
+  }
+
+  function b64ToBytes(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function bytesToB64(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  async function deriveKey(password, salt, iterations) {
+    const baseKey = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(password), {name: 'PBKDF2'}, false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      {name: 'PBKDF2', salt, iterations, hash: 'SHA-256'},
+      baseKey,
+      {name: 'AES-GCM', length: 256},
+      true,  // extractable (so we can stash it for remember-me)
+      ['decrypt']
+    );
+  }
+
+  async function decryptBlob(key, blob) {
+    // Layout: iv(12) || ciphertext+tag
+    const iv = blob.slice(0, 12);
+    const ct = blob.slice(12);
+    const pt = await crypto.subtle.decrypt({name: 'AES-GCM', iv}, key, ct);
+    return textDecoder.decode(pt);
+  }
+
+  async function fetchAndDecrypt(path) {
+    // data.json is the primary program list and is re-fetched every 2 min
+    // by the dashboard's auto-refresh loop — always pull fresh from origin
+    // (no in-memory cache, no browser cache). The bulkier lazy-loaded files
+    // (curriculum.json, reference.json, regulatory.json, campus_groups.json)
+    // are still cached after first fetch since they're requested on-demand
+    // from row expansions and don't need to track live scan updates.
+    const noCache = (path === 'data.json');
+    if (!noCache && cache.has(path)) return cache.get(path);
+    const ts = Date.now();
+    const r = await fetch(path + '.enc?v=' + CACHE_BUST + '&t=' + ts,
+                          {cache: 'no-store'});
+    if (!r.ok) throw new Error('fetch ' + path + '.enc failed');
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(cryptoKey, blob);
+    const obj = JSON.parse(plaintext);
+    if (!noCache) cache.set(path, obj);
+    return obj;
+  }
+
+  // Monkey-patch fetch so existing app.js paths (fetch('data.json') etc.)
+  // transparently go through the decryptor.
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async function(url, opts) {
+    const name = typeof url === 'string'
+      ? url.replace(/^\.\//, '').split('?')[0]
+      : null;
+    if (name && ENC_FILES.has(name)) {
+      const obj = await fetchAndDecrypt(name);
+      return new Response(JSON.stringify(obj), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+    return origFetch(url, opts);
+  };
+
+  async function tryRememberedKey() {
+    try {
+      const raw = localStorage.getItem(REMEMBER_KEY);
+      if (!raw) return null;
+      const {jwk, expires} = JSON.parse(raw);
+      if (Date.now() > expires) { localStorage.removeItem(REMEMBER_KEY); return null; }
+      return await crypto.subtle.importKey(
+        'jwk', jwk, {name: 'AES-GCM'}, true, ['decrypt']
+      );
+    } catch (e) { return null; }
+  }
+
+  async function stashKeyForRemember(key) {
+    const jwk = await crypto.subtle.exportKey('jwk', key);
+    localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+      jwk, expires: Date.now() + REMEMBER_TTL_MS,
+    }));
+  }
+
+  async function verifyKey(key) {
+    // Try decrypting data.json.enc as a password check. AES-GCM throws if tag mismatches.
+    const r = await fetch('data.json.enc?v=' + CACHE_BUST);
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(key, blob);
+    const obj = JSON.parse(plaintext);
+    cache.set('data.json', obj);
+    return obj;
+  }
+
+  function bootDashboard() {
+    gate.style.display = 'none';
+    document.getElementById('app-root').style.display = '';
+    const s = document.createElement('script');
+    s.src = 'app.js?v=' + CACHE_BUST;
+    document.head.appendChild(s);
+  }
+
+  async function attemptUnlock(password) {
+    const params = await loadCryptoParams();
+    const salt = b64ToBytes(params.salt);
+    const key = await deriveKey(password, salt, params.iterations);
+    await verifyKey(key);  // throws on bad password
+    cryptoKey = key;
+    if (remember.checked) {
+      try { await stashKeyForRemember(key); } catch (e) { /* ignore */ }
+    }
+    bootDashboard();
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.textContent = '';
+    submit.disabled = true;
+    submit.textContent = 'Unlocking...';
+    try {
+      await attemptUnlock(input.value);
+    } catch (err) {
+      errEl.textContent = 'Wrong password.';
+      submit.disabled = false;
+      submit.textContent = 'Unlock';
+      input.select();
+    }
+  });
+
+  // Try remembered key silently
+  (async () => {
+    const key = await tryRememberedKey();
+    if (!key) return;
+    try {
+      await verifyKey(key);
+      cryptoKey = key;
+      bootDashboard();
+    } catch (e) {
+      localStorage.removeItem(REMEMBER_KEY);
+    }
+  })();
+})();
+</script>
+
+<div id="app-root" style="display:none">
+    <div id="error-banner" class="error-banner" style="display: none;">
+        <span id="error-banner-text"></span>
+        <button class="error-banner-close" onclick="dismissErrorBanner()" title="Dismiss">&times;</button>
+    </div>
+    <header>
+        <div class="header-left">
+            <h1>Program Dashboard</h1>
+        </div>
+        <div class="header-middle">
+            <div class="view-toggle">
+                <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">CIM Programs</button>
+                <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">CIM Courses</button>
+                <button class="toggle-btn" onclick="switchView('catalog')" id="btn-catalog">CIM Catalog</button>
+                <button class="toggle-btn" onclick="switchView('portfolio')" id="btn-portfolio">Portfolio</button>
+            </div>
+            <div class="header-search">
+                <input type="text" id="filter-search" placeholder="Search programs by name or banner code..." oninput="applyFilters(); updateClearButtons()">
+                <span class="filter-clear header-search-clear" onclick="clearFilter('filter-search')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <span id="last-updated" class="last-updated"></span>
+            <span id="scan-status" class="scan-status"></span>
+            <div id="progress-container" class="progress-container" style="display: none;">
+                <span id="progress-phase" class="progress-phase"></span>
+            </div>
+            
+            
+            
+            
+            <!-- Portfolio-only actions: shown/hidden by switchView() -->
+            <span id="portfolio-header-actions" style="display:none; align-items:center; gap:8px;">
+                <button class="header-secondary-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
+                <button class="portfolio-col-picker-btn" id="portfolio-views-btn" onclick="openPortfolioViewsModal()">Views</button>
+                <div class="portfolio-col-picker" id="portfolio-col-picker" style="position:relative">
+                    <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
+                    <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
+                </div>
+            </span>
+        </div>
+    </header>
+
+    
+
+    <!-- Manage References modal (local-only) -->
+    
+        </div>
+    </div>
+
+    <!-- Portfolio starred-view tiles (quick-apply); only shown on Portfolio view -->
+    <div id="portfolio-view-tiles" class="portfolio-view-tiles" style="display:none"></div>
+
+    <!-- Portfolio filter bar (visible only in portfolio view) -->
+    <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
+      <div class="portfolio-filter-block portfolio-filter-block-1">
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <button class="portfolio-lvl-btn" data-lvl="Undergraduate" onclick="setPortfolioLevel(this,'Undergraduate')">Undergraduate</button>
+            <button class="portfolio-lvl-btn" data-lvl="Graduate" onclick="setPortfolioLevel(this,'Graduate')">Graduate</button>
+        </div>
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <button class="portfolio-deg-btn" data-deg="Bachelor's" onclick="setPortfolioDegree(this,&quot;Bachelor's&quot;)">Bachelor's</button>
+            <button class="portfolio-deg-btn" data-deg="Master's" onclick="setPortfolioDegree(this,&quot;Master's&quot;)">Master's</button>
+            <button class="portfolio-deg-btn" data-deg="PhD" onclick="setPortfolioDegree(this,'PhD')">PhD</button>
+            <button class="portfolio-deg-btn" data-deg="Prof Doctorate" onclick="setPortfolioDegree(this,'Prof Doctorate')">Prof. Doctorate</button>
+            <button class="portfolio-deg-btn" data-deg="CAGS" onclick="setPortfolioDegree(this,'CAGS')">CAGS</button>
+            <button class="portfolio-deg-btn" data-deg="Certificate" onclick="setPortfolioDegree(this,'Certificate')">Certificate</button>
+            <button class="portfolio-deg-btn" data-deg="Minor" onclick="setPortfolioDegree(this,'Minor')">Minor</button>
+            <button class="portfolio-deg-btn" data-deg="Dual Degree" onclick="setPortfolioDegree(this,'Dual Degree')">Dual Degree</button>
+        </div>
+        <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>College:</label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-college">
+                <button class="filter-multi-btn" id="portfolio-filter-college" onclick="togglePortfolioMultiFilter('portfolio-filter-college', event)">All Colleges ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-college"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-college')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Campus:</label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-campus">
+                <button class="filter-multi-btn" id="portfolio-filter-campus" onclick="togglePortfolioMultiFilter('portfolio-filter-campus', event)">All Campuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-campus"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-campus')" title="Clear">&times;</span>
+            </div>
+            <button class="portfolio-campus-shortcut" style="margin-left:14px" onclick="setPortfolioCampusBoston()" title="Filter to Boston only">Boston</button>
+        </div>
+      </div>
+      <div class="portfolio-filter-block portfolio-filter-block-2">
+        <div class="pf-cim-row" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span class="portfolio-btn-row-label">CIM:</span>
+            <button class="portfolio-incim-btn" data-incim="Yes" onclick="setPortfolioInCim(this,'Yes')"><span class="info-tip-wrap">In CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Program exists in CourseLeaf CIM — active in workflow or already approved/historical.</span></span></span></button>
+            <button class="portfolio-incim-btn" data-incim="No"  onclick="setPortfolioInCim(this,'No')"><span class="info-tip-wrap">Not in CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Portfolio entry has no CIM record — appears only in external feeds (SVT, IPD, OTP).</span></span></span></button>
+            <button class="portfolio-cimchg-btn cimchg-new"   data-cimchg="New"          style="margin-left:24px" onclick="setPortfolioCimChange(this,'New')">New</button>
+            <button class="portfolio-cimchg-btn cimchg-edit"  data-cimchg="Change"       onclick="setPortfolioCimChange(this,'Change')">Change</button>
+            <button class="portfolio-cimchg-btn cimchg-inact" data-cimchg="Inactivation" onclick="setPortfolioCimChange(this,'Inactivation')">Inactivation</button>
+            <button class="portfolio-status-btn" data-status="inworkflow" style="margin-left:24px" onclick="setPortfolioStatus('inworkflow')"><span class="info-tip-wrap">In Workflow<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with an active proposal currently moving through CIM approval steps.</span></span></span></button>
+            <button class="portfolio-status-btn" data-status="catalog"    onclick="setPortfolioStatus('catalog')"><span class="info-tip-wrap">Completed Approval<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs approved at least once — either observed completing CIM, or currently undergoing a Change/Inactivation proposal (which implies a prior approval). A program in a new proposal still counts here AND in "In Workflow" until it completes.</span></span></span></button>
+        </div>
+        <!-- Portfolio search is the header #filter-search; applyFilters()
+             routes it through setPortfolioSearch() on Portfolio view. No
+             separate Portfolio search input here. -->
+        <div class="filter-group" id="pf-admit-break" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>Admitting Today:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Whether the program is currently admitting students. Yes = active, no inactivation in progress. No = inactivation underway or complete.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-inacttoday" onchange="portfolioInactTodayFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inacttoday')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Inact. of Admission:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Admissions inactivation status from the GLS Roster of Record.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-inactadmit">
+                <button class="filter-multi-btn" id="portfolio-filter-inactadmit" onclick="togglePortfolioMultiFilter('portfolio-filter-inactadmit', event)">All Semesters ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-inactadmit"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactadmit')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group" id="pf-status-break" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Status from the SVT Source Data Smartsheet (Intake, Discovery, Launch in Progress, Complete, etc.).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-roster">
+                <button class="filter-multi-btn" id="portfolio-filter-roster" onclick="togglePortfolioMultiFilter('portfolio-filter-roster', event)">All Statuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-roster"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-roster')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Sub-status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch Sub-Status from the SVT Source Data Smartsheet.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-substatus">
+                <button class="filter-multi-btn" id="portfolio-filter-substatus" onclick="togglePortfolioMultiFilter('portfolio-filter-substatus', event)">All Sub-statuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-substatus"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-substatus')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Speed to Market:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Speed to Market flag from the SVT Source Data Smartsheet (True / False / blank).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-speed">
+                <button class="filter-multi-btn" id="portfolio-filter-speed" onclick="togglePortfolioMultiFilter('portfolio-filter-speed', event)">All ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-speed"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-speed')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>GLS Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch status from the GLS (Global Launch Strategy) Roster of Record.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-gls">
+                <button class="filter-multi-btn" id="portfolio-filter-gls" onclick="togglePortfolioMultiFilter('portfolio-filter-gls', event)">All GLS ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-gls"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-gls')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>OTP Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Approval and market status from the OTP (Office of Transformative Programs) tracker.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-otp">
+                <button class="filter-multi-btn" id="portfolio-filter-otp" onclick="togglePortfolioMultiFilter('portfolio-filter-otp', event)">All OTP ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-otp"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-otp')" title="Clear">&times;</span>
+            </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Portfolio table toolbar (result count only — actions moved to header) -->
+    <div id="portfolio-table-toolbar" style="display:none">
+        <span id="portfolio-result-count" class="result-count"></span>
+        <span class="portfolio-layout-toggle">
+            <button class="portfolio-layout-btn active" data-layout="table" onclick="setPortfolioLayout('table')">Table</button>
+            <button class="portfolio-layout-btn" data-layout="matrix" onclick="setPortfolioLayout('matrix')">Matrix</button>
+        </span>
+    </div>
+
+    <!-- Portfolio Views modal (mirrors student tracker's filter builder modal) -->
+    <div id="pv-modal-backdrop" class="pv-modal-backdrop" onclick="if(event.target===this)closePortfolioViewsModal()">
+        <div class="pv-modal" role="dialog" aria-modal="true" aria-label="Portfolio Views">
+            <div class="pv-modal-header">
+                <span class="pv-modal-title">Views</span>
+                <span class="pv-modal-count" id="pv-modal-count"></span>
+                <button class="pv-modal-x" onclick="closePortfolioViewsModal()" aria-label="Close">×</button>
+            </div>
+            <div class="pv-modal-body">
+                <aside class="pv-modal-sidebar" id="pv-modal-sidebar"></aside>
+                <div class="pv-modal-maincol">
+                    <div class="pv-modal-main" id="pv-modal-main"></div>
+                    <div class="pv-modal-footer" id="pv-modal-footer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CIM scoping controls (chosen first, above the pipeline/buttons) -->
+    <section id="cim-scope-bar" class="filters-section scope-bar">
+        <div class="filter-group" id="perspective-filter-group">
+            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">University = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles. EM = Enrollment Management view (programs only): new offerings + inactivations, with a Ready for GTM bucket once governance clears.</span></span></label>
+            <div id="perspective-bar" class="perspective-bar">
+                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">University</button>
+                <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
+                <button class="perspective-btn" data-persp="em" onclick="setCimPerspective('em')">EM</button>
+                <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
+            </div>
+        </div>
+        <div class="filter-group" id="level-filter-group">
+            <label>Level:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Graduate / Undergraduate. Filters the table by level; in College perspective it also prunes the role tiles to that level.</span></span></label>
+            <div class="level-switch">
+                <button class="type-btn" onclick="setTypeFilter('Graduate')">Graduate</button>
+                <button class="type-btn" onclick="setTypeFilter('Undergraduate')">Undergraduate</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pipeline Summary -->
+    <section id="pipeline" class="pipeline-section">
+        <div class="pipeline-header-row">
+            <h2>Pipeline Summary</h2>
+        </div>
+        <div class="pipeline-row">
+            <button id="pipeline-arrow-left" class="panel-arrow" style="display:none" title="Back to college steps">◂</button>
+            <div id="pipeline-bar" class="pipeline-bar">
+                <!-- Populated by JS -->
+            </div>
+            <button id="pipeline-arrow-right" class="panel-arrow" style="display:none" title="Show university pipeline">▸</button>
+        </div>
+    </section>
+
+    <!-- Proposal-type buttons -->
+    <section class="smart-views-section">
+        <div class="view-group">
+            <span class="info-tip-wrap"><button class="proposal-btn" id="btn-proposal-new" onclick="setProposalFilter('Added')">New Programs</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to create a brand-new academic program.</span></span></span>
+            <span class="info-tip-wrap"><button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to modify an existing program's requirements, name, or structure.</span></span></span>
+            <span class="info-tip-wrap"><button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to retire and stop admitting students to an existing program.</span></span></span>
+            <span class="info-tip-wrap"><button class="proposal-btn" id="btn-proposal-complete" onclick="setProposalFilter('__complete__')">Complete</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have finished the full approval workflow and are no longer in the active pipeline.</span></span></span>
+        </div>
+    </section>
+
+    <!-- Program-kind filter (programs view only) -->
+    <section class="kind-filter-section" id="kind-filter-row">
+        <button class="kind-btn" data-kind="bachelors" onclick="setProgramKindFilter('bachelors')">Bachelor's</button>
+        <button class="kind-btn" data-kind="masters" onclick="setProgramKindFilter('masters')">Master's</button>
+        <button class="kind-btn" data-kind="phd" onclick="setProgramKindFilter('phd')">PhD</button>
+        <button class="kind-btn" data-kind="profdoc" onclick="setProgramKindFilter('profdoc')">Prof. Doctorate</button>
+        <button class="kind-btn" data-kind="certificate" onclick="setProgramKindFilter('certificate')">Certificate</button>
+        <button class="kind-btn" data-kind="cags" onclick="setProgramKindFilter('cags')">CAGS</button>
+        <button class="kind-btn" data-kind="minor" onclick="setProgramKindFilter('minor')">Minor</button>
+        <button class="kind-btn" data-kind="plusone" onclick="setProgramKindFilter('plusone')">PlusOne</button>
+        <button class="kind-btn" data-kind="concentration" onclick="setProgramKindFilter('concentration')">Concentration</button>
+        <button class="kind-btn" data-kind="dual" onclick="setProgramKindFilter('dual')">Dual Degree</button>
+    </section>
+
+    <!-- Smart Views: New Submissions → Recent Changes → Potentially Stuck -->
+    <section class="smart-actions-section">
+        <span class="info-tip-wrap"><button class="smart-view-btn" onclick="setSmartView('new')">New Submissions</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs submitted to CIM within the last 30 days.</span></span></span>
+        <span class="info-tip-wrap"><button class="smart-view-btn" onclick="setSmartView('recent')">Recent Changes</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that moved to a new approval step within the last 14 days.</span></span></span>
+        <span class="info-tip-wrap">
+            <button class="smart-view-btn" onclick="setSmartView('stuck')">Potentially Stuck</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have been at the same approval step for 30 or more days.</span></span>
+        </span>
+    </section>
+
+    <!-- Filters -->
+    <section class="filters-section">
+        <div class="filter-group">
+            <label>College:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the college or school responsible for the program.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-college" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Colleges</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group" id="filter-group-subject" style="display: none">
+            <label>Subject Code:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter courses by their subject prefix (e.g. CS, ENGR, HIST).</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-subject" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Subjects</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-subject')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Campus:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the campus where the program is offered (e.g. Boston, Oakland, Online).</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-campus" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Campuses</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-campus')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Approver:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the person currently responsible for reviewing the proposal at its current step.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-approver" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Approvers</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-approver')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Step:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the current approval step in the CIM workflow.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-step" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Steps</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-step')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <span id="result-count" class="result-count"></span>
+        </div>
+    </section>
+
+    <!-- Programs Table -->
+    <section id="programs" class="programs-section">
+        <div id="programs-table-container">
+            <!-- Populated by JS -->
+        </div>
+    </section>
+
+
+    <div id="tip-overlay"></div>
+</div>
+</body>
+</html>

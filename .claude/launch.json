@@ -2,10 +2,24 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dashboard",
+      "name": "flask",
       "runtimeExecutable": "/usr/bin/python3",
-      "runtimeArgs": ["-m", "http.server", "8888", "--directory", "/Users/wmeleis/committees/nu-docs/Curriculum/CIM/docs"],
-      "port": 8888
+      "runtimeArgs": [
+        "/Users/wmeleis/committees/nu-docs/Curriculum/CIM/app.py"
+      ],
+      "port": 5001
+    },
+    {
+      "name": "snake",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--directory",
+        "/Users/wmeleis/committees/nu-docs/Curriculum/CIM"
+      ],
+      "port": 8765
     }
   ]
 }

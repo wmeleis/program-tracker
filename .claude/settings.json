@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gunzip -c *)",
+      "Bash(curl -s http://localhost:5001/api/*)",
+      "Bash(sqlite3 /Users/wmeleis/committees/nu-docs/Curriculum/CIM/data/tracker.db \"SELECT *)",
+      "Bash(sqlite3 data/tracker.db \"SELECT *)",
+      "Bash(sqlite3 /Users/wmeleis/committees/nu-docs/Curriculum/CIM/data/tracker.db \".schema *)",
+      "Bash(sqlite3 /Users/wmeleis/committees/nu-docs/Curriculum/CIM/data/tracker.db \"PRAGMA table_info*)",
+      "Bash(launchctl list)",
+      "Bash(launchctl list *)",
+      "mcp__Claude_Preview__preview_console_logs",
+      "mcp__Control_Chrome__get_current_tab",
+      "mcp__Control_Chrome__list_tabs",
+      "mcp__Control_Chrome__get_page_content",
+      "mcp__Claude_Preview__preview_screenshot",
+      "mcp__Claude_Preview__preview_list",
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__ccd_session_mgmt__search_session_transcripts",
+      "mcp__mcp-registry__search_mcp_registry",
+      "mcp__mcp-registry__list_connectors"
+    ]
+  }
+}

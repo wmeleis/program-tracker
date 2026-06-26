@@ -741,9 +741,19 @@ function emIncluded(p) {
 // Ready for GTM = a NEW OFFERING whose governance has cleared: new
 // concentrations/certs past the (grad) curriculum committee; new degrees past
 // the Board of Trustees; or completed. (Inactivations are not "go to market".)
+// Earliest catalog year considered "current" for GTM purposes. Anything
+// effective before this already went to market, so it's excluded from GTM add.
+const EM_GTM_MIN_CATALOG_YEAR = 2025;
+function emCatalogStartYear(p) {
+    const m = /Catalog\s+(\d{4})-\d{4}/.exec(p && p.completion_date || '');
+    return m ? parseInt(m[1], 10) : null;
+}
 function emReadyForGTM(p) {
     if (!emIsNewOffering(p)) return false;
-    if (p.completion_date && !p.current_step) return true;   // approved/historical
+    if (p.completion_date && !p.current_step) {              // approved/historical
+        const yr = emCatalogStartYear(p);
+        return yr !== null && yr >= EM_GTM_MIN_CATALOG_YEAR;  // current/upcoming only
+    }
     if (!p.current_step) return false;
     const gate = (p.new_offering.indexOf('new_degree') !== -1) ? EM_BOT_ORD : EM_UGCC_ORD;
     return emStageOrd(p.current_step) > gate;
