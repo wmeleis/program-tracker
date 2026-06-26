@@ -5348,6 +5348,7 @@ const _GTM_RELEVANT_GROUP = {
 // (governance cleared / current-or-upcoming) plus grad inactivations.
 const GTM_VIEW = {
     id: 'gtm', name: 'GTM', team: true, system: true,
+    tip: 'Graduate new offerings that have cleared their governance gate (a new concentration or certificate past the Graduate Curriculum Committee, a new degree past the Board of Trustees, or completed effective in the 2025-2026 catalog or later), plus graduate inactivations in workflow or effective in that catalog window.',
     state: {
         visibleCols: _GTM_VIEW_COLS,
         filters: {},
@@ -5358,6 +5359,7 @@ const GTM_VIEW = {
 // (no GTM Type from the Go To Market Roster).
 const GTM_NEEDS_ACTION_VIEW = {
     id: 'gtm_needs_action', name: 'GTM — Needs Action', team: true, system: true,
+    tip: 'The GTM set (graduate new offerings ready for go-to-market plus graduate inactivations) filtered to programs with no GTM Type recorded in the Go To Market Roster 2.0 — i.e. no GTM action started yet.',
     state: {
         visibleCols: _GTM_VIEW_COLS,
         filters: {},
@@ -6111,11 +6113,14 @@ function renderPortfolioViewTiles() {
         const active = (v.id === 'all')
             ? (!portfolioActiveViewId || portfolioActiveViewId === 'all')
             : (v.id === portfolioActiveViewId);
+        const tipHtml = v.tip
+            ? `<span class="info-tip" onclick="event.stopPropagation()"><i class="tip-icon">i</i><span class="tip-bubble">${escapeHtml(v.tip)}</span></span>`
+            : '';
         return `<button class="pv-tile${active ? ' active' : ''}"
             onclick="applyPortfolioView('${v.id}'); renderPortfolioTable();"
             title="${escapeHtml(v.name)}">
             <span class="pv-tile-count">${typeof cnt === 'number' ? cnt.toLocaleString() : cnt}</span>
-            <span class="pv-tile-label">${escapeHtml(v.name)}</span>
+            <span class="pv-tile-label">${escapeHtml(v.name)}${tipHtml}</span>
         </button>`;
     }).join('');
 }
