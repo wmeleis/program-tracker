@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1782500085">
+    <link rel="stylesheet" href="style.css?v=1782502060">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1782500085;
+  const CACHE_BUST = 1782502060;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -424,11 +424,10 @@
     <!-- CIM scoping controls (chosen first, above the pipeline/buttons) -->
     <section id="cim-scope-bar" class="filters-section scope-bar">
         <div class="filter-group" id="perspective-filter-group">
-            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">University = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles. EM = Enrollment Management view (programs only): new offerings + inactivations, with a Ready for GTM bucket once governance clears.</span></span></label>
+            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">University = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles.</span></span></label>
             <div id="perspective-bar" class="perspective-bar">
                 <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">University</button>
                 <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
-                <button class="perspective-btn" data-persp="em" onclick="setCimPerspective('em')">EM</button>
                 <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
             </div>
         </div>
