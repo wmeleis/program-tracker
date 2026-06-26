@@ -133,9 +133,13 @@ header h1 {
 .pipeline-row {
     display: flex;
     align-items: stretch;
+    justify-content: flex-start;
     gap: 8px;
 }
-.pipeline-row .pipeline-bar { flex: 1 1 auto; min-width: 0; }
+/* Size the bar to its tiles (don't grow to fill the row) so the panel arrow
+   sits right after the last tile instead of pinned to the far right. Still
+   shrinks + scrolls when the tiles overflow the available width. */
+.pipeline-row .pipeline-bar { flex: 0 1 auto; min-width: 0; }
 .panel-arrow {
     flex: 0 0 auto;
     display: inline-flex;
