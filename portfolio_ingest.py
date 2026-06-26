@@ -1910,6 +1910,95 @@ def _best_guess(subject, degree, cim_entries, prefer_campus=''):
 
 
 # ---------------------------------------------------------------------------
+# GTM (go-to-market) readiness — ported from the EM perspective in static/app.js.
+# Grad-only. A new offering is "ready for GTM" once its governance gate clears:
+# a new concentration/cert past the Graduate Curriculum Committee, a new degree
+# past the Board of Trustees, or a completed proposal effective in the current /
+# upcoming catalog (>= EM_GTM_MIN_CATALOG_YEAR). Inactivations are tracked
+# separately (gtm_inactivation) over the same current/upcoming window.
+# ---------------------------------------------------------------------------
+EM_GTM_MIN_CATALOG_YEAR = 2025
+_EM_STAGE_ORD = {
+    "Program PR Graduate Dean's Office": 1,
+    "Provost Initial Review": 2,
+    "Program Review 2": 3,
+    "Program Graduate Provost Review": 4,
+    "Program GRA Regulatory": 5,
+    "Program Graduate Curriculum Committee": 6,                        # UGCC gate (grad)
+    "Program Undergraduate Curriculum Committee - Tabled Proposals": 7,
+    "Program Provost Administrative and Budgetary Review": 8,
+    "Program Provost Approval": 9,
+    "Program Faculty Senate": 10,
+    "Program University Board of Trustees": 11,                        # BOT gate
+    "Program Setup": 12,                                               # Registrar
+    "Program Teach-Out": 13,
+}
+_EM_UGCC_ORD, _EM_BOT_ORD = 6, 11
+_EM_PIPELINE_STEPS = set(_EM_STAGE_ORD)
+
+def _em_canonical_step(step):
+    if not step:
+        return step
+    if step.startswith("Program GRA Regulatory"):
+        return "Program GRA Regulatory"
+    if (step in ("Program Banner Setup", "Program Editor",
+                 "Program Workflow Setup", "Program CIP Code Committee")
+            or step.startswith("Program Catalog Setup")
+            or "Degree Audit" in step):
+        return "Program Setup"
+    return step
+
+def _em_is_college_step(step):
+    if not step:
+        return False
+    if _em_canonical_step(step) in _EM_PIPELINE_STEPS:
+        return False
+    if step == "Program UIP College Approval":
+        return True
+    if "Chair" in step:
+        return True
+    return bool(re.match(
+        r'^Program (AFCS|AM |AMSL|ARCH|ASNS|BA |CS |EDU|EECE|EN |ENGL|HIST|HUSV|MSCI|PPUA|PS |SC |SH )',
+        step))
+
+def _em_stage_ord(step):
+    if not step:
+        return -1
+    if _em_is_college_step(step):
+        return 0
+    return _EM_STAGE_ORD.get(_em_canonical_step(step), -1)
+
+def _em_catalog_start_year(completion_date):
+    m = re.search(r'Catalog\s+(\d{4})-\d{4}', completion_date or '')
+    return int(m.group(1)) if m else None
+
+def _em_current_or_upcoming(completion_date):
+    """True for a completed proposal effective in the current/upcoming catalog."""
+    yr = _em_catalog_start_year(completion_date)
+    return yr is not None and yr >= EM_GTM_MIN_CATALOG_YEAR
+
+def compute_ready_for_gtm(new_offering, current_step, completion_date):
+    """'Yes' if a grad new offering has cleared its governance gate."""
+    if not new_offering:
+        return ''
+    if completion_date and not current_step:           # approved / historical
+        return 'Yes' if _em_current_or_upcoming(completion_date) else ''
+    if not current_step:
+        return ''
+    gate = _EM_BOT_ORD if 'new_degree' in new_offering else _EM_UGCC_ORD
+    return 'Yes' if _em_stage_ord(current_step) > gate else ''
+
+def compute_gtm_inactivation(inactivates, current_step, completion_date):
+    """'Yes' for a grad inactivation that is in workflow or completed
+    in the current/upcoming catalog (mirrors the GTM current/upcoming window)."""
+    if inactivates != 'Yes':
+        return ''
+    if current_step:
+        return 'Yes'
+    return 'Yes' if _em_current_or_upcoming(completion_date) else ''
+
+
+# ---------------------------------------------------------------------------
 # Main ingest function
 # ---------------------------------------------------------------------------
 
@@ -1940,6 +2029,9 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         'cim_change_type': '',
         'inactivation_admission': '',
         'proposal_stage': '',
+        'new_offering': '',
+        'ready_for_gtm': '',
+        'gtm_inactivation': '',
         'last_refreshed': now,
     }
 
@@ -1964,7 +2056,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     with get_db() as conn:
         raw_rows = conn.execute("""
             SELECT id, name, college, current_step, completion_date, status, eff_cat,
-                   banner_code
+                   banner_code, program_type, new_offering, inactivates
             FROM programs
             WHERE (current_step IS NOT NULL AND current_step != '')
                OR (completion_date IS NOT NULL AND completion_date != '')
@@ -2034,6 +2126,14 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             row['inactivation_admission'] = _eff_cat_to_semester(
                 _best_eff_cat(r['eff_cat'] or '', r['completion_date'] or '', r['current_step'] or '')
             )
+        # GTM (enrollment-management) signals — graduate programs only.
+        if (r['program_type'] or '') == 'Graduate':
+            new_off = r['new_offering'] or ''
+            cur_step = r['current_step'] or ''
+            comp_date = r['completion_date'] or ''
+            row['new_offering']     = new_off
+            row['ready_for_gtm']    = compute_ready_for_gtm(new_off, cur_step, comp_date)
+            row['gtm_inactivation'] = compute_gtm_inactivation(r['inactivates'] or '', cur_step, comp_date)
         tracker[pid] = row
 
         # Index by (subj, deg, campus)
