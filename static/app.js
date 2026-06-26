@@ -1453,8 +1453,8 @@ function renderEMPipeline(baseFiltered) {
         ['__em_college__',       'College'],
         ['__em_ugcc__',          'UGCC'],
         ['__em_registrar__',     'Registrar'],
-        ['__em_gtm__',           'Ready for GTM'],
-        ['__em_inactivations__', 'Inactivations'],
+        ['__em_gtm__',           'GTM add'],
+        ['__em_inactivations__', 'GTM inactivation'],
     ];
     bar.innerHTML = TILES.map(([key, label]) => {
         const count = source.filter(p => emBucketMatch(p, key)).length;
