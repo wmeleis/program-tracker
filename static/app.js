@@ -728,27 +728,34 @@ function emStageOrd(step) {
     if (isCollegeStep(step)) return 0;
     return EM_STAGE_ORD[canonicalStep(step)] ?? -1;
 }
-// EM tracks new offerings + inactivations; ignores plain edits to existing programs.
+// EM is GRADUATE only and tracks new offerings + inactivations, identified from
+// CIM-native fields (NOT `status`, which can't distinguish them): `new_offering`
+// (new_concentration / new_degree / new_cert, from the proposal XML) and
+// `inactivates` ('Yes' when the proposal removes/inactivates the program).
+// Plain edits to existing programs have neither → excluded.
+function emIsNewOffering(p) { return !!(p && p.new_offering); }
+function emIsInactivation(p) { return !!(p && p.inactivates === 'Yes'); }
 function emIncluded(p) {
-    return p && (p.status === 'Added' || p.status === 'Deactivated');
+    return p && p.program_type === 'Graduate' && (emIsNewOffering(p) || emIsInactivation(p));
 }
-// Ready for GTM = governance cleared: concentrations/certs past the (grad)
-// curriculum committee; everything else past the Board of Trustees; or completed.
+// Ready for GTM = a NEW OFFERING whose governance has cleared: new
+// concentrations/certs past the (grad) curriculum committee; new degrees past
+// the Board of Trustees; or completed. (Inactivations are not "go to market".)
 function emReadyForGTM(p) {
-    if (!p) return false;
+    if (!emIsNewOffering(p)) return false;
     if (p.completion_date && !p.current_step) return true;   // approved/historical
     if (!p.current_step) return false;
-    const kind = classifyProgramKind(p);
-    const gate = (kind === 'concentration' || kind === 'certificate') ? EM_UGCC_ORD : EM_BOT_ORD;
+    const gate = (p.new_offering.indexOf('new_degree') !== -1) ? EM_BOT_ORD : EM_UGCC_ORD;
     return emStageOrd(p.current_step) > gate;
 }
 // EM tile membership (overlapping: a program can be e.g. both Registrar and GTM).
 function emBucketMatch(p, bucket) {
     if (!emIncluded(p)) return false;
-    if (bucket === '__em_gtm__')       return emReadyForGTM(p);
-    if (bucket === '__em_college__')   return isCollegeStep(p.current_step);
-    if (bucket === '__em_ugcc__')      return canonicalStep(p.current_step) === EM_UGCC_STEP;
-    if (bucket === '__em_registrar__') return canonicalStep(p.current_step) === 'Program Setup';
+    if (bucket === '__em_gtm__')           return emReadyForGTM(p);
+    if (bucket === '__em_inactivations__') return emIsInactivation(p);
+    if (bucket === '__em_college__')       return isCollegeStep(p.current_step);
+    if (bucket === '__em_ugcc__')          return canonicalStep(p.current_step) === EM_UGCC_STEP;
+    if (bucket === '__em_registrar__')     return canonicalStep(p.current_step) === 'Program Setup';
     return false;
 }
 
@@ -1443,15 +1450,16 @@ function renderEMPipeline(baseFiltered) {
     const bar = document.getElementById('pipeline-bar');
     const source = baseFiltered || allPrograms;
     const TILES = [
-        ['__em_college__',   'College'],
-        ['__em_ugcc__',      'UGCC'],
-        ['__em_registrar__', 'Registrar'],
-        ['__em_gtm__',       'Ready for GTM'],
+        ['__em_college__',       'College'],
+        ['__em_ugcc__',          'UGCC'],
+        ['__em_registrar__',     'Registrar'],
+        ['__em_gtm__',           'Ready for GTM'],
+        ['__em_inactivations__', 'Inactivations'],
     ];
     bar.innerHTML = TILES.map(([key, label]) => {
         const count = source.filter(p => emBucketMatch(p, key)).length;
         const active = pipelineFilter === key ? ' active' : '';
-        const gtm = key === '__em_gtm__' ? ' em-gtm' : '';
+        const gtm = key === '__em_gtm__' ? ' em-gtm' : (key === '__em_inactivations__' ? ' em-inact' : '');
         return `
             <div class="pipeline-step ${count > 0 ? 'has-items' : 'empty'}${active}${gtm}"
                  onclick="togglePipelineFilter('${key}')"
