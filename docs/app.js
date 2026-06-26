@@ -5080,7 +5080,7 @@ const PORTFOLIO_COLUMNS = [
     {key: 'offering',    label: 'New Offering', defaultHidden: true,
         help: 'Whether this graduate program is a new offering or an inactivation, derived from CIM proposal fields: New concentration (a concentration marked not-existing in the proposal), New degree (a new degree type), or Inactivation (whole-program deactivation).'},
     {key: 'gtmentered',  label: 'GTM Entered', defaultHidden: true,
-        help: 'Date the record entered the GTM stage — when it first became GTM-relevant (a new offering cleared its governance gate, or an inactivation began). Preserved across scans; existing records at launch were seeded from their CIM step-entered date.'},
+        help: 'Date the record entered the GTM stage — when it first became GTM-relevant (a new offering completed governance, or an inactivation began). Preserved across scans; existing records at launch were seeded from their CIM step-entered date.'},
     {key: 'gtmtype',     label: 'GTM Type', defaultHidden: true,
         help: 'Type from the Go To Market Roster 2.0 (Net new, Redeployment, Major Program Update, Inactivation, etc.). Joined to CIM by the roster’s CIM url + Banner Code.'},
     {key: 'gtmdate',     label: 'GTM Date', defaultHidden: true,
@@ -5350,7 +5350,7 @@ const _GTM_RELEVANT_GROUP = {
 // (governance cleared / current-or-upcoming) plus grad inactivations.
 const GTM_VIEW = {
     id: 'gtm', name: 'GTM', team: true, system: true,
-    tip: 'Graduate new offerings that have cleared their governance gate (a new concentration or certificate past the Graduate Curriculum Committee, a new degree past the Board of Trustees, or completed effective in the 2025-2026 catalog or later), plus graduate inactivations in workflow or effective in that catalog window.',
+    tip: 'Graduate new offerings that have completed governance (a new concentration or certificate past the Graduate Curriculum Committee, a new degree past the Board of Trustees, or completed effective in the 2025-2026 catalog or later), plus graduate inactivations in workflow or effective in that catalog window.',
     state: {
         visibleCols: _GTM_VIEW_COLS,
         filters: {},
@@ -5378,7 +5378,7 @@ const GTM_NEEDS_ACTION_VIEW = {
 // (GTM Entered Date · in the last … days).
 const GTM_RECENT_VIEW = {
     id: 'gtm_recent', name: 'GTM — New (30d)', team: true, system: true,
-    tip: 'Graduate records that entered the GTM stage in the last 30 days — i.e. first became GTM-relevant (a new offering cleared its governance gate, or an inactivation began) within the window, by GTM Entered date. Adjust the day count in the view’s filter.',
+    tip: 'Graduate records that entered the GTM stage in the last 30 days — i.e. first became GTM-relevant (a new offering completed governance, or an inactivation began) within the window, by GTM Entered date. Adjust the day count in the view’s filter.',
     state: {
         visibleCols: ['degree', 'college', 'campus', 'offering', 'gtmentered', 'cim',
             'svt', 'gtmtype', 'gtmdate', 'gtmfirst', 'gtmlast', 'gtmintake'],
