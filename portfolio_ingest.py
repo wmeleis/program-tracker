@@ -2065,6 +2065,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         'ready_for_gtm': '',
         'gtm_inactivation': '',
         'gtm_entered_date': '',
+        'cim_eff_term': '',
         'last_refreshed': now,
     }
 
@@ -2088,7 +2089,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     _STATUS_LABEL = {'Added': 'New', 'Edited': 'Change', 'Deactivated': 'Inactivation'}
     with get_db() as conn:
         raw_rows = conn.execute("""
-            SELECT id, name, college, current_step, completion_date, status, eff_cat,
+            SELECT id, name, college, current_step, completion_date, status, eff_cat, eff_term,
                    banner_code, program_type, new_offering, inactivates, step_entered_date
             FROM programs
             WHERE (current_step IS NOT NULL AND current_step != '')
@@ -2159,6 +2160,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             row['inactivation_admission'] = _eff_cat_to_semester(
                 _best_eff_cat(r['eff_cat'] or '', r['completion_date'] or '', r['current_step'] or '')
             )
+        # CIM effective term (Banner code, e.g. "202710") — raw, for display/comparison.
+        row['cim_eff_term'] = r['eff_term'] or ''
         # GTM (enrollment-management) signals — graduate programs only.
         if (r['program_type'] or '') == 'Graduate':
             new_off = r['new_offering'] or ''

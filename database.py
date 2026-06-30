@@ -62,6 +62,7 @@ def init_db():
                 completion_date TEXT DEFAULT '',
                 campus TEXT DEFAULT '',
                 eff_cat TEXT DEFAULT '',
+                eff_term TEXT DEFAULT '',
                 new_concentrations TEXT DEFAULT '',
                 new_offering TEXT DEFAULT '',
                 inactivates TEXT DEFAULT '',
@@ -278,10 +279,10 @@ def upsert_program(program_data):
                 INSERT INTO programs (id, banner_code, name, status, current_step,
                     total_steps, completed_steps, current_approver_emails,
                     program_type, college, department, degree, date_submitted,
-                    step_entered_date, curriculum_html, completion_date, campus, eff_cat,
+                    step_entered_date, curriculum_html, completion_date, campus, eff_cat, eff_term,
                     new_concentrations, new_offering, inactivates,
                     first_seen, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 program_data['id'],
                 program_data.get('banner_code', ''),
@@ -301,6 +302,7 @@ def upsert_program(program_data):
                 program_data.get('completion_date', ''),
                 program_data.get('campus', ''),
                 program_data.get('eff_cat', ''),
+                program_data.get('eff_term', ''),
                 program_data.get('new_concentrations', ''),
                 program_data.get('new_offering', ''),
                 program_data.get('inactivates', ''),
@@ -351,7 +353,7 @@ def upsert_program(program_data):
                     college = ?, department = ?, degree = ?,
                     date_submitted = ?, step_entered_date = ?,
                     curriculum_html = ?,
-                    completion_date = ?, campus = ?, eff_cat = ?,
+                    completion_date = ?, campus = ?, eff_cat = ?, eff_term = ?,
                     new_concentrations = ?, new_offering = ?, inactivates = ?,
                     last_updated = ?
                 WHERE id = ?
@@ -373,6 +375,7 @@ def upsert_program(program_data):
                 completion_val,
                 keep('campus'),
                 keep('eff_cat'),
+                keep('eff_term'),
                 # New-offering signals: preserve when a fetch didn't supply them
                 # (transient/no-XML), like other metadata.
                 keep('new_concentrations'),
@@ -1356,7 +1359,8 @@ def init_portfolio_tables(conn):
             new_offering TEXT DEFAULT '',
             ready_for_gtm TEXT DEFAULT '',
             gtm_inactivation TEXT DEFAULT '',
-            gtm_entered_date TEXT DEFAULT ''
+            gtm_entered_date TEXT DEFAULT '',
+            cim_eff_term TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS portfolio_notes (
@@ -1382,7 +1386,8 @@ def init_portfolio_tables(conn):
                 'inactivation_admission', 'proposal_stage',
                 'gtm_type', 'gtm_date', 'gtm_first_term', 'gtm_last_term', 'gtm_intake_terms',
                 'exit_masters', 'otp_notes',
-                'new_offering', 'ready_for_gtm', 'gtm_inactivation', 'gtm_entered_date'):
+                'new_offering', 'ready_for_gtm', 'gtm_inactivation', 'gtm_entered_date',
+                'cim_eff_term'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1412,7 +1417,7 @@ def upsert_portfolio_program(row):
                  cim_change_type, inactivation_admission, proposal_stage,
                  gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms,
                  exit_masters, new_offering, ready_for_gtm, gtm_inactivation,
-                 gtm_entered_date)
+                 gtm_entered_date, cim_eff_term)
             VALUES
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1428,7 +1433,7 @@ def upsert_portfolio_program(row):
                  :cim_change_type, :inactivation_admission, :proposal_stage,
                  :gtm_type, :gtm_date, :gtm_first_term, :gtm_last_term, :gtm_intake_terms,
                  :exit_masters, :new_offering, :ready_for_gtm, :gtm_inactivation,
-                 :gtm_entered_date)
+                 :gtm_entered_date, :cim_eff_term)
             ON CONFLICT(id) DO UPDATE SET
                 program_name=excluded.program_name,
                 college=excluded.college,
@@ -1472,7 +1477,8 @@ def upsert_portfolio_program(row):
                 new_offering=excluded.new_offering,
                 ready_for_gtm=excluded.ready_for_gtm,
                 gtm_inactivation=excluded.gtm_inactivation,
-                gtm_entered_date=excluded.gtm_entered_date
+                gtm_entered_date=excluded.gtm_entered_date,
+                cim_eff_term=excluded.cim_eff_term
         """, row)
 
 
@@ -1497,7 +1503,7 @@ def replace_all_portfolio_programs(rows):
                      cim_change_type, inactivation_admission, proposal_stage,
                      gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms,
                      exit_masters, new_offering, ready_for_gtm, gtm_inactivation,
-                     gtm_entered_date)
+                     gtm_entered_date, cim_eff_term)
                 VALUES
                     (:id, :program_name, :college, :campus,
                      :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1513,7 +1519,7 @@ def replace_all_portfolio_programs(rows):
                      :cim_change_type, :inactivation_admission, :proposal_stage,
                      :gtm_type, :gtm_date, :gtm_first_term, :gtm_last_term, :gtm_intake_terms,
                      :exit_masters, :new_offering, :ready_for_gtm, :gtm_inactivation,
-                     :gtm_entered_date)
+                     :gtm_entered_date, :cim_eff_term)
             """, row)
 
 
@@ -1555,6 +1561,7 @@ def migrate_db():
             'completion_date': 'TEXT DEFAULT ""',   # last approval date once fully approved; empty while in pipeline
             'campus': 'TEXT DEFAULT ""',            # XML campus code (e.g. BOS, VAN); parsed from program name otherwise
             'eff_cat': 'TEXT DEFAULT ""',           # XML <eff_cat> e.g. "2026-2027"; set for both active and completed
+            'eff_term': 'TEXT DEFAULT ""',          # XML <eff_term> Banner term code e.g. "202710" (effective term)
             'new_concentrations': 'TEXT DEFAULT ""', # '; '-joined titles of NEW concentrations (existing_concentration=No)
             'new_offering': 'TEXT DEFAULT ""',       # comma list: new_concentration / new_degree / new_cert (from CIM XML)
             'inactivates': 'TEXT DEFAULT ""',        # 'Yes' if proposal removes/inactivates the program (deleterec/deletestatus)

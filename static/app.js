@@ -5071,6 +5071,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Current CourseLeaf CIM workflow step (the review role currently holding the proposal). Blank when the program is not in active workflow.'},
     {key: 'cimcatalog',   label: 'CIM Catalog', defaultHidden: true,
         help: 'Effective catalog year CIM approved the program for (e.g. "Catalog 2026-2027"), from the completion surrogate. Blank while still in active workflow. This is the value the "SVT launch ≠ CIM catalog" check compares against.'},
+    {key: 'cimterm',      label: 'CIM Effective Term', defaultHidden: true,
+        help: 'Effective term from CIM XML <eff_term> (Banner code, e.g. 202710) with a best-effort decode — NU encodes Fall under the next calendar year. Not yet certified as the program\'s first-offered / launch term.'},
     {key: 'cimchange',    label: 'CIM Change',
         help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
     {key: 'inworkflow',   label: 'In CIM',
@@ -5428,7 +5430,7 @@ const ADMIN_CIM_DONE_SVT_BEHIND_VIEW = {
             'EDGE - Development', 'EDGE - Development & Delivery', 'EDGE - Content Consultation'] },
     ] } },
 };
-const _ADMIN_DATE_COLS = ['degree', 'college', 'campus', 'svt', 'launch', 'gtmfirst', 'cimcatalog', 'cimchange'];
+const _ADMIN_DATE_COLS = ['degree', 'college', 'campus', 'svt', 'launch', 'gtmfirst', 'cimcatalog', 'cimterm', 'cimchange'];
 const ADMIN_LAUNCH_OVERDUE_VIEW = {
     id: 'admin_launch_overdue', name: 'Admin · Launch overdue', team: true, system: true, admin: true,
     tip: 'Programs whose SVT launch term has already passed but that are not Complete (and not On Hold or inactivating) — planned to launch by a term that has gone by, but not yet launched. Free-text/TBD launch dates are excluded.',
@@ -5657,6 +5659,25 @@ function _pfLaunchVsCimCatalog(p) {
     return implied !== parseInt(m[1], 10);
 }
 
+// Decode a Banner term code (e.g. "202710") to a readable term. NU encodes Fall
+// under the NEXT calendar year (Fall 2026 = 202710); 30=Spring, 40/50/60=Summer.
+// Best-effort / display only — not yet certified as the program's launch term.
+function _pfDecodeBannerTerm(code) {
+    const c = String(code || '').trim();
+    if (!/^\d{6}$/.test(c)) return '';
+    const y = parseInt(c.slice(0, 4), 10), tt = c.slice(4);
+    if (tt === '10') return 'Fall ' + (y - 1);
+    if (tt === '30') return 'Spring ' + y;
+    if (tt === '40' || tt === '50' || tt === '60') return 'Summer ' + y;
+    return '';
+}
+function _pfEffTermLabel(p) {
+    const c = (p && p.cim_eff_term) || '';
+    if (!c) return '';
+    const d = _pfDecodeBannerTerm(c);
+    return d ? `${c} (${d})` : c;
+}
+
 const PORTFOLIO_FILTER_FIELDS = [
     {key: 'program',     label: 'Program',          type: 'text',   value: p => p.program_name || ''},
     {key: 'level',       label: 'Level',            type: 'select', value: p => classifyPortfolioLevel(p.program_name) || ''},
@@ -5668,6 +5689,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
     {key: 'svt',         label: 'SVT Status',       type: 'select', value: p => p.svt_status || ''},
     {key: 'launch',      label: 'SVT Launch Date',  type: 'select', value: p => p.roster_launch_date || ''},
+    {key: 'cimterm',     label: 'CIM Effective Term', type: 'text',  value: p => _pfEffTermLabel(p)},
     {key: 'launch_overdue', label: 'SVT launch overdue',     type: 'boolean', value: p => _pfLaunchOverdue(p) ? 'Y' : 'N'},
     {key: 'launch_vs_gtm',  label: 'SVT launch ≠ GTM intake', type: 'boolean', value: p => _pfLaunchVsGtm(p) ? 'Y' : 'N'},
     {key: 'launch_vs_cim',  label: 'SVT launch ≠ CIM catalog', type: 'boolean', value: p => _pfLaunchVsCimCatalog(p) ? 'Y' : 'N'},
@@ -7244,6 +7266,7 @@ function renderPortfolioTable() {
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimcatalog': av = a.cim_completion_date || ''; bv = b.cim_completion_date || ''; break;
+            case 'cimterm':   av = a.cim_eff_term || ''; bv = b.cim_eff_term || ''; break;
             case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
             case 'inworkflow':  av = a.cim_program_id ? 'Yes' : 'No'; bv = b.cim_program_id ? 'Yes' : 'No'; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
@@ -7574,6 +7597,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
         ${_pc('cimcatalog', escapeHtml(p.cim_completion_date || ''))}
+        ${_pc('cimterm',   escapeHtml(_pfEffTermLabel(p)))}
         ${_pc('cimchange',   (activeInWorkflow && p.cim_change_type) ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
         ${_pc('inworkflow',  p.cim_program_id ? 'Yes' : 'No')}
         ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
@@ -7633,6 +7657,7 @@ function exportPortfolioCsv() {
             case 'launch':      return p.roster_launch_date || '';
             case 'cim':         return p.cim_step || '';
             case 'cimcatalog':  return p.cim_completion_date || '';
+            case 'cimterm':     return _pfEffTermLabel(p);
             case 'cimchange':   return (p.cim_step && p.cim_change_type) ? p.cim_change_type : p.cim_program_id ? '' : '';
             case 'inworkflow':  return p.cim_program_id ? 'Yes' : 'No';
             case 'inactadmit':  return p.inactivation_admission || '';

@@ -1329,6 +1329,7 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True,
             'step_entered_date': sed, 'curriculum_html': curriculum_html,
             'completion_date': completion_date, 'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            'eff_term': meta.get('eff_term', ''),
             **parse_new_offerings(meta),
         }
         old_step = prev.get('current_step') or ''
@@ -1861,6 +1862,7 @@ def refresh_program_http(pid, sess=None, log=False):
                            .replace('<![CDATA[', '').replace(']]>', '').strip(),
         'completion_date': completion_date, 'campus': meta.get('campus', ''),
         'eff_cat': meta.get('eff_cat', ''),
+        'eff_term': meta.get('eff_term', ''),
         **parse_new_offerings(meta),
     })
     if steps:
@@ -1958,6 +1960,7 @@ def sweep_program_ids_http(start_id=1, end_id=2100, max_workers=16, log=True,
                                .replace('<![CDATA[', '').replace(']]>', '').strip(),
             'completion_date': completion_date, 'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            'eff_term': meta.get('eff_term', ''),
             **parse_new_offerings(meta),
         })
         if steps:
@@ -2654,6 +2657,7 @@ def run_full_scan(force_fetch_only=False):
             'completion_date': completion_date,
             'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            'eff_term': meta.get('eff_term', ''),
             'new_concentrations': meta.get('new_concentrations', ''),
             'new_offering': meta.get('new_offering', ''),
             'inactivates': meta.get('inactivates', ''),
@@ -2973,6 +2977,7 @@ def sweep_all_program_ids(start_id=1, end_id=2100, batch_size=25, log=True):
             'completion_date': completion_date,
             'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
+            'eff_term': meta.get('eff_term', ''),
             'new_concentrations': meta.get('new_concentrations', ''),
             'new_offering': meta.get('new_offering', ''),
             'inactivates': meta.get('inactivates', ''),
@@ -3365,6 +3370,7 @@ def heal_stale_program_steps(log=False, active_only=True):
                 'completion_date': '',
                 'campus': meta.get('campus', ''),
                 'eff_cat': meta.get('eff_cat', ''),
+            'eff_term': meta.get('eff_term', ''),
                 'new_concentrations': meta.get('new_concentrations', ''),
                 'new_offering': meta.get('new_offering', ''),
                 'inactivates': meta.get('inactivates', ''),
