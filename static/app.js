@@ -5069,6 +5069,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Actual Launch Date from the SVT Source Data Smartsheet. Stored as a term/free-text value (e.g. "Fall 2026", "TBD"), not a calendar date.'},
     {key: 'cim',          label: 'CIM Step',
         help: 'Current CourseLeaf CIM workflow step (the review role currently holding the proposal). Blank when the program is not in active workflow.'},
+    {key: 'cimcatalog',   label: 'CIM Catalog', defaultHidden: true,
+        help: 'Effective catalog year CIM approved the program for (e.g. "Catalog 2026-2027"), from the completion surrogate. Blank while still in active workflow. This is the value the "SVT launch ≠ CIM catalog" check compares against.'},
     {key: 'cimchange',    label: 'CIM Change',
         help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
     {key: 'inworkflow',   label: 'In CIM',
@@ -5426,7 +5428,7 @@ const ADMIN_CIM_DONE_SVT_BEHIND_VIEW = {
             'EDGE - Development', 'EDGE - Development & Delivery', 'EDGE - Content Consultation'] },
     ] } },
 };
-const _ADMIN_DATE_COLS = ['degree', 'college', 'campus', 'svt', 'launch', 'gtmfirst', 'cim', 'cimchange'];
+const _ADMIN_DATE_COLS = ['degree', 'college', 'campus', 'svt', 'launch', 'gtmfirst', 'cimcatalog', 'cimchange'];
 const ADMIN_LAUNCH_OVERDUE_VIEW = {
     id: 'admin_launch_overdue', name: 'Admin · Launch overdue', team: true, system: true, admin: true,
     tip: 'Programs whose SVT launch term has already passed but that are not Complete (and not On Hold or inactivating) — planned to launch by a term that has gone by, but not yet launched. Free-text/TBD launch dates are excluded.',
@@ -7241,6 +7243,7 @@ function renderPortfolioTable() {
             case 'gls':       av = a.gls_status || ''; bv = b.gls_status || ''; break;
             case 'launch':    av = a.roster_launch_date || ''; bv = b.roster_launch_date || ''; break;
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
+            case 'cimcatalog': av = a.cim_completion_date || ''; bv = b.cim_completion_date || ''; break;
             case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
             case 'inworkflow':  av = a.cim_program_id ? 'Yes' : 'No'; bv = b.cim_program_id ? 'Yes' : 'No'; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
@@ -7570,6 +7573,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('gls',     glsBadge)}
         ${_pc('launch',  escapeHtml(p.roster_launch_date || ''))}
         ${_pc('cim',       cimStep, 'step-cell')}
+        ${_pc('cimcatalog', escapeHtml(p.cim_completion_date || ''))}
         ${_pc('cimchange',   (activeInWorkflow && p.cim_change_type) ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
         ${_pc('inworkflow',  p.cim_program_id ? 'Yes' : 'No')}
         ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
@@ -7628,6 +7632,7 @@ function exportPortfolioCsv() {
             case 'gls':         return p.gls_status || '';
             case 'launch':      return p.roster_launch_date || '';
             case 'cim':         return p.cim_step || '';
+            case 'cimcatalog':  return p.cim_completion_date || '';
             case 'cimchange':   return (p.cim_step && p.cim_change_type) ? p.cim_change_type : p.cim_program_id ? '' : '';
             case 'inworkflow':  return p.cim_program_id ? 'Yes' : 'No';
             case 'inactadmit':  return p.inactivation_admission || '';
