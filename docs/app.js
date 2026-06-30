@@ -5426,7 +5426,33 @@ const ADMIN_CIM_DONE_SVT_BEHIND_VIEW = {
             'EDGE - Development', 'EDGE - Development & Delivery', 'EDGE - Content Consultation'] },
     ] } },
 };
-const ADMIN_VIEWS = [ADMIN_PLANNING_AHEAD_VIEW, ADMIN_CIM_INACT_SVT_ACTIVE_VIEW, ADMIN_CIM_DONE_SVT_BEHIND_VIEW];
+const _ADMIN_DATE_COLS = ['degree', 'college', 'campus', 'svt', 'launch', 'gtmfirst', 'cim', 'cimchange'];
+const ADMIN_LAUNCH_OVERDUE_VIEW = {
+    id: 'admin_launch_overdue', name: 'Admin · Launch overdue', team: true, system: true, admin: true,
+    tip: 'Programs whose SVT launch term has already passed but that are not Complete (and not On Hold or inactivating) — planned to launch by a term that has gone by, but not yet launched. Free-text/TBD launch dates are excluded.',
+    state: { visibleCols: _ADMIN_DATE_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
+        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'launch_overdue', op: 'in', value: ['Y'] },
+    ] } },
+};
+const ADMIN_LAUNCH_VS_GTM_VIEW = {
+    id: 'admin_launch_vs_gtm', name: 'Admin · SVT launch ≠ GTM intake', team: true, system: true, admin: true,
+    tip: 'Programs whose SVT launch term and GTM first-intake term disagree — the two planning sources name different launch terms. Only rows where both terms are present and parseable are shown.',
+    state: { visibleCols: _ADMIN_DATE_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
+        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'launch_vs_gtm', op: 'in', value: ['Y'] },
+    ] } },
+};
+const ADMIN_LAUNCH_VS_CIM_VIEW = {
+    id: 'admin_launch_vs_cim', name: 'Admin · SVT launch ≠ CIM catalog', team: true, system: true, admin: true,
+    tip: 'Programs whose SVT launch term falls outside the effective catalog year CIM approved them for (CIM authoritative). Fall maps to that catalog year; Spring/Summer to the prior one. Only completed-CIM rows with a parseable launch term are shown.',
+    state: { visibleCols: _ADMIN_DATE_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
+        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'launch_vs_cim', op: 'in', value: ['Y'] },
+    ] } },
+};
+const ADMIN_VIEWS = [ADMIN_PLANNING_AHEAD_VIEW, ADMIN_CIM_INACT_SVT_ACTIVE_VIEW, ADMIN_CIM_DONE_SVT_BEHIND_VIEW,
+    ADMIN_LAUNCH_OVERDUE_VIEW, ADMIN_LAUNCH_VS_GTM_VIEW, ADMIN_LAUNCH_VS_CIM_VIEW];
 
 const _PORTFOLIO_ADMIN_LS = 'cim-portfolio-admin-views';
 function _pvAdminViewsOn() { try { return localStorage.getItem(_PORTFOLIO_ADMIN_LS) === '1'; } catch (_) { return false; } }
@@ -5588,6 +5614,47 @@ function portfolioOfferingLabel(p) {
     return p.gtm_inactivation === 'Yes' ? 'Inactivation' : '';
 }
 
+// ── Term/date parsing for data-quality date-mismatch checks ─────────────────
+// Portfolio "dates" are mostly free-text academic terms ("Fall 2026", "SP 25",
+// "Summer 25"). Parse to a comparable rank = year*10 + season(Winter0/Spring1/
+// Summer2/Fall3); null when unparseable (TBD, soft-launch prose, etc.).
+function _pfTermRank(s) {
+    if (!s) return null;
+    const m = String(s).match(/(Fall|Spring|Summer|Winter|FA|SP|SU|WI)\s*'?\s*((?:20)?\d{2})\b/i);
+    if (!m) return null;
+    let yr = parseInt(m[2], 10); if (yr < 100) yr += 2000;
+    const rank = {winter:0, wi:0, spring:1, sp:1, summer:2, su:2, fall:3, fa:3}[m[1].toLowerCase()];
+    return rank == null ? null : yr * 10 + rank;
+}
+function _pfCurrentTermRank() {
+    const d = new Date(), mo = d.getMonth();          // 0=Jan
+    const rank = mo <= 3 ? 1 : mo <= 7 ? 2 : 3;        // Jan–Apr Spring, May–Aug Summer, Sep–Dec Fall
+    return d.getFullYear() * 10 + rank;
+}
+// #1 launch term has passed but program isn't launched (and isn't on-hold/inactivating).
+function _pfLaunchOverdue(p) {
+    const r = _pfTermRank(p.roster_launch_date);
+    if (r == null || r >= _pfCurrentTermRank()) return false;
+    const s = (p.svt_status || '').toLowerCase();
+    if (!s || s.includes('complete') || s.includes('hold') || s.includes('inactiv')) return false;
+    return true;
+}
+// #2 SVT launch term disagrees with the GTM first-intake term.
+function _pfLaunchVsGtm(p) {
+    const a = _pfTermRank(p.roster_launch_date), b = _pfTermRank(p.gtm_first_term);
+    return a != null && b != null && a !== b;
+}
+// #3 SVT launch term falls outside CIM's approved effective catalog year.
+// Fall Y -> catalog Y/(Y+1) (start Y); Spring/Summer/Winter Y -> catalog (Y-1)/Y (start Y-1).
+function _pfLaunchVsCimCatalog(p) {
+    const r = _pfTermRank(p.roster_launch_date);
+    if (r == null) return false;
+    const m = /Catalog\s+(\d{4})-\d{4}/.exec(p.cim_completion_date || '');
+    if (!m) return false;
+    const yr = Math.floor(r / 10), implied = (r % 10) >= 3 ? yr : yr - 1;
+    return implied !== parseInt(m[1], 10);
+}
+
 const PORTFOLIO_FILTER_FIELDS = [
     {key: 'program',     label: 'Program',          type: 'text',   value: p => p.program_name || ''},
     {key: 'level',       label: 'Level',            type: 'select', value: p => classifyPortfolioLevel(p.program_name) || ''},
@@ -5599,6 +5666,9 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
     {key: 'svt',         label: 'SVT Status',       type: 'select', value: p => p.svt_status || ''},
     {key: 'launch',      label: 'SVT Launch Date',  type: 'select', value: p => p.roster_launch_date || ''},
+    {key: 'launch_overdue', label: 'SVT launch overdue',     type: 'boolean', value: p => _pfLaunchOverdue(p) ? 'Y' : 'N'},
+    {key: 'launch_vs_gtm',  label: 'SVT launch ≠ GTM intake', type: 'boolean', value: p => _pfLaunchVsGtm(p) ? 'Y' : 'N'},
+    {key: 'launch_vs_cim',  label: 'SVT launch ≠ CIM catalog', type: 'boolean', value: p => _pfLaunchVsCimCatalog(p) ? 'Y' : 'N'},
     {key: 'substatus',   label: 'SVT Sub-status',   type: 'select', value: p => p.roster_sub_status || ''},
     {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
