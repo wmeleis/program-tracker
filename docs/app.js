@@ -5057,7 +5057,7 @@ const PORTFOLIO_COLUMNS = [
         help: 'Numeric performance score from the 2025 portfolio scoring workbook (Boston programs only).'},
     {key: 'otp',          label: 'OTP Status',
         help: 'Status from the "OTP Program Tracking" sheet of the Optimization, Withdrawal, and Deactivation Tracker (Boston-only; being deprecated).'},
-    {key: 'svt',          label: 'Status',
+    {key: 'svt',          label: 'SVT Status',
         help: 'Status from the SVT Source Data Smartsheet (Intake, Discovery, Approved for Development by College, Launch in Progress, Complete, Inactivation In Progress, etc.).'},
     {key: 'substatus',    label: 'Sub-status',
         help: 'Launch sub-status from the SVT Source Data Smartsheet (e.g. "Regulatory Submission in Progress", "Post-Launch & Monitor - IPD").'},
@@ -5065,8 +5065,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Speed to Market flag from the SVT Source Data Smartsheet (checkbox).'},
     {key: 'gls',          label: 'GLS Status',
         help: 'Per-campus status from the GLS Tableau dashboard (campus deployment health).'},
-    {key: 'launch',       label: 'Actual Launch Date',
-        help: 'Actual Launch Date from the SVT Source Data Smartsheet.'},
+    {key: 'launch',       label: 'SVT Launch Date',
+        help: 'Actual Launch Date from the SVT Source Data Smartsheet. Stored as a term/free-text value (e.g. "Fall 2026", "TBD"), not a calendar date.'},
     {key: 'cim',          label: 'CIM Step',
         help: 'Current CourseLeaf CIM workflow step (the review role currently holding the proposal). Blank when the program is not in active workflow.'},
     {key: 'cimchange',    label: 'CIM Change',
@@ -5394,7 +5394,7 @@ const GTM_RECENT_VIEW = {
 // ── Administrative data-quality views ───────────────────────────────────────
 // Hidden behind the "⚙ Admin views" toggle in the Views modal (per-browser,
 // localStorage). Graduate data-validation queues; CIM is authoritative.
-const _ADMIN_VIEW_COLS = ['degree', 'college', 'campus', 'cim', 'cimchange', 'svt', 'substatus', 'inactadmit'];
+const _ADMIN_VIEW_COLS = ['degree', 'college', 'campus', 'cim', 'cimchange', 'svt', 'substatus', 'launch', 'inactadmit'];
 const ADMIN_PLANNING_AHEAD_VIEW = {
     id: 'admin_planning_ahead', name: 'Admin · Planning ahead of CIM', team: true, system: true, admin: true,
     tip: 'Portfolio rows with no CIM record whose SVT status is Launch in Progress or Regulatory Validation In Progress — launch is underway but no approved CIM proposal is linked. Some may be CIM match failures (the program exists in CIM under a different name); treat as an investigation queue.',
@@ -5598,6 +5598,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'cim_step',    label: 'CIM Step',         type: 'select', value: p => p.cim_step || ''},
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
     {key: 'svt',         label: 'SVT Status',       type: 'select', value: p => p.svt_status || ''},
+    {key: 'launch',      label: 'SVT Launch Date',  type: 'select', value: p => p.roster_launch_date || ''},
     {key: 'substatus',   label: 'SVT Sub-status',   type: 'select', value: p => p.roster_sub_status || ''},
     {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
