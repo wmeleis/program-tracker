@@ -5072,7 +5072,9 @@ const PORTFOLIO_COLUMNS = [
     {key: 'cimcatalog',   label: 'CIM Catalog', defaultHidden: true,
         help: 'Effective catalog year CIM approved the program for (e.g. "Catalog 2026-2027"), from the completion surrogate. Blank while still in active workflow. This is the value the "SVT launch ≠ CIM catalog" check compares against.'},
     {key: 'cimterm',      label: 'CIM Effective Term', defaultHidden: true,
-        help: 'Effective term from CIM XML <eff_term> (Banner code, e.g. 202710) with a best-effort decode — NU encodes Fall under the next calendar year. Not yet certified as the program\'s first-offered / launch term.'},
+        help: 'Effective term from CIM XML <eff_term> (decoded from the Banner code per NU\'s official scheme, e.g. "Fall 2027").'},
+    {key: 'svtnote',      label: 'SVT Coordination Note', defaultHidden: true,
+        help: 'Heuristic note for the "Needs SVT coordination" view: why an SVT entry with no CIM record is problematic — no CIM match, a possible match to an existing CIM program (likely a match failure / duplicate), or a bundled name that may need splitting.'},
     {key: 'cimchange',    label: 'CIM Change',
         help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
     {key: 'inworkflow',   label: 'In CIM',
@@ -5455,8 +5457,17 @@ const ADMIN_LAUNCH_VS_CIM_VIEW = {
         { type: 'rule', field: 'launch_before_cimterm', op: 'in', value: ['Y'] },
     ] } },
 };
+const _ADMIN_SVT_COLS = ['degree', 'college', 'campus', 'svt', 'substatus', 'launch', 'svtnote'];
+const ADMIN_SVT_COORD_VIEW = {
+    id: 'admin_svt_coord', name: 'Admin · Needs SVT coordination', team: true, system: true, admin: true,
+    tip: 'SVT entries that do not cleanly map to one CIM program and need reconciliation with the SVT team — there is an SVT status but no CIM record. The SVT Coordination Note classifies each (heuristic): no CIM match, a possible match to an existing CIM program (likely a match failure / duplicate, e.g. "Applied Sustainability - new concentration, MS"), or a bundled name that may need splitting.',
+    state: { visibleCols: _ADMIN_SVT_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
+        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'svt_coord', op: 'in', value: ['Y'] },
+    ] } },
+};
 const ADMIN_VIEWS = [ADMIN_PLANNING_AHEAD_VIEW, ADMIN_CIM_INACT_SVT_ACTIVE_VIEW, ADMIN_CIM_DONE_SVT_BEHIND_VIEW,
-    ADMIN_LAUNCH_OVERDUE_VIEW, ADMIN_LAUNCH_VS_GTM_VIEW, ADMIN_LAUNCH_VS_CIM_VIEW];
+    ADMIN_LAUNCH_OVERDUE_VIEW, ADMIN_LAUNCH_VS_GTM_VIEW, ADMIN_LAUNCH_VS_CIM_VIEW, ADMIN_SVT_COORD_VIEW];
 
 const _PORTFOLIO_ADMIN_LS = 'cim-portfolio-admin-views';
 function _pvAdminViewsOn() { try { return localStorage.getItem(_PORTFOLIO_ADMIN_LS) === '1'; } catch (_) { return false; } }
@@ -5605,6 +5616,51 @@ function _syncPortfolioFilterUi() {
 // Each rule = {field, op, value}. Fields are defined in PORTFOLIO_FILTER_FIELDS
 // with a value(p) accessor returning the row's value as a display string.
 
+// ── SVT coordination queue ──────────────────────────────────────────────────
+// SVT entries that don't cleanly map to one CIM program — need reconciliation
+// with the SVT team. A row qualifies when it has an SVT status but no CIM record.
+function _svtNeedsCoord(p) {
+    return !!(p && (p.svt_status || '') && !p.cim_program_id);
+}
+const _SVT_STOP = new Set(['the','of','in','for','and','a','an','to','with','program','online','new']);
+function _svtSubjectWords(name) {
+    let s = (name || '').toLowerCase();
+    s = s.replace(/\([^)]*\)/g, ' ').replace(/—.*/, ' ');     // drop (campus) + em-dash deployment
+    s = s.split(',')[0];                                       // subject = before the first comma (degree)
+    s = s.replace(/\bnew concentration\b|\bdirect entry\b|\bcertificate\b/g, ' ');
+    return new Set(s.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w && !_SVT_STOP.has(w)));
+}
+function _svtDegKey(name) { return (extractPortfolioDegree(name) || '').toLowerCase().trim(); }
+let _svtCimSubjCache = null, _svtCimSubjLen = -1;
+function _svtCimSubjects() {
+    const all = allPortfolioPrograms || [];
+    if (_svtCimSubjCache && _svtCimSubjLen === all.length) return _svtCimSubjCache;
+    _svtCimSubjCache = all.filter(p => p.cim_program_id)
+        .map(p => ({ name: p.program_name, w: _svtSubjectWords(p.program_name), deg: _svtDegKey(p.program_name) }));
+    _svtCimSubjLen = all.length;
+    return _svtCimSubjCache;
+}
+// Heuristic note explaining why an SVT row needs coordination.
+function _svtCoordNote(p) {
+    if (!_svtNeedsCoord(p)) return '';
+    const name = p.program_name || '';
+    const degs = name.match(/\b(MS|MA|MBA|MPS|MPH|MPA|MPP|MSCS|MSIS|PhD|EdD|DNP|DMSc|CAGS|Certificate)\b/gi) || [];
+    if (name.includes(';') || (/\band\b/i.test(name) && degs.length >= 2))
+        return 'May bundle multiple programs — consider splitting';
+    const w = _svtSubjectWords(name), deg = _svtDegKey(name);
+    if (w.size) {
+        let best = null, bestScore = 0;
+        for (const c of _svtCimSubjects()) {
+            if (!c.w.size || c.deg !== deg) continue;          // require same credential
+            let inter = 0; for (const x of w) if (c.w.has(x)) inter++;
+            const j = inter / (w.size + c.w.size - inter);
+            if (j > bestScore) { bestScore = j; best = c.name; }
+        }
+        if (bestScore >= 0.6) return 'Possible match to CIM: ' + best;
+    }
+    return 'No CIM match';
+}
+
 // Human label for a portfolio row's GTM offering signal (grad programs only).
 function portfolioOfferingLabel(p) {
     const v = p.new_offering || '';
@@ -5709,6 +5765,8 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'launch_vs_gtm',  label: 'SVT launch ≠ GTM intake', type: 'boolean', value: p => _pfLaunchVsGtm(p) ? 'Y' : 'N'},
     {key: 'launch_vs_cim',  label: 'SVT launch ≠ CIM catalog', type: 'boolean', value: p => _pfLaunchVsCimCatalog(p) ? 'Y' : 'N'},
     {key: 'launch_before_cimterm', label: 'SVT launch before CIM term', type: 'boolean', value: p => _pfLaunchBeforeCimTerm(p) ? 'Y' : 'N'},
+    {key: 'svt_coord',   label: 'Needs SVT coordination', type: 'boolean', value: p => _svtNeedsCoord(p) ? 'Y' : 'N'},
+    {key: 'svtnote',     label: 'SVT coordination note', type: 'text',    value: p => _svtCoordNote(p)},
     {key: 'substatus',   label: 'SVT Sub-status',   type: 'select', value: p => p.roster_sub_status || ''},
     {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
@@ -7283,6 +7341,7 @@ function renderPortfolioTable() {
             case 'cim':       av = a.cim_step || ''; bv = b.cim_step || ''; break;
             case 'cimcatalog': av = a.cim_completion_date || ''; bv = b.cim_completion_date || ''; break;
             case 'cimterm':   av = a.cim_eff_term || ''; bv = b.cim_eff_term || ''; break;
+            case 'svtnote':   av = _svtCoordNote(a); bv = _svtCoordNote(b); break;
             case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
             case 'inworkflow':  av = a.cim_program_id ? 'Yes' : 'No'; bv = b.cim_program_id ? 'Yes' : 'No'; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
@@ -7614,6 +7673,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('cim',       cimStep, 'step-cell')}
         ${_pc('cimcatalog', escapeHtml(p.cim_completion_date || ''))}
         ${_pc('cimterm',   escapeHtml(_pfEffTermLabel(p)))}
+        ${_pc('svtnote',   escapeHtml(_svtCoordNote(p)))}
         ${_pc('cimchange',   (activeInWorkflow && p.cim_change_type) ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
         ${_pc('inworkflow',  p.cim_program_id ? 'Yes' : 'No')}
         ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
@@ -7674,6 +7734,7 @@ function exportPortfolioCsv() {
             case 'cim':         return p.cim_step || '';
             case 'cimcatalog':  return p.cim_completion_date || '';
             case 'cimterm':     return _pfEffTermLabel(p);
+            case 'svtnote':     return _svtCoordNote(p);
             case 'cimchange':   return (p.cim_step && p.cim_change_type) ? p.cim_change_type : p.cim_program_id ? '' : '';
             case 'inworkflow':  return p.cim_program_id ? 'Yes' : 'No';
             case 'inactadmit':  return p.inactivation_admission || '';
