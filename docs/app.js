@@ -5391,6 +5391,53 @@ const GTM_RECENT_VIEW = {
     },
 };
 
+// ── Administrative data-quality views ───────────────────────────────────────
+// Hidden behind the "⚙ Admin views" toggle in the Views modal (per-browser,
+// localStorage). Graduate data-validation queues; CIM is authoritative.
+const _ADMIN_VIEW_COLS = ['degree', 'college', 'campus', 'cim', 'cimchange', 'svt', 'substatus', 'inactadmit'];
+const ADMIN_PLANNING_AHEAD_VIEW = {
+    id: 'admin_planning_ahead', name: 'Admin · Planning ahead of CIM', team: true, system: true, admin: true,
+    tip: 'Portfolio rows with no CIM record whose SVT status is Launch in Progress or Regulatory Validation In Progress — launch is underway but no approved CIM proposal is linked. Some may be CIM match failures (the program exists in CIM under a different name); treat as an investigation queue.',
+    state: { visibleCols: _ADMIN_VIEW_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
+        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'in_cim', op: 'in', value: ['N'] },
+        { type: 'rule', field: 'svt', op: 'in', value: ['Launch in Progress', 'Regulatory Validation In Progress'] },
+    ] } },
+};
+const ADMIN_CIM_INACT_SVT_ACTIVE_VIEW = {
+    id: 'admin_cim_inact_svt_active', name: 'Admin · CIM inactivation vs SVT active', team: true, system: true, admin: true,
+    tip: 'Programs CIM is inactivating, but whose SVT status is anything other than Inactivation In Progress (e.g. Complete, Launch in Progress, On Hold) — the planning record disagrees with the authoritative CIM inactivation.',
+    state: { visibleCols: _ADMIN_VIEW_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
+        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'cim_change', op: 'in', value: ['Inactivation'] },
+        { type: 'rule', field: 'svt', op: 'is_set', value: [] },
+        { type: 'rule', field: 'svt', op: 'not_in', value: ['Inactivation In Progress'] },
+    ] } },
+};
+const ADMIN_CIM_DONE_SVT_BEHIND_VIEW = {
+    id: 'admin_cim_done_svt_behind', name: 'Admin · CIM done, SVT behind', team: true, system: true, admin: true,
+    tip: 'Programs CIM has fully approved (in CIM, no active workflow step) but whose SVT status is still an early development stage (Discovery, Intake, Approved for Development, Economic Model, Leadership Review, EDGE) — SVT is behind the authoritative CIM state.',
+    state: { visibleCols: _ADMIN_VIEW_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
+        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'in_cim', op: 'in', value: ['Y'] },
+        { type: 'rule', field: 'cim_step', op: 'is_empty', value: [] },
+        { type: 'rule', field: 'svt', op: 'in', value: ['Discovery', 'Intake', 'Economic Model',
+            'Leadership Review Pending', 'Approved for Development by College', 'Approved for Development by IPD',
+            'EDGE - Development', 'EDGE - Development & Delivery', 'EDGE - Content Consultation'] },
+    ] } },
+};
+const ADMIN_VIEWS = [ADMIN_PLANNING_AHEAD_VIEW, ADMIN_CIM_INACT_SVT_ACTIVE_VIEW, ADMIN_CIM_DONE_SVT_BEHIND_VIEW];
+
+const _PORTFOLIO_ADMIN_LS = 'cim-portfolio-admin-views';
+function _pvAdminViewsOn() { try { return localStorage.getItem(_PORTFOLIO_ADMIN_LS) === '1'; } catch (_) { return false; } }
+function togglePvAdminViews() {
+    const on = !_pvAdminViewsOn();
+    try { localStorage.setItem(_PORTFOLIO_ADMIN_LS, on ? '1' : '0'); } catch (_) {}
+    if (typeof renderPvModal === 'function') renderPvModal();
+    renderPortfolioViewTiles();
+}
+if (typeof window !== 'undefined') window.togglePvAdminViews = togglePvAdminViews;
+
 // State
 let portfolioActiveViewId = null;
 let portfolioActiveViewDirty = false;  // filters changed since view was applied
@@ -5404,8 +5451,9 @@ function setPortfolioPersonalViews(views) {
     try { localStorage.setItem(_PORTFOLIO_VIEWS_LS, JSON.stringify(views)); } catch(_) {}
 }
 function getAllPortfolioViews() {
-    return [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW, GTM_RECENT_VIEW,
+    const base = [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW, GTM_RECENT_VIEW,
             ...getPortfolioTeamViews(), ...getPortfolioPersonalViews()];
+    return _pvAdminViewsOn() ? base.concat(ADMIN_VIEWS) : base;
 }
 function getPortfolioViewById(id) {
     return getAllPortfolioViews().find(v => v.id === id) || null;
@@ -5798,6 +5846,12 @@ function _renderPvSidebar() {
     html += team.length ? team.map(item).join('') : '';
     html += `<div class="pv-side-section">Personal</div>`;
     html += personal.length ? personal.map(item).join('') : '<div class="pv-side-empty">None saved yet</div>';
+    if (_pvAdminViewsOn()) {
+        html += `<div class="pv-side-section">Admin</div>`;
+        html += ADMIN_VIEWS.map(item).join('');
+    }
+    html += `<button class="pv-side-admintoggle${_pvAdminViewsOn() ? ' on' : ''}" onclick="togglePvAdminViews()"
+        title="Show/hide administrative data-quality views">⚙ Admin views${_pvAdminViewsOn() ? ' ✓' : ''}</button>`;
     host.innerHTML = html;
 }
 
@@ -6135,7 +6189,8 @@ function renderPortfolioViewTiles() {
     // personal views. The bar is therefore always visible.
     const starredViews = [...getPortfolioTeamViews(), ...getPortfolioPersonalViews()]
                             .filter(v => stars.has(v.id));
-    const tileViews = [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW, GTM_RECENT_VIEW, ...starredViews];
+    const tileViews = [ALL_PROGRAMS_VIEW, GTM_VIEW, GTM_NEEDS_ACTION_VIEW, GTM_RECENT_VIEW,
+        ...(_pvAdminViewsOn() ? ADMIN_VIEWS : []), ...starredViews];
     bar.style.display = 'flex';
 
     // Count of TOP-LEVEL programs matching a view's saved tree + filters — same

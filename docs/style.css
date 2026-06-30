@@ -2573,6 +2573,13 @@ table.matrix-table th.mx-sortable:hover { background: #eef2f7; }
 .pv-side-item.selected .pv-side-act-star.on { color: #fde68a; }
 .pv-side-item.selected .pv-side-act:hover { color: #fff; background: rgba(255,255,255,.2); }
 .pv-side-empty { font-size: 11.5px; color: #94a3b8; padding: 6px 8px; font-style: italic; }
+.pv-side-admintoggle {
+    display: block; width: 100%; margin-top: 14px; padding: 6px 8px;
+    background: none; border: none; border-top: 1px solid #e5e7eb;
+    color: #94a3b8; font-size: 11px; text-align: left; cursor: pointer;
+}
+.pv-side-admintoggle:hover { color: #2563eb; }
+.pv-side-admintoggle.on { color: #2563eb; }
 .pv-editing-tag {
     display: inline-block; margin-bottom: 10px; font-size: 13px;
     color: var(--text-secondary); background: #f1f5f9;
