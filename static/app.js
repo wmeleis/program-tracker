@@ -5462,7 +5462,7 @@ const ADMIN_SVT_COORD_VIEW = {
     id: 'admin_svt_coord', name: 'Admin · Needs SVT coordination', team: true, system: true, admin: true,
     tip: 'SVT entries that do not cleanly map to one CIM program and need reconciliation with the SVT team — there is an SVT status but no CIM record. The SVT Coordination Note classifies each (heuristic): no CIM match, a possible match to an existing CIM program (likely a match failure / duplicate, e.g. "Applied Sustainability - new concentration, MS"), or a bundled name that may need splitting.',
     state: { visibleCols: _ADMIN_SVT_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
-        { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
+        { type: 'rule', field: 'level', op: 'not_in', value: ['Undergraduate'] },
         { type: 'rule', field: 'svt_coord', op: 'in', value: ['Y'] },
     ] } },
 };

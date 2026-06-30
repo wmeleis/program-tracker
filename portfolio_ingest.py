@@ -2736,6 +2736,16 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 'reason':        'no banner_code match and no recognizable subject+degree',
                 'best_guess':    best,
             })
+            # Also surface unparseable SVT entries as orphan rows so they appear in
+            # the "Needs SVT coordination" view (not just the Console log). These
+            # have already passed the non_program gate above.
+            disp = (p.get('program_name') or '').strip()
+            if disp:
+                camp = _normalize_campus(p.get('campus') or '') or 'Boston'
+                pid = _make_id(disp, camp)
+                if pid not in tracker:
+                    tracker[pid] = _make_row(pid, disp, p.get('college', ''), camp)
+                _apply_svt_fields(tracker[pid], p)
 
     print(f"  SVT: {len(svt_rows_data)} entries, {n_svt_matched} matched, "
           f"{n_svt_added} added, {n_svt_mismatch} mismatches, {n_svt_nonprog} non-programs")
