@@ -5448,11 +5448,11 @@ const ADMIN_LAUNCH_VS_GTM_VIEW = {
     ] } },
 };
 const ADMIN_LAUNCH_VS_CIM_VIEW = {
-    id: 'admin_launch_vs_cim', name: 'Admin · SVT launch ≠ CIM term', team: true, system: true, admin: true,
-    tip: 'Programs whose SVT launch term disagrees with CIM\'s effective term (eff_term, decoded from the Banner code — CIM authoritative). Term-level comparison; only rows where both terms are present and parseable are shown.',
+    id: 'admin_launch_vs_cim', name: 'Admin · SVT launch before CIM term', team: true, system: true, admin: true,
+    tip: 'Programs whose SVT launch term is EARLIER than CIM\'s effective term (eff_term, decoded from the Banner code — CIM authoritative) — i.e. planned to launch before the program is effective in CIM. Launching at or after the CIM term is fine (programs can be in the catalog before they launch), so those are not flagged. Only rows where both terms are present are shown.',
     state: { visibleCols: _ADMIN_DATE_COLS, filters: {}, tree: { type: 'group', conj: 'all', children: [
         { type: 'rule', field: 'level', op: 'in', value: ['Graduate'] },
-        { type: 'rule', field: 'launch_vs_cimterm', op: 'in', value: ['Y'] },
+        { type: 'rule', field: 'launch_before_cimterm', op: 'in', value: ['Y'] },
     ] } },
 };
 const ADMIN_VIEWS = [ADMIN_PLANNING_AHEAD_VIEW, ADMIN_CIM_INACT_SVT_ACTIVE_VIEW, ADMIN_CIM_DONE_SVT_BEHIND_VIEW,
@@ -5648,10 +5648,12 @@ function _pfLaunchVsGtm(p) {
     const a = _pfTermRank(p.roster_launch_date), b = _pfTermRank(p.gtm_first_term);
     return a != null && b != null && a !== b;
 }
-// #3b SVT launch term disagrees with CIM's effective term (eff_term, term-level).
-function _pfLaunchVsCimTerm(p) {
+// #3b SVT launch term is EARLIER than CIM's effective term — planning to launch
+// before the program is effective in CIM. (Launching at/after the CIM term is
+// fine: programs can be in the catalog before they launch.)
+function _pfLaunchBeforeCimTerm(p) {
     const a = _pfTermRank(p.roster_launch_date), b = _pfEffTermRank(p);
-    return a != null && b != null && a !== b;
+    return a != null && b != null && a < b;
 }
 // #3 SVT launch term falls outside CIM's approved effective catalog year.
 // Fall Y -> catalog Y/(Y+1) (start Y); Spring/Summer/Winter Y -> catalog (Y-1)/Y (start Y-1).
@@ -5688,8 +5690,7 @@ function _pfEffTermRank(p) { return _pfTermRank(_pfDecodeBannerTerm(p && p.cim_e
 function _pfEffTermLabel(p) {
     const c = (p && p.cim_eff_term) || '';
     if (!c) return '';
-    const d = _pfDecodeBannerTerm(c);
-    return d ? `${c} (${d})` : c;
+    return _pfDecodeBannerTerm(c) || c;   // decoded term only (e.g. "Fall 2027"); raw code only if undecodable
 }
 
 const PORTFOLIO_FILTER_FIELDS = [
@@ -5707,7 +5708,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'launch_overdue', label: 'SVT launch overdue',     type: 'boolean', value: p => _pfLaunchOverdue(p) ? 'Y' : 'N'},
     {key: 'launch_vs_gtm',  label: 'SVT launch ≠ GTM intake', type: 'boolean', value: p => _pfLaunchVsGtm(p) ? 'Y' : 'N'},
     {key: 'launch_vs_cim',  label: 'SVT launch ≠ CIM catalog', type: 'boolean', value: p => _pfLaunchVsCimCatalog(p) ? 'Y' : 'N'},
-    {key: 'launch_vs_cimterm', label: 'SVT launch ≠ CIM term', type: 'boolean', value: p => _pfLaunchVsCimTerm(p) ? 'Y' : 'N'},
+    {key: 'launch_before_cimterm', label: 'SVT launch before CIM term', type: 'boolean', value: p => _pfLaunchBeforeCimTerm(p) ? 'Y' : 'N'},
     {key: 'substatus',   label: 'SVT Sub-status',   type: 'select', value: p => p.roster_sub_status || ''},
     {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
