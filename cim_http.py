@@ -590,14 +590,18 @@ def _xml_tags_all(xml, tag):
 def parse_program_xml(xml):
     """Extract program metadata from the CIM XML API (mirrors the JS getXml)."""
     statustype = _xml_tag(xml, 'statustype')
-    delete_justification = _xml_tag(xml, 'deletejustification')
+    # Authoritative inactivation signals: statustype "inactivat*" OR the delete
+    # flags deleterec=true / deletestatus=Deactivated. Do NOT use a non-empty
+    # <deletejustification> — CIM reuses that "Rationale for Inactivation" field
+    # for splits, launch-holds, and revision rationales, and often leaves stale
+    # text in it (e.g. Robotics MS "split into three banner codes", AI—Align
+    # "Khoury not ready to launch"). Validated across all 416 Deactivated: 412
+    # carry a real delete flag; the 4 with justification-only are NOT inactivations.
+    _drec = _xml_tag(xml, 'deleterec').strip().lower()
+    _dstat = _xml_tag(xml, 'deletestatus').strip().lower()
     if re.search(r'new', statustype, re.I):
         proposal_type = 'New Program Proposal'
-    elif re.search(r'inactivat', statustype, re.I) or delete_justification.strip():
-        # A non-empty <deletejustification> means this is an inactivation
-        # proposal even when <statustype> is absent — CIM frequently signals
-        # inactivation only via that field. (Matches the original scraper's
-        # rule; without it, inactivations show as "Edited"/blue instead of red.)
+    elif re.search(r'inactivat', statustype, re.I) or _drec == 'true' or _dstat == 'deactivated':
         proposal_type = 'Inactivation Proposal'
     else:
         proposal_type = 'Program Revision Proposal'
@@ -647,10 +651,13 @@ def parse_course_xml(xml):
     """Extract course metadata from the CIM course XML API (mirrors the JS
     getXml block in batch_fetch_course_details)."""
     statustype = _xml_tag(xml, 'statustype')
+    # Authoritative inactivation signals only (see parse_program_xml) — NOT a
+    # non-empty <deletejustification>, which CIM reuses for splits/holds/revisions.
+    _drec = _xml_tag(xml, 'deleterec').strip().lower()
+    _dstat = _xml_tag(xml, 'deletestatus').strip().lower()
     if re.search(r'new', statustype, re.I):
         proposal_type = 'New Course Proposal'
-    elif re.search(r'inactivat', statustype, re.I) or _xml_tag(xml, 'deletejustification').strip():
-        # Non-empty <deletejustification> ⇒ inactivation even without statustype.
+    elif re.search(r'inactivat', statustype, re.I) or _drec == 'true' or _dstat == 'deactivated':
         proposal_type = 'Inactivation Proposal'
     else:
         proposal_type = 'Course Revision Proposal'
