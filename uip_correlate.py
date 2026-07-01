@@ -118,7 +118,7 @@ def correlate(xlsx_path, db_path='data/tracker.db'):
     import openpyxl
     wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
     conn = sqlite3.connect(db_path); conn.row_factory = sqlite3.Row
-    pf = conn.execute("SELECT pp.*, p.banner_code, p.eff_term FROM portfolio_programs pp "
+    pf = conn.execute("SELECT pp.*, p.banner_code, p.eff_term, p.inactivates FROM portfolio_programs pp "
                       "JOIN programs p ON p.id = pp.cim_program_id").fetchall()
     dep_campus, boston = {}, {}
     for r in pf:
@@ -130,10 +130,14 @@ def correlate(xlsx_path, db_path='data/tracker.db'):
             boston.setdefault(key, r)
             if r['banner_code']:
                 boston.setdefault(r['banner_code'].upper(), r)
-    # inactivation deployments per program key/code
+    # inactivation deployments per program key/code. Use the AUTHORITATIVE delete
+    # flags (`programs.inactivates` ← deleterec/deletestatus), NOT the status-derived
+    # cim_change_type: a non-empty `deletejustification` (e.g. a program being *split*
+    # into multiple banner codes) wrongly sets status=Deactivated, but leaves
+    # deleterec/deletestatus empty — so `inactivates` correctly stays blank.
     inactivating = {}
     for r in pf:
-        if r['cim_change_type'] == 'Inactivation':
+        if (r['inactivates'] or '') == 'Yes':
             inactivating.setdefault(_nname(r['program_name']), []).append(r['campus'] or 'Boston')
             if r['banner_code']:
                 inactivating.setdefault(r['banner_code'].upper(), []).append(r['campus'] or 'Boston')
@@ -205,6 +209,7 @@ def main():
         xlsx = download_uip_xlsx(os.path.join('data', 'portfolio_feeds', 'uip_program_information.xlsx'))
         if not xlsx:
             print("Could not obtain the UIP workbook; leaving previous report untouched.")
+            print("UIP_STATUS: download-failed")
             return 0
     disc = correlate(xlsx)
     stamp = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -215,6 +220,7 @@ def main():
     with open(args.out, 'w') as f:
         f.write(report)
     print(report)
+    print(f"UIP_STATUS: ok discrepancies={len(disc)}")
     return 0
 
 
