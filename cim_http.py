@@ -617,7 +617,7 @@ def parse_program_xml(xml):
         'eff_cat': _xml_tag(xml, 'eff_cat'),
         'curriculum_html': _xml_tag(xml, 'body'),
         'proposal_type': proposal_type,
-        'delete_justification': delete_justification,
+        'delete_justification': _xml_tag(xml, 'deletejustification'),
         # New/removed offering signals (for the EM perspective). Derived from
         # CIM-native fields; parse_new_offerings lives in scraper (lazy import to
         # avoid the scraper<->cim_http import cycle).
