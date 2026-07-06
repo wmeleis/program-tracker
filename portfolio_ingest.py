@@ -1664,6 +1664,7 @@ def _parse_external_name(name_raw):
     Campus extraction: from trailing parens OR trailing ", CampusName" suffix.
     """
     subj, deg, campus = _parse_external_name_inner(name_raw)
+    subj = _strip_conc_descriptor(subj)
     # Promote a leading-"Online" marker (stashed via global below) onto the
     # degree as an "—Online" variant suffix so it routes through the same
     # variant-in-subject lookup as native CIM —Online programs.
@@ -1674,6 +1675,20 @@ def _parse_external_name(name_raw):
     return subj, deg, campus
 
 _PARSE_LEADING_ONLINE = {'flag': False}
+
+def _strip_conc_descriptor(subj):
+    """Strip a trailing '- new [...] concentration' / '- new ...' annotation that
+    SVT appends to a program name (e.g. 'Master of Science in Applied Sustainability
+    - new concentration' → subject 'Applied Sustainability'). These are descriptive
+    noise, not part of the CIM subject, and caused name-match misses against the
+    real CIM program (which had no banner code to fall back on). Deployment em-dash
+    suffixes (—Align/—Online/etc.) never contain 'new'/'concentration', so they're
+    untouched."""
+    if not subj:
+        return subj
+    s = re.sub(r'\s*[-–—]\s*new\b.*$', '', subj, flags=re.I).strip()          # "- new ..."
+    s = re.sub(r'\s*[-–—][^-–—]*concentrations?\s*$', '', s, flags=re.I).strip()  # "- ... concentration(s)"
+    return s or subj
 
 def _parse_external_name_inner(name_raw):
     s = (name_raw or '').strip()
