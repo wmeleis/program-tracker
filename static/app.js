@@ -5418,6 +5418,10 @@ const ADMIN_CIM_INACT_SVT_ACTIVE_VIEW = {
         { type: 'rule', field: 'cim_change', op: 'in', value: ['Inactivation'] },
         { type: 'rule', field: 'svt', op: 'is_set', value: [] },
         { type: 'rule', field: 'svt', op: 'not_in', value: ['Inactivation In Progress'] },
+        // Suppress agreement: when the SVT row is ITSELF an inactivation, SVT's
+        // "Complete"/"Intake" means the inactivation is in progress/done, which
+        // AGREES with CIM — not a conflict (e.g. Applied Physics, Cloud Software).
+        { type: 'rule', field: 'svt_type', op: 'not_in', value: ['Inactivation'] },
     ] } },
 };
 const ADMIN_CIM_DONE_SVT_BEHIND_VIEW = {
@@ -5759,6 +5763,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'cim_step',    label: 'CIM Step',         type: 'select', value: p => p.cim_step || ''},
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
     {key: 'svt',         label: 'SVT Status',       type: 'select', value: p => p.svt_status || ''},
+    {key: 'svt_type',    label: 'SVT Proposal Type', type: 'select', value: p => p.roster_proposal_type || ''},
     {key: 'launch',      label: 'SVT Launch Date',  type: 'select', value: p => p.roster_launch_date || ''},
     {key: 'cimterm',     label: 'CIM Effective Term', type: 'text',  value: p => _pfEffTermLabel(p)},
     {key: 'launch_overdue', label: 'SVT launch overdue',     type: 'boolean', value: p => _pfLaunchOverdue(p) ? 'Y' : 'N'},

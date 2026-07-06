@@ -335,7 +335,12 @@ def upsert_program(program_data):
             # workflow (current_step non-empty), clear completion_date so the
             # program rejoins the active pipeline.
             new_completion = program_data.get('completion_date', None)
-            if new_completion is None:
+            if program_data.get('unsubmitted_draft'):
+                # An unsubmitted New-Program draft has never completed workflow;
+                # force-clear any stale eff_cat surrogate completion_date (it was
+                # never a real completion — see scraper false-completion guard).
+                completion_val = ''
+            elif new_completion is None:
                 completion_val = existing['completion_date'] if 'completion_date' in existing.keys() else ''
             elif new_completion == '' and (program_data.get('current_step') or ''):
                 completion_val = ''

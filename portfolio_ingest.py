@@ -2577,6 +2577,22 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
 
         code = (p.get('program_code') or '').strip().upper()
 
+        # Market-research inquiries are exploratory ("should we deploy X to the
+        # network?"), not proposals moving through a pipeline. They must NEVER
+        # be matched to a program — even when they carry a Program Code — because
+        # overlaying their early-stage status onto a completed CIM program
+        # manufactures false "SVT still early-stage" discrepancies (e.g.
+        # Psychology, PhD (Boston)). Drop them regardless of code, case-insensitive.
+        if 'market research' in (p.get('hcwhy') or '').lower():
+            n_svt_nonprog += 1
+            non_programs.append({
+                'source':      'SVT',
+                'source_name': original_name,
+                'campus':      p.get('campus', ''),
+                'reason':      f"Market research (HCWHY={p.get('hcwhy', '')})",
+            })
+            continue
+
         # HCWHY non-program filter — but bypass it when a Program Code is
         # present (Program Code in SVT == CIM banner_code, so the row IS a
         # real program record even if the HCWHY value is something like
@@ -2624,7 +2640,13 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         matched = None
         if code and code in cim_banner_index:
             candidates = cim_banner_index[code]
-            if len(candidates) == 1:
+            # A lone banner-code candidate is matched only when the SVT row's
+            # campus is compatible (unspecified, or equal to the candidate's
+            # campus). A single candidate at a DIFFERENT campus than the SVT row
+            # names is NOT a match — e.g. DNP-NUAN exists only for Boston, but
+            # the SVT row is the Seattle deployment. Fall through to name-rescue
+            # / leave unmatched for coordination instead of borrowing Boston.
+            if len(candidates) == 1 and camp_norm in ('', candidates[0]['campus']):
                 matched = candidates[0]['row']
             else:
                 # Multiple campuses share the banner_code — pick the one whose
@@ -2647,13 +2669,21 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                         rescue_row, _ = _lookup_cim(rescue_subj, rescue_deg, rescue_camp)
                         if rescue_row and rescue_row not in (c['row'] for c in candidates):
                             matched = rescue_row
-                if not matched:
+                # Boston fallback ONLY when the SVT row's campus is unspecified
+                # (or Boston itself). If the SVT row names a SPECIFIC non-Boston
+                # campus that has no CIM record, DO NOT borrow the Boston record —
+                # leave it unmatched so it surfaces as a coordination item under
+                # its real campus. Borrowing Boston here was the root cause of
+                # phantom "Boston" discrepancies (Bioinformatics/Health
+                # Informatics/Nurse Anesthesia/etc. — SVT rows for Toronto/Miami/
+                # Seattle deployments wrongly stamped onto the Boston program).
+                if not matched and camp_norm in ('', 'Boston'):
                     for c in candidates:
                         if c['campus'] == 'Boston':
                             matched = c['row']
                             break
-                if not matched:
-                    matched = candidates[0]['row']
+                    if not matched:
+                        matched = candidates[0]['row']
 
         if matched:
             n_svt_matched += 1

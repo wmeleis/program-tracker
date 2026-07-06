@@ -767,6 +767,13 @@ def parse_program_page(html):
         rollbacks.append({'date': m.group(1), 'step': re.sub(r' for .*$', '', m.group(3)).strip()})
 
     last_approval_date = approvals[-1]['date'] if approvals else ''
+    # An unsubmitted New-Program draft shows "Changes saved but not submitted"
+    # and has NO "Last approved" version. It lacks a workflow div for the SAME
+    # reason a completed program does (workflow not rendered), so callers must
+    # NOT treat a no-workflow draft as a completion. Genuine completions always
+    # carry a "Last approved" line.
+    _low = text.lower()
+    unsubmitted_draft = ('saved but not submitted' in _low) and ('last approved' not in _low)
     return {
         'steps': steps,
         'found_workflow': found,
@@ -775,6 +782,7 @@ def parse_program_page(html):
         'approvals': approvals,
         'rollbacks': rollbacks,
         'last_approval_date': last_approval_date,
+        'unsubmitted_draft': unsubmitted_draft,
     }
 
 

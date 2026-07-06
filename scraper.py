@@ -1258,6 +1258,7 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True,
         steps = (page or {}).get('steps') or []
         in_dump = pid in pending
         prev = existing.get(pid, {})
+        is_draft = False  # set True only for unsubmitted New-Program drafts (else branch)
         # current_step
         if in_dump:
             current_step = pending[pid]['current_step']
@@ -1284,10 +1285,18 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True,
             if page is None:
                 return None
             found_wf = (page or {}).get('found_workflow')
+            is_draft = (page or {}).get('unsubmitted_draft')
             total = len(steps)
             approved = sum(1 for s in steps if s.get('status') == 'approved')
             marker = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
-            if (not found_wf) or (total > 0 and approved == total and marker is None):
+            if is_draft:
+                # Unsubmitted New-Program draft ("saved but not submitted",
+                # no "Last approved"): NOT in workflow and NOT complete. Do not
+                # stamp an eff_cat surrogate completion — leave it invisible.
+                current_step = ''
+                completion_date = ''
+                emails = ''
+            elif (not found_wf) or (total > 0 and approved == total and marker is None):
                 current_step = ''
                 completion_date = (page or {}).get('last_approval_date', '') \
                     or (('Catalog ' + meta.get('eff_cat')) if meta.get('eff_cat') else 'Approved')
@@ -1330,6 +1339,7 @@ def run_http_program_scan(dry_run=False, max_workers=12, log=True,
             'completion_date': completion_date, 'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
             'eff_term': meta.get('eff_term', ''),
+            'unsubmitted_draft': is_draft,
             **parse_new_offerings(meta),
         }
         old_step = prev.get('current_step') or ''
@@ -1826,10 +1836,16 @@ def refresh_program_http(pid, sess=None, log=False):
         if page is None:
             return None
         found_wf = (page or {}).get('found_workflow')
+        is_draft = (page or {}).get('unsubmitted_draft')
         total = len(steps)
         approved = sum(1 for s in steps if s.get('status') == 'approved')
         marker = next((s.get('name') for s in steps if s.get('status') == 'current'), None)
-        if (not found_wf) or (total > 0 and approved == total and marker is None):
+        if is_draft:
+            # Unsubmitted New-Program draft: not in workflow, not complete.
+            current_step = ''
+            completion_date = ''
+            emails = ''
+        elif (not found_wf) or (total > 0 and approved == total and marker is None):
             current_step = ''
             completion_date = (page or {}).get('last_approval_date', '') \
                 or (('Catalog ' + meta.get('eff_cat')) if meta.get('eff_cat') else 'Approved')
@@ -1863,6 +1879,7 @@ def refresh_program_http(pid, sess=None, log=False):
         'completion_date': completion_date, 'campus': meta.get('campus', ''),
         'eff_cat': meta.get('eff_cat', ''),
         'eff_term': meta.get('eff_term', ''),
+        'unsubmitted_draft': is_draft,
         **parse_new_offerings(meta),
     })
     if steps:
@@ -1926,8 +1943,12 @@ def sweep_program_ids_http(start_id=1, end_id=2100, max_workers=16, log=True,
         approved = sum(1 for s in steps if s.get('status') == 'approved')
         html_current = next((s for s in steps if s.get('status') == 'current'), None)
         no_wf = (total == 0)
+        is_draft = (page or {}).get('unsubmitted_draft')
         all_approved = (total > 0 and approved == total and html_current is None)
-        is_complete = no_wf or all_approved
+        # A no-workflow page is a COMPLETION only if it isn't an unsubmitted
+        # New-Program draft ("saved but not submitted", no "Last approved").
+        # Drafts also lack a workflow div but must not get an eff_cat surrogate.
+        is_complete = (no_wf or all_approved) and not is_draft
         if is_complete:
             if all_approved:
                 completion_date = (page or {}).get('last_approval_date', '')
@@ -1961,6 +1982,7 @@ def sweep_program_ids_http(start_id=1, end_id=2100, max_workers=16, log=True,
             'completion_date': completion_date, 'campus': meta.get('campus', ''),
             'eff_cat': meta.get('eff_cat', ''),
             'eff_term': meta.get('eff_term', ''),
+            'unsubmitted_draft': is_draft,
             **parse_new_offerings(meta),
         })
         if steps:
