@@ -744,6 +744,69 @@ def api_scan_status():
     })
 
 
+# Number of days without a SUCCESSFUL refresh before a source is "out of date".
+STALE_SOURCE_DAYS = 3
+
+@app.route('/api/source_health')
+def api_source_health():
+    """Freshness of each upstream data source, for the dashboard staleness
+    banner. A source is 'stale' when its last SUCCESSFUL refresh is older than
+    STALE_SOURCE_DAYS. OTP is intentionally excluded (being deprecated)."""
+    now = datetime.now().astimezone()
+
+    def _aware(v):
+        if v is None:
+            return None
+        try:
+            if isinstance(v, (int, float)):
+                return datetime.fromtimestamp(v).astimezone()
+            d = datetime.fromisoformat(str(v))
+            return d if d.tzinfo else d.astimezone()  # naive → assume local
+        except Exception:
+            return None
+
+    def _mtime(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return None
+
+    feeds_dir = os.path.join(_DATA_DIR, 'portfolio_feeds')
+    try:
+        with open(os.path.join(feeds_dir, 'feed_health.json')) as f:
+            fh = _json.load(f)
+    except Exception:
+        fh = {}
+    def _success(key):
+        return (fh.get(key) or {}).get('last_success')
+
+    last_scan = get_last_scan()
+    cim_ts = dict(last_scan).get('scan_time') if last_scan else None
+
+    sources = []
+    def add(name, ts):
+        d = _aware(ts)
+        if d is None:
+            sources.append({'name': name, 'last_success': None, 'age_hours': None, 'stale': True})
+        else:
+            age = (now - d).total_seconds() / 3600.0
+            sources.append({'name': name, 'last_success': d.isoformat(),
+                            'age_hours': round(age, 1), 'stale': age > STALE_SOURCE_DAYS * 24})
+
+    add('CIM scan', cim_ts)
+    add('SVT roster', _success('SVT (Smartsheet API)'))
+    add('IPD', _success('IPD (Smartsheet)') or _mtime(os.path.join(feeds_dir, 'portfolio_smartsheet.tsv')))
+    add('GTM', _success('GTM (Smartsheet API)'))
+    add('GLS', _success('GLS (Tableau)'))
+    add('Regulatory', _mtime(os.path.join(_DATA_DIR, 'last_regulatory_fetch')))
+
+    return jsonify({
+        'threshold_days': STALE_SOURCE_DAYS,
+        'sources': sources,
+        'stale': [s['name'] for s in sources if s['stale']],
+    })
+
+
 @app.route('/api/session/check')
 def api_session_check():
     """Verify the CIM session over direct HTTP (the session the scans + the

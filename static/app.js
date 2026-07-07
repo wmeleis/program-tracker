@@ -875,6 +875,46 @@ async function loadDashboard() {
     // — until the user happened to click a filter that re-ran applyFilters.
     updateSmartViewCounts();
     applyFilters();
+    loadSourceHealth();
+}
+
+// ── Source-data staleness banner ────────────────────────────────────────────
+// Warns (amber, dismissible, all views) when any upstream source hasn't had a
+// successful refresh within the server's threshold. Driven by /api/source_health
+// (Flask/local app). On the static site the fetch fails and no banner shows.
+let _sourceHealthDismissed = false;
+async function loadSourceHealth() {
+    try {
+        const res = await fetch('/api/source_health');
+        if (!res.ok) return;
+        renderSourceHealthBanner(await res.json());
+    } catch (_) { /* static site / server down: no banner */ }
+}
+function _fmtStaleAge(hrs) {
+    if (hrs == null) return 'never';
+    const d = Math.round(hrs / 24);
+    if (hrs >= 24) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+    return Math.max(1, Math.round(hrs)) + 'h ago';
+}
+function renderSourceHealthBanner(data) {
+    let bar = document.getElementById('source-health-banner');
+    const stale = ((data && data.sources) || []).filter(s => s.stale);
+    if (!stale.length || _sourceHealthDismissed) { if (bar) bar.remove(); return; }
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'source-health-banner';
+        document.body.insertBefore(bar, document.body.firstChild);
+    }
+    const items = stale.map(s => `${escapeHtml(s.name)} (${_fmtStaleAge(s.age_hours)})`).join(' · ');
+    bar.innerHTML =
+        `<span class="shb-icon">⚠</span>`
+        + `<span>Source data out of date — no refresh in over ${data.threshold_days} days: <strong>${items}</strong></span>`
+        + `<button class="shb-dismiss" title="Dismiss" onclick="dismissSourceHealth()">×</button>`;
+}
+function dismissSourceHealth() {
+    _sourceHealthDismissed = true;
+    const bar = document.getElementById('source-health-banner');
+    if (bar) bar.remove();
 }
 
 async function loadPipeline() {
