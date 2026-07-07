@@ -1278,6 +1278,15 @@ async function loadScanStatus() {
 function updatePipelineCounts(baseFiltered) {
     const pipeline = currentView === 'courses' ? cachedCoursePipeline : cachedPipeline;
     if (!pipeline.length) return;
+    // Initial-load race guard: /api/pipeline (tile counts) can resolve before
+    // /api/programs populates allPrograms. If a tile is clicked in that window,
+    // recounting from an empty source would zero EVERY tile and stick until the
+    // next applyFilters. Skip the recount while the source data is still empty;
+    // loadPrograms()/loadDashboard() re-run applyFilters once it arrives. (A
+    // legitimately empty result set — e.g. a search that matches nothing — still
+    // zeroes correctly because the source array itself is non-empty.)
+    const srcData = currentView === 'courses' ? allCourses : allPrograms;
+    if (!srcData.length) return;
     const isCourses = currentView === 'courses';
     // Recount each pipeline step from filtered data. Program tiles use canonical
     // stage names (e.g. "Program Setup" covers Catalog Setup / Editor / Banner /
