@@ -2285,10 +2285,19 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 /* CIM scoping bar sits above the pipeline; chosen before the tiles/buttons. */
 #cim-scope-bar.scope-bar { margin-bottom: 12px; }
 .perspective-btn {
-    padding: 4px 12px; border: 1px solid var(--border); background: #fff;
-    color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;
+    /* Match .type-btn (Level) sizing so Perspective and Level buttons align. */
+    padding: 7px 16px; border: 2px solid var(--border); background: #fff;
+    color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
     border-radius: 6px;
 }
+
+/* Freshness line directly below the header: last refresh + app build. */
+.freshness-row {
+    display: flex;
+    gap: 16px;
+    padding: 4px 24px 0;
+}
+.freshness-row .last-updated { margin-right: 0; }
 .perspective-btn.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
 .perspective-college {
     padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;

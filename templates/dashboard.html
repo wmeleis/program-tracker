@@ -28,8 +28,6 @@
             </div>
         </div>
         <div class="header-right">
-            <span id="last-updated" class="last-updated"></span>
-            <span id="app-build" class="last-updated"></span>
             <span id="scan-status" class="scan-status"></span>
             <div id="progress-container" class="progress-container" style="display: none;">
                 <span id="progress-phase" class="progress-phase"></span>
@@ -49,6 +47,12 @@
             </span>
         </div>
     </header>
+
+    <!-- Always-visible freshness line: last data refresh + app build time -->
+    <div id="freshness-row" class="freshness-row">
+        <span id="last-updated" class="last-updated"></span>
+        <span id="app-build" class="last-updated"></span>
+    </div>
 
     <!-- Console modal (local-only, hidden on static site) -->
     <div id="console-modal" class="modal-overlay" style="display: none;" onclick="closeConsoleModalIfBackdrop(event)">
