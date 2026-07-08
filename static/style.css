@@ -2302,7 +2302,7 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 .freshness-row .last-updated {
     margin-right: 0;
     color: var(--text);
-    font-weight: 600;
+    font-weight: 500;
 }
 .perspective-btn.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
 .perspective-college {
