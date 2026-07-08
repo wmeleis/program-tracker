@@ -92,6 +92,12 @@
         </div>
     </div>
 
+    <!-- Collapsible filters toggle (all views; shown/positioned by switchView).
+         Placed above every view's filter content so it collapses them all. -->
+    <div id="cim-filter-toggle-row" style="display:none">
+        <button id="cim-filter-toggle-btn" onclick="toggleCimFilters()">▸ Filters</button>
+    </div>
+
     <!-- Portfolio starred-view tiles (quick-apply); only shown on Portfolio view -->
     <div id="portfolio-view-tiles" class="portfolio-view-tiles" style="display:none"></div>
 
@@ -238,11 +244,6 @@
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Collapsible filters toggle (programs/courses only; shown by switchView) -->
-    <div id="cim-filter-toggle-row" style="display:none">
-        <button id="cim-filter-toggle-btn" onclick="toggleCimFilters()">▸ Filters</button>
     </div>
 
     <!-- CIM scoping controls (chosen first, above the pipeline/buttons) -->

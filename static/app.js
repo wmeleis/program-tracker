@@ -327,14 +327,13 @@ function switchView(view) {
     // Show/hide the OTP/College perspective toggle for the new view.
     syncPerspectiveUI();
 
-    // Collapsible filters: the "▸ Filters" toggle only applies to programs/
-    // courses. Manage the body class here so it never hides catalog/portfolio
-    // filter sections (which reuse .filters-section).
+    // Collapsible filters: the "▸ Filters" toggle applies to ALL views. It sits
+    // above every view's filter content and the collapse CSS hides the right
+    // sections per view (program/course controls, catalog dropdowns, portfolio
+    // filter bar + view tiles).
     const cimFilterToggleRow = document.getElementById('cim-filter-toggle-row');
-    const cimFilterable = (view === 'programs' || view === 'courses');
-    if (cimFilterToggleRow) cimFilterToggleRow.style.display = cimFilterable ? 'block' : 'none';
-    if (cimFilterable) applyCimFiltersState();
-    else document.body.classList.remove('cim-filters-collapsed');
+    if (cimFilterToggleRow) cimFilterToggleRow.style.display = 'block';
+    applyCimFiltersState();
 
     // Reload appropriate data
     if (view === 'programs') {
