@@ -40,11 +40,9 @@
             <button id="auth-btn" class="header-secondary-btn" onclick="cimAuthenticate()" title="CIM session — click to (re)open CIM login in Chrome">Authenticate</button>
             <button id="console-btn" class="header-secondary-btn" onclick="openConsoleModal()">Console</button>
             <button id="refs-btn" class="header-secondary-btn" onclick="openReferencesModal()" title="Manage custom reference curricula">References</button>
-            <!-- Portfolio-only actions: shown/hidden by switchView(). Export +
-                 Columns live in the table toolbar just above the list; Views stays here. -->
-            <span id="portfolio-header-actions" style="display:none; align-items:center; gap:8px;">
-                <button class="portfolio-col-picker-btn" id="portfolio-views-btn" onclick="openPortfolioViewsModal()">Views</button>
-            </span>
+            <!-- Portfolio actions moved out of the header: Export + Columns are in
+                 the table toolbar; Views opens via the clickable "VIEWS" label. -->
+            <span id="portfolio-header-actions" style="display:none; align-items:center; gap:8px;"></span>
         </div>
     </header>
 

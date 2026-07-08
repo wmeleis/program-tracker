@@ -6434,13 +6434,6 @@ function _portfolioViewTouch() {}
 
 // Update the Views button label + render the starred-view tile bar.
 function renderPortfolioViewTiles() {
-    // Views button — always "★ Views" (active view shown by the highlighted
-    // tile, not the button text), plus an ADMIN pill when ?admin=1 is set.
-    const btn = document.getElementById('portfolio-views-btn');
-    if (btn) {
-        btn.innerHTML = '★ Views' + (_pvIsAdmin() ? ' <span class="pv-admin-pill">ADMIN</span>' : '');
-    }
-
     const bar = document.getElementById('portfolio-view-tiles');
     if (!bar) return;
     if (currentView !== 'portfolio') { bar.style.display = 'none'; return; }
@@ -6470,7 +6463,9 @@ function renderPortfolioViewTiles() {
         } catch(_) { return '—'; }
     }
 
-    bar.innerHTML = tileViews.map(v => {
+    // Clickable "VIEWS" label opens the Views modal (replaces the header button).
+    const _viewsLabel = `<button class="view-tiles-label" onclick="openPortfolioViewsModal()" title="Open saved views — switch, star, or build a filter">VIEWS${_pvIsAdmin() ? ' <span class="pv-admin-pill">ADMIN</span>' : ''}</button>`;
+    bar.innerHTML = _viewsLabel + tileViews.map(v => {
         const cnt = countForView(v);
         const active = (v.id === 'all')
             ? (!portfolioActiveViewId || portfolioActiveViewId === 'all')
