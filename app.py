@@ -740,7 +740,8 @@ def api_scan_status():
         'error': scan_status['error'],
         'last_scan': last_scan,
         'phase': scan_status.get('phase', ''),
-        'progress': scan_status.get('progress', 0)
+        'progress': scan_status.get('progress', 0),
+        'build_time': BUILD_TIME,
     })
 
 

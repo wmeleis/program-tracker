@@ -47,7 +47,9 @@ header {
 
 .header-left {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
     flex: 0 0 auto;
 }
 
@@ -2291,12 +2293,13 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     border-radius: 6px;
 }
 
-/* Freshness line directly below the header: last refresh + app build.
-   No color bar — sits on the page background; kept faint/low-key. */
+/* Freshness line under the "Program Dashboard" title (inside header-left,
+   above the header's grey border). No color bar; kept faint/low-key. */
 .freshness-row {
     display: flex;
     gap: 16px;
-    padding: 4px 24px;
+    padding: 0;
+    margin-top: 2px;
 }
 .freshness-row .last-updated {
     margin-right: 0;

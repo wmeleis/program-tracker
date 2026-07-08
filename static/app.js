@@ -260,7 +260,8 @@ function switchView(view) {
     if (view === 'portfolio') {
         cimHdrBtns.forEach(b => b.style.display = 'none');
         if (authBtn) authBtn.style.display = '';   // keep CIM connection status visible
-        if (lastUpdatedEl) lastUpdatedEl.style.display = 'none';
+        // #last-updated stays visible on Portfolio — it's part of the always-on
+        // freshness line under the title, not a CIM-only control.
         if (scanStatusEl)  scanStatusEl.style.display  = 'none';
         if (progressEl)    progressEl.style.display    = 'none';
         if (portfolioFilters)    portfolioFilters.style.display = 'flex';
@@ -1316,6 +1317,10 @@ async function loadScanStatus() {
             const d = new Date(data.last_scan.scan_time);
             updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
+        // App build time — set here (runs on every view) so it's reliable even
+        // when loadSourceHealth (loadDashboard-only) doesn't run, e.g. Portfolio.
+        const buildEl = document.getElementById('app-build');
+        if (buildEl && data.build_time) buildEl.textContent = 'Build: ' + _fmtDT(data.build_time);
     } catch (e) {
         console.error('Failed to load scan status:', e);
     }
