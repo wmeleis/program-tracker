@@ -793,9 +793,12 @@ def api_source_health():
             sources.append({'name': name, 'last_success': d.isoformat(),
                             'age_hours': round(age, 1), 'stale': age > STALE_SOURCE_DAYS * 24})
 
+    # OTP and IPD are intentionally excluded: both are retired sources. IPD was
+    # disabled 2026-05-22 (SVT is the single source of program-status truth now;
+    # its overlay in portfolio_ingest is off), so its feed file is stale BY
+    # DESIGN and must not raise a false "out of date" alarm.
     add('CIM scan', cim_ts)
     add('SVT roster', _success('SVT (Smartsheet API)'))
-    add('IPD', _success('IPD (Smartsheet)') or _mtime(os.path.join(feeds_dir, 'portfolio_smartsheet.tsv')))
     add('GTM', _success('GTM (Smartsheet API)'))
     add('GLS', _success('GLS (Tableau)'))
     add('Regulatory', _mtime(os.path.join(_DATA_DIR, 'last_regulatory_fetch')))
