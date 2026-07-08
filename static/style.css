@@ -2294,10 +2294,16 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
 /* Freshness line directly below the header: last refresh + app build. */
 .freshness-row {
     display: flex;
-    gap: 16px;
-    padding: 4px 24px 0;
+    gap: 20px;
+    padding: 6px 24px;
+    background: #eef2f7;
+    border-bottom: 1px solid var(--border);
 }
-.freshness-row .last-updated { margin-right: 0; }
+.freshness-row .last-updated {
+    margin-right: 0;
+    color: var(--text);
+    font-weight: 600;
+}
 .perspective-btn.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
 .perspective-college {
     padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
