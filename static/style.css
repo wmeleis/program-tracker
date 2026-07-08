@@ -2291,18 +2291,18 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     border-radius: 6px;
 }
 
-/* Freshness line directly below the header: last refresh + app build. */
+/* Freshness line directly below the header: last refresh + app build.
+   No color bar — sits on the page background; kept faint/low-key. */
 .freshness-row {
     display: flex;
-    gap: 20px;
-    padding: 6px 24px;
-    background: #eef2f7;
-    border-bottom: 1px solid var(--border);
+    gap: 16px;
+    padding: 4px 24px;
 }
 .freshness-row .last-updated {
     margin-right: 0;
-    color: var(--text);
-    font-weight: 500;
+    color: #aab2bd;      /* much fainter */
+    font-weight: 400;
+    font-size: 11px;
 }
 .perspective-btn.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
 .perspective-college {
