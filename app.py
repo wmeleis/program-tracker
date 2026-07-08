@@ -747,6 +747,27 @@ def api_scan_status():
 # Number of days without a SUCCESSFUL refresh before a source is "out of date".
 STALE_SOURCE_DAYS = 3
 
+def _compute_build_time():
+    """When the running code was last built/committed — shown in the status bar.
+    Prefers the git HEAD commit time; falls back to the newest core-file mtime."""
+    d = os.path.dirname(os.path.abspath(__file__))
+    try:
+        import subprocess
+        out = subprocess.run(['git', '-C', d, 'log', '-1', '--format=%cI'],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    try:
+        mt = max(os.path.getmtime(os.path.join(d, f))
+                 for f in ('app.py', 'scraper.py', 'static/app.js'))
+        return datetime.fromtimestamp(mt).astimezone().isoformat()
+    except Exception:
+        return None
+
+BUILD_TIME = _compute_build_time()
+
 @app.route('/api/source_health')
 def api_source_health():
     """Freshness of each upstream data source, for the dashboard staleness
@@ -807,6 +828,8 @@ def api_source_health():
         'threshold_days': STALE_SOURCE_DAYS,
         'sources': sources,
         'stale': [s['name'] for s in sources if s['stale']],
+        'last_refresh': _with_local_tz(cim_ts) if cim_ts else None,
+        'build_time': BUILD_TIME,
     })
 
 

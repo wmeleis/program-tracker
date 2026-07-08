@@ -878,17 +878,17 @@ async function loadDashboard() {
     loadSourceHealth();
 }
 
-// ── Source-data staleness banner ────────────────────────────────────────────
-// Warns (amber, dismissible, all views) when any upstream source hasn't had a
-// successful refresh within the server's threshold. Driven by /api/source_health
-// (Flask/local app). On the static site the fetch fails and no banner shows.
-let _sourceHealthDismissed = false;
+// ── Source-data status bar ──────────────────────────────────────────────────
+// ALWAYS visible (all views, local app): shows the last data-refresh time and
+// the app build time. Turns amber and lists offenders when any upstream source
+// hasn't had a successful refresh within the server's threshold. Driven by
+// /api/source_health; on the static site the fetch fails and nothing renders.
 async function loadSourceHealth() {
     try {
         const res = await fetch('/api/source_health');
         if (!res.ok) return;
         renderSourceHealthBanner(await res.json());
-    } catch (_) { /* static site / server down: no banner */ }
+    } catch (_) { /* static site / server down: no bar */ }
 }
 function _fmtStaleAge(hrs) {
     if (hrs == null) return 'never';
@@ -896,25 +896,34 @@ function _fmtStaleAge(hrs) {
     if (hrs >= 24) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
     return Math.max(1, Math.round(hrs)) + 'h ago';
 }
+function _fmtDT(iso) {
+    if (!iso) return '—';
+    try {
+        return new Date(iso).toLocaleString('en-US', {
+            timeZone: 'America/New_York', month: 'short', day: 'numeric',
+            year: 'numeric', hour: 'numeric', minute: '2-digit'
+        }) + ' ET';
+    } catch (_) { return iso; }
+}
 function renderSourceHealthBanner(data) {
     let bar = document.getElementById('source-health-banner');
-    const stale = ((data && data.sources) || []).filter(s => s.stale);
-    if (!stale.length || _sourceHealthDismissed) { if (bar) bar.remove(); return; }
     if (!bar) {
         bar = document.createElement('div');
         bar.id = 'source-health-banner';
         document.body.insertBefore(bar, document.body.firstChild);
     }
-    const items = stale.map(s => `${escapeHtml(s.name)} (${_fmtStaleAge(s.age_hours)})`).join(' · ');
-    bar.innerHTML =
-        `<span class="shb-icon">⚠</span>`
-        + `<span>Source data out of date — no refresh in over ${data.threshold_days} days: <strong>${items}</strong></span>`
-        + `<button class="shb-dismiss" title="Dismiss" onclick="dismissSourceHealth()">×</button>`;
-}
-function dismissSourceHealth() {
-    _sourceHealthDismissed = true;
-    const bar = document.getElementById('source-health-banner');
-    if (bar) bar.remove();
+    const info = `Data last refreshed: <strong>${_fmtDT(data.last_refresh)}</strong>`
+        + ` &nbsp;·&nbsp; App build: <strong>${_fmtDT(data.build_time)}</strong>`;
+    const stale = ((data && data.sources) || []).filter(s => s.stale);
+    if (stale.length) {
+        const items = stale.map(s => `${escapeHtml(s.name)} (${_fmtStaleAge(s.age_hours)})`).join(', ');
+        bar.className = 'shb-stale';
+        bar.innerHTML = `<span class="shb-icon">⚠</span><span>${info} &nbsp;·&nbsp; `
+            + `<strong>Out of date (>${data.threshold_days} days): ${items}</strong></span>`;
+    } else {
+        bar.className = 'shb-ok';
+        bar.innerHTML = `<span>${info}</span>`;
+    }
 }
 
 async function loadPipeline() {
