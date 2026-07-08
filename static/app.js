@@ -906,24 +906,23 @@ function _fmtDT(iso) {
     } catch (_) { return iso; }
 }
 function renderSourceHealthBanner(data) {
+    // ALWAYS-visible info: app build time in the header (the last-refresh time is
+    // already shown alongside it by loadScanStatus in #last-updated).
+    const buildEl = document.getElementById('app-build');
+    if (buildEl) buildEl.textContent = data.build_time ? ('Build: ' + _fmtDT(data.build_time)) : '';
+    // The amber BANNER appears ONLY when a source is stale.
     let bar = document.getElementById('source-health-banner');
+    const stale = ((data && data.sources) || []).filter(s => s.stale);
+    if (!stale.length) { if (bar) bar.remove(); return; }
     if (!bar) {
         bar = document.createElement('div');
         bar.id = 'source-health-banner';
         document.body.insertBefore(bar, document.body.firstChild);
     }
-    const info = `Data last refreshed: <strong>${_fmtDT(data.last_refresh)}</strong>`
-        + ` &nbsp;·&nbsp; App build: <strong>${_fmtDT(data.build_time)}</strong>`;
-    const stale = ((data && data.sources) || []).filter(s => s.stale);
-    if (stale.length) {
-        const items = stale.map(s => `${escapeHtml(s.name)} (${_fmtStaleAge(s.age_hours)})`).join(', ');
-        bar.className = 'shb-stale';
-        bar.innerHTML = `<span class="shb-icon">⚠</span><span>${info} &nbsp;·&nbsp; `
-            + `<strong>Out of date (>${data.threshold_days} days): ${items}</strong></span>`;
-    } else {
-        bar.className = 'shb-ok';
-        bar.innerHTML = `<span>${info}</span>`;
-    }
+    const items = stale.map(s => `${escapeHtml(s.name)} (${_fmtStaleAge(s.age_hours)})`).join(', ');
+    bar.innerHTML = `<span class="shb-icon">⚠</span>`
+        + `<span>Source data out of date — no refresh in over ${data.threshold_days} days: `
+        + `<strong>${items}</strong></span>`;
 }
 
 async function loadPipeline() {
