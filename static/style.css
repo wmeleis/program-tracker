@@ -2664,3 +2664,19 @@ table.matrix-table th.mx-sortable:hover { background: #eef2f7; }
    toggle + Export/Columns actions to the right, just above the list. */
 #portfolio-table-toolbar .portfolio-layout-toggle { margin-left: auto; }
 .portfolio-toolbar-actions { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Collapsible CIM filters (programs/courses) — mirrors the student/section
+   tracker's "▸ Filters" toggle. Hides the filter controls; the pipeline summary
+   stays visible. !important overrides switchView's per-view inline display. */
+#cim-filter-toggle-row { margin: 8px 24px 0; }
+#cim-filter-toggle-btn {
+    background: none; border: none; cursor: pointer; font: inherit;
+    font-size: 13px; font-weight: 600; color: var(--text-secondary);
+    padding: 6px 8px; border-radius: 6px;
+}
+#cim-filter-toggle-btn:hover { background: #eef2f7; color: var(--text); }
+body.cim-filters-collapsed #cim-scope-bar,
+body.cim-filters-collapsed .smart-views-section,
+body.cim-filters-collapsed .kind-filter-section,
+body.cim-filters-collapsed .smart-actions-section,
+body.cim-filters-collapsed section.filters-section { display: none !important; }

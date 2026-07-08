@@ -327,6 +327,15 @@ function switchView(view) {
     // Show/hide the OTP/College perspective toggle for the new view.
     syncPerspectiveUI();
 
+    // Collapsible filters: the "▸ Filters" toggle only applies to programs/
+    // courses. Manage the body class here so it never hides catalog/portfolio
+    // filter sections (which reuse .filters-section).
+    const cimFilterToggleRow = document.getElementById('cim-filter-toggle-row');
+    const cimFilterable = (view === 'programs' || view === 'courses');
+    if (cimFilterToggleRow) cimFilterToggleRow.style.display = cimFilterable ? 'block' : 'none';
+    if (cimFilterable) applyCimFiltersState();
+    else document.body.classList.remove('cim-filters-collapsed');
+
     // Reload appropriate data
     if (view === 'programs') {
         loadDashboard();
@@ -925,6 +934,23 @@ function renderSourceHealthBanner(data) {
         + `<span>Source data out of date — no refresh in over ${data.threshold_days} days: `
         + `<strong>${items}</strong></span>`;
 }
+
+// ── Collapsible CIM filters (programs/courses) ──────────────────────────────
+// Mirrors the student/section tracker's "▸ Filters" toggle. Hides the filter
+// controls (scope bar, proposal/kind/smart-view buttons, dropdown filters); the
+// pipeline summary stays visible. Remembered per-browser; defaults open.
+let _cimFiltersOpen = (localStorage.getItem('cim-filters-open') !== 'false');
+function applyCimFiltersState() {
+    document.body.classList.toggle('cim-filters-collapsed', !_cimFiltersOpen);
+    const btn = document.getElementById('cim-filter-toggle-btn');
+    if (btn) btn.textContent = _cimFiltersOpen ? '▾ Filters' : '▸ Filters';
+}
+function toggleCimFilters() {
+    _cimFiltersOpen = !_cimFiltersOpen;
+    try { localStorage.setItem('cim-filters-open', _cimFiltersOpen); } catch (_) {}
+    applyCimFiltersState();
+}
+window.toggleCimFilters = toggleCimFilters;
 
 async function loadPipeline() {
     try {
