@@ -4166,15 +4166,22 @@ def fetch_reference_curricula(program_ids, batch_size=10, targeted_ids=None):
 
 # 1:1 mapping between campus name (as it appears in CIM program names) and
 # the SharePoint filename prefix (and the workbook itself).
-REGULATORY_CAMPUS_FILES = {
-    'Vancouver': 'BC Approved Courses.xlsx',
-    'Miami':     'FL Approved Courses.xlsx',
-    'Portland':  'ME Approved Courses.xlsx',
-    'Charlotte': 'NC Approved Courses.xlsx',
-    'Toronto':   'Ontario Approved Courses.xlsx',
-    'Arlington': 'VA Approved Courses.xlsx',
-    'Seattle':   'WA Approved Courses.xlsx',
+# Campus → stable filename PREFIX. GRA appends dated suffixes to workbooks
+# (e.g. the Toronto file was renamed "Ontario Approved Courses_JUNE 4 2026.xlsx"
+# on 2026-07, which silently broke exact-name matching). Match by prefix instead
+# and take the most-recently-modified .xlsx whose name starts with it.
+REGULATORY_CAMPUS_PREFIXES = {
+    'Vancouver': 'BC Approved Courses',
+    'Miami':     'FL Approved Courses',
+    'Portland':  'ME Approved Courses',
+    'Charlotte': 'NC Approved Courses',
+    'Toronto':   'Ontario Approved Courses',
+    'Arlington': 'VA Approved Courses',
+    'Seattle':   'WA Approved Courses',
+    'New York':  'NY Approved Courses',
 }
+# Back-compat alias: downstream code iterates the campus keys.
+REGULATORY_CAMPUS_FILES = REGULATORY_CAMPUS_PREFIXES
 
 # Path of the SharePoint folder containing the workbooks. Changing this is
 # the single point of control if the curriculum committee moves the files.
@@ -4199,11 +4206,12 @@ def _download_regulatory_workbooks():
     """
     import base64 as _b64
 
-    # Kick off all 7 downloads in parallel; each writes base64 result into
+    # List the folder, resolve each campus PREFIX to the newest matching .xlsx,
+    # then download those in parallel; each writes its base64 result into
     # window.__regwb[<campus>] so Python can pull them after.
-    files_json = json.dumps([
-        {'campus': c, 'filename': fn}
-        for c, fn in REGULATORY_CAMPUS_FILES.items()
+    prefixes_json = json.dumps([
+        {'campus': c, 'prefix': p}
+        for c, p in REGULATORY_CAMPUS_PREFIXES.items()
     ])
     folder_url = _REGULATORY_FOLDER_URL
 
@@ -4211,53 +4219,51 @@ def _download_regulatory_workbooks():
 (function(){{
     window.__regwb = {{}};
     window.__regwb_status = "running";
-    var files = {files_json};
+    var prefixes = {prefixes_json};
     var folder = "{folder_url}";
+    var base = location.origin + "/sites/GlobalRegulatoryAffairs/_api/web";
 
-    function fetchOne(entry) {{
-        var encoded = encodeURIComponent(entry.filename);
-        var url = location.origin +
-            "/sites/GlobalRegulatoryAffairs/_api/web/GetFileByServerRelativeUrl('" +
-            folder + "/" + encoded + "')/$value";
-        return new Promise(function(resolve) {{
-            var xhr = new XMLHttpRequest();
-            xhr.open("GET", url, true);
-            xhr.responseType = "arraybuffer";
-            xhr.onload = function(){{
-                if (xhr.status >= 200 && xhr.status < 300) {{
-                    var b = new Uint8Array(xhr.response);
-                    var bin = "";
-                    // Chunk-wise to avoid call-stack limits on very large files
-                    var step = 32768;
-                    for (var i = 0; i < b.length; i += step) {{
-                        bin += String.fromCharCode.apply(null, b.subarray(i, i+step));
-                    }}
-                    window.__regwb[entry.campus] = {{ status: xhr.status, len: b.length, b64: btoa(bin) }};
-                }} else {{
-                    window.__regwb[entry.campus] = {{ status: xhr.status, error: "http" }};
-                }}
-                resolve();
-            }};
-            xhr.onerror = function(){{
-                window.__regwb[entry.campus] = {{ error: "network" }};
-                resolve();
-            }};
-            xhr.send();
-        }});
+    function toB64(ab){{
+        var b = new Uint8Array(ab), bin = "", step = 32768;
+        for (var i = 0; i < b.length; i += step) {{
+            bin += String.fromCharCode.apply(null, b.subarray(i, i+step));
+        }}
+        return btoa(bin);
+    }}
+    function download(campus, name){{
+        var url = base + "/GetFileByServerRelativeUrl('" + folder + "/" + encodeURIComponent(name) + "')/$value";
+        return fetch(url, {{credentials:'include'}}).then(function(r){{
+            if (!r.ok) {{ window.__regwb[campus] = {{status:r.status, error:"http", name:name}}; return; }}
+            return r.arrayBuffer().then(function(ab){{
+                window.__regwb[campus] = {{status:r.status, len:new Uint8Array(ab).length, b64:toB64(ab), name:name}};
+            }});
+        }}).catch(function(e){{ window.__regwb[campus] = {{error:"network", name:name}}; }});
     }}
 
-    Promise.all(files.map(fetchOne)).then(function(){{
-        window.__regwb_status = "done";
-    }}).catch(function(e){{
-        window.__regwb_status = "error:" + (e && e.message || e);
-    }});
+    var listUrl = base + "/GetFolderByServerRelativeUrl('" + folder + "')/Files?$select=Name,TimeLastModified&$top=200";
+    fetch(listUrl, {{headers:{{'Accept':'application/json;odata=nometadata'}}, credentials:'include'}})
+        .then(function(r){{ return r.json(); }})
+        .then(function(j){{
+            var files = j.value || [];
+            var jobs = prefixes.map(function(p){{
+                var m = files.filter(function(f){{
+                    return f.Name && f.Name.toLowerCase().indexOf(p.prefix.toLowerCase()) === 0 && /\\.xlsx$/i.test(f.Name);
+                }});
+                if (!m.length) {{ window.__regwb[p.campus] = {{error:"not found", name:null}}; return Promise.resolve(); }}
+                m.sort(function(a,b){{ return (b.TimeLastModified||"").localeCompare(a.TimeLastModified||""); }});
+                return download(p.campus, m[0].Name);
+            }});
+            return Promise.all(jobs);
+        }})
+        .then(function(){{ window.__regwb_status = "done"; }})
+        .catch(function(e){{ window.__regwb_status = "error:" + (e && e.message || e); }});
     return "fired";
 }})();
 '''
     fired = run_js_in_tab(_REGULATORY_TAB_MATCH, kickoff_js, match_by='url', timeout=30)
     if not fired or fired == 'missing value':
         print("  SharePoint tab not open — skipping regulatory fetch")
-        return {c: None for c in REGULATORY_CAMPUS_FILES}
+        return {c: None for c in REGULATORY_CAMPUS_PREFIXES}
 
     # Poll for completion
     status_js = 'window.__regwb_status || "missing"'
@@ -4280,6 +4286,7 @@ def _download_regulatory_workbooks():
             '] ? {status: window.__regwb[' + json.dumps(campus) + '].status || null,'
             ' len: window.__regwb[' + json.dumps(campus) + '].len || 0,'
             ' b64len: (window.__regwb[' + json.dumps(campus) + '].b64 || "").length,'
+            ' name: window.__regwb[' + json.dumps(campus) + '].name || null,'
             ' error: window.__regwb[' + json.dumps(campus) + '].error || null} : null)'
         )
         meta = run_js_in_tab(_REGULATORY_TAB_MATCH, meta_js, match_by='url', timeout=15)
@@ -4317,7 +4324,7 @@ def _download_regulatory_workbooks():
         if len(data) != m['len']:
             print(f"  {campus}: length mismatch (expected {m['len']}, got {len(data)})")
         results[campus] = data
-        print(f"  {campus}: downloaded {len(data)} bytes from {REGULATORY_CAMPUS_FILES[campus]}")
+        print(f"  {campus}: downloaded {len(data)} bytes from {m.get('name') or REGULATORY_CAMPUS_PREFIXES[campus]}")
 
     # Clean up window state
     run_js_in_tab(_REGULATORY_TAB_MATCH,

@@ -420,18 +420,20 @@ Additional dropdown between College and Campus on the Courses view. Populates wi
 Type filter (`.type-btn`), Smart View (`.smart-view-btn`), Programs/Courses toggle (`.toggle-btn`), and the proposal "All" (`active-all`) buttons now share the pipeline-style active state: light-blue fill (`#eff6ff`), blue border (`var(--accent)`), blue text. The Proposal buttons retain their semantic colors for New (green), Edited (blue), and Inactivated (red) since those convey meaningful status. This was a consistency fix — previously type/smart-view used solid black and courses/programs used a segmented-control pill.
 
 ### Regulatory Tab (approved-courses check)
-Fourth tab on each program's expandable row (shown only for programs at the seven regulatory campuses with a matching SharePoint workbook on file). Flags each course in the current proposal against a per-campus "Approved Courses" workbook maintained by Global Regulatory Affairs.
+Fourth tab on each program's expandable row (shown only for programs at the eight regulatory campuses with a matching SharePoint workbook on file). Flags each course in the current proposal against a per-campus "Approved Courses" workbook maintained by Global Regulatory Affairs.
 
-- **Source files:** SharePoint folder `GlobalRegulatoryAffairs/Shared Documents/Resources/Master Portfolio/CURRENT APPROVED CURRICULUM`. Seven `.xlsx` workbooks — one per regulatory campus:
-  - `BC Approved Courses.xlsx` → Vancouver
-  - `FL Approved Courses.xlsx` → Miami
-  - `ME Approved Courses.xlsx` → Portland
-  - `NC Approved Courses.xlsx` → Charlotte
-  - `Ontario Approved Courses.xlsx` → Toronto
-  - `VA Approved Courses.xlsx` → Arlington
-  - `WA Approved Courses.xlsx` → Seattle
+- **Source files:** SharePoint folder `GlobalRegulatoryAffairs/Shared Documents/Resources/Master Portfolio/CURRENT APPROVED CURRICULUM`. Eight `.xlsx` workbooks — one per regulatory campus. **Matched by filename PREFIX, not exact name** (`REGULATORY_CAMPUS_PREFIXES` in `scraper.py`) — GRA appends dated suffixes (e.g. the Toronto file was renamed `Ontario Approved Courses_JUNE 4 2026.xlsx` on 2026-07, silently breaking the old exact-match). The scraper lists the folder (`GetFolderByServerRelativeUrl(...)/Files`) and picks the most-recently-modified `.xlsx` whose name starts with each prefix:
+  - `BC Approved Courses` → Vancouver
+  - `FL Approved Courses` → Miami
+  - `ME Approved Courses` → Portland
+  - `NC Approved Courses` → Charlotte
+  - `Ontario Approved Courses` → Toronto
+  - `VA Approved Courses` → Arlington
+  - `WA Approved Courses` → Seattle
+  - `NY Approved Courses` → New York (added 2026-07)
+- **Access note:** the account needs read access to the CURRENT APPROVED CURRICULUM document library. The site's *home page* may return AccessDenied even when the library itself is readable — that's fine; the scraper only touches the library via REST. The Chrome tab just needs to be on any GRA-site URL (the folder view works).
 - **Workbook shape:** one sheet per program. Row-0 col-A is the full program title; row-0 col-D is an "Edited by … on …" provenance string. Row 1 has the column headers (`Course #`, `Course Title`, `SH` or `QH`, optional `Notes`). Section rows appear as text-only rows in col A ("Core Requirements", "Electives", "Theory and Security", etc.). Each course row has `code`, `title`, `credit hours`, `note`.
-- **Download:** The scraper uses the logged-in Chrome session on the SharePoint site (match substring `sharepoint.com/sites/GlobalRegulatoryAffairs`). SharePoint's REST endpoint `/_api/web/GetFileByServerRelativeUrl('<path>')/$value` returns the `.xlsx` bytes; Python pulls them in base64 chunks via AppleScript (same pattern as `fetch_reference_curricula`). All 7 files download in parallel per scan (~1.3 MB total).
+- **Download:** The scraper uses the logged-in Chrome session on the SharePoint site (match substring `sharepoint.com/sites/GlobalRegulatoryAffairs`). SharePoint's REST endpoint `/_api/web/GetFileByServerRelativeUrl('<path>')/$value` returns the `.xlsx` bytes; Python pulls them in base64 chunks via AppleScript (same pattern as `fetch_reference_curricula`). All 8 files download in parallel per scan (~1.5 MB total).
 - **Parser (`xlsx_parser.py`):** Pure stdlib (`zipfile` + `xml.etree`). `parse_workbook(bytes_or_path)` returns a list of `{sheet_name, title, edited_by, unit_header, courses, sections}`. Section tracking: rows with text only in col A and no course-code pattern become the `current_section`; subsequent course rows inherit that section.
 - **Sheet → CIM program matching (`match_sheets_to_programs`):**
   - Scope is per workbook (one workbook ↔ one campus).
@@ -444,7 +446,7 @@ Fourth tab on each program's expandable row (shown only for programs at the seve
   - **Placeholder sheets are skipped** (A1 starts with `"As of"`, `"TBD"`, or `"Course #"`) per explicit project preference.
   - **Unmatched programs hide the tab** (no "missing" state is shown to the user).
 - **Database:** `regulatory_approved_courses` table (`program_id` PK, `campus`, `source_file`, `sheet_name`, `sheet_title`, `edited_by`, `unit_header`, `confidence`, `match_reason`, `courses_json`, `sections_json`, `fetched_at`). Functions: `upsert_regulatory_approved()`, `delete_regulatory_approved()`, `get_regulatory_approved()`, `get_all_regulatory_approved()`. Programs that lose their match on a subsequent scan have their row deleted.
-- **Scraper integration:** `fetch_regulatory_approved(program_ids)` in `scraper.py` runs after `fetch_reference_curricula()` during every scan (`app.py` `do_scan`). Pulls all 7 workbooks in parallel, parses each, scopes CIM programs by campus-in-name parenthetical, and upserts matches. Any failure (SharePoint tab closed, session expired) logs a warning and skips the step — it never blocks programs/courses/reference. `REGULATORY_CAMPUS_FILES` (campus → filename dict) and `_REGULATORY_FOLDER_URL` at the top of `scraper.py` are the single points of control if the files move.
+- **Scraper integration:** `fetch_regulatory_approved(program_ids)` in `scraper.py` runs after `fetch_reference_curricula()` during every scan (`app.py` `do_scan`). Pulls all 8 workbooks in parallel, parses each, scopes CIM programs by campus-in-name parenthetical, and upserts matches. Any failure (SharePoint tab closed, session expired) logs a warning and skips the step — it never blocks programs/courses/reference. `REGULATORY_CAMPUS_PREFIXES` (campus → filename prefix) and `_REGULATORY_FOLDER_URL` at the top of `scraper.py` are the single points of control if the files move.
 - **API:** `GET /api/program/<id>/regulatory` returns `{available, campus, source_file, sheet_name, sheet_title, edited_by, unit_header, confidence, match_reason, fetched_at, courses, sections}` or `404` with `{available: false}`. `/api/programs` now includes a `has_regulatory` boolean on each program so the frontend can show/hide the tab without a probe.
 - **Frontend (`static/app.js`):**
   - `loadRegulatoryDetail(programId)` loads the current proposal curriculum + regulatory data, extracts proposal courses via `extractCourseLines()` (shared with Compare tab), then flags each:
