@@ -37,7 +37,6 @@
             <div id="progress-container" class="progress-container" style="display: none;">
                 <span id="progress-phase" class="progress-phase"></span>
             </div>
-            <button id="scan-btn" class="header-secondary-btn" onclick="triggerScan()">Update</button>
             <button id="auth-btn" class="header-secondary-btn" onclick="cimAuthenticate()" title="CIM session — click to (re)open CIM login in Chrome">Authenticate</button>
             <button id="console-btn" class="header-secondary-btn" onclick="openConsoleModal()">Console</button>
             <button id="refs-btn" class="header-secondary-btn" onclick="openReferencesModal()" title="Manage custom reference curricula">References</button>
@@ -92,14 +91,14 @@
         </div>
     </div>
 
-    <!-- Collapsible filters toggle (all views; shown/positioned by switchView).
-         Placed above every view's filter content so it collapses them all. -->
+    <!-- Portfolio starred-view tiles (quick-apply); only shown on Portfolio view -->
+    <div id="portfolio-view-tiles" class="portfolio-view-tiles" style="display:none"></div>
+
+    <!-- Collapsible filters toggle (all views): sits BELOW the views and ABOVE
+         the filters; collapses the filter content only (not the views). -->
     <div id="cim-filter-toggle-row" style="display:none">
         <button id="cim-filter-toggle-btn" onclick="toggleCimFilters()">▸ Filters</button>
     </div>
-
-    <!-- Portfolio starred-view tiles (quick-apply); only shown on Portfolio view -->
-    <div id="portfolio-view-tiles" class="portfolio-view-tiles" style="display:none"></div>
 
     <!-- Portfolio filter bar (visible only in portfolio view) -->
     <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">

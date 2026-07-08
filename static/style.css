@@ -2680,5 +2680,4 @@ body.cim-filters-collapsed .smart-views-section,
 body.cim-filters-collapsed .kind-filter-section,
 body.cim-filters-collapsed .smart-actions-section,
 body.cim-filters-collapsed section.filters-section,
-body.cim-filters-collapsed #portfolio-filters,
-body.cim-filters-collapsed #portfolio-view-tiles { display: none !important; }
+body.cim-filters-collapsed #portfolio-filters { display: none !important; }
