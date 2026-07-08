@@ -6,7 +6,28 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 from datetime import datetime
+
+
+def _build_time():
+    """When the deployed code was last built/committed — baked into the static
+    export so the "Build: …" stamp shows on the GitHub Pages site (which has no
+    live API). Mirrors app.py's _compute_build_time (git HEAD commit time)."""
+    d = os.path.dirname(os.path.abspath(__file__))
+    try:
+        out = subprocess.run(['git', '-C', d, 'log', '-1', '--format=%cI'],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    try:
+        mt = max(os.path.getmtime(os.path.join(d, f))
+                 for f in ('app.py', 'scraper.py', 'static/app.js'))
+        return datetime.fromtimestamp(mt).astimezone().isoformat()
+    except Exception:
+        return None
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
@@ -229,6 +250,7 @@ def export_data():
 
     return {
         'exported_at': datetime.now().isoformat(),
+        'build_time': _build_time(),
         'programs': programs,
         'courses': courses,
         'pipeline': pipeline,
@@ -808,6 +830,8 @@ function __staticInit() {
             const d = new Date(D.last_scan.scan_time);
             updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
+        const buildEl = document.getElementById('app-build');
+        if (buildEl && D.build_time) buildEl.textContent = 'Build: ' + _fmtDT(D.build_time);
 
         // Changes shown via smart view button, not separate section
 
@@ -872,6 +896,8 @@ function __staticInit() {
             const d = new Date(D.last_scan.scan_time);
             updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
+        const buildEl = document.getElementById('app-build');
+        if (buildEl && D.build_time) buildEl.textContent = 'Build: ' + _fmtDT(D.build_time);
     }
 
     window.loadCatalogDashboard = async function() {
