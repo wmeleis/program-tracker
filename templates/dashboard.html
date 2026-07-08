@@ -36,14 +36,10 @@
             <button id="auth-btn" class="header-secondary-btn" onclick="cimAuthenticate()" title="CIM session — click to (re)open CIM login in Chrome">Authenticate</button>
             <button id="console-btn" class="header-secondary-btn" onclick="openConsoleModal()">Console</button>
             <button id="refs-btn" class="header-secondary-btn" onclick="openReferencesModal()" title="Manage custom reference curricula">References</button>
-            <!-- Portfolio-only actions: shown/hidden by switchView() -->
+            <!-- Portfolio-only actions: shown/hidden by switchView(). Export +
+                 Columns live in the table toolbar just above the list; Views stays here. -->
             <span id="portfolio-header-actions" style="display:none; align-items:center; gap:8px;">
-                <button class="header-secondary-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
                 <button class="portfolio-col-picker-btn" id="portfolio-views-btn" onclick="openPortfolioViewsModal()">Views</button>
-                <div class="portfolio-col-picker" id="portfolio-col-picker" style="position:relative">
-                    <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
-                    <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
-                </div>
             </span>
         </div>
     </header>
@@ -210,12 +206,20 @@
       </div>
     </section>
 
-    <!-- Portfolio table toolbar (result count only — actions moved to header) -->
+    <!-- Portfolio table toolbar (just above the list): result count + layout on
+         the left; Export + Columns on the right. -->
     <div id="portfolio-table-toolbar" style="display:none">
         <span id="portfolio-result-count" class="result-count"></span>
         <span class="portfolio-layout-toggle">
             <button class="portfolio-layout-btn active" data-layout="table" onclick="setPortfolioLayout('table')">Table</button>
             <button class="portfolio-layout-btn" data-layout="matrix" onclick="setPortfolioLayout('matrix')">Matrix</button>
+        </span>
+        <span class="portfolio-toolbar-actions">
+            <button class="portfolio-col-picker-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
+            <div class="portfolio-col-picker" id="portfolio-col-picker" style="position:relative">
+                <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
+                <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
+            </div>
         </span>
     </div>
 

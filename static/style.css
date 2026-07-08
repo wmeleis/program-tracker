@@ -2656,3 +2656,8 @@ table.matrix-table th.mx-sortable:hover { background: #eef2f7; }
 }
 #source-health-banner strong { color: #7c2d12; }
 #source-health-banner .shb-icon { font-size: 14px; }
+
+/* Portfolio table toolbar: keep result-count on the left; push the layout
+   toggle + Export/Columns actions to the right, just above the list. */
+#portfolio-table-toolbar .portfolio-layout-toggle { margin-left: auto; }
+.portfolio-toolbar-actions { display: inline-flex; align-items: center; gap: 8px; }
