@@ -321,10 +321,9 @@
     <section class="filters-section">
         <div class="filter-group">
             <label>College:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the college or school responsible for the program.</span></span></label>
-            <div class="filter-select-wrap">
-                <select id="filter-college" onchange="applyFilters(); updateClearButtons()">
-                    <option value="">All Colleges</option>
-                </select>
+            <div class="filter-multi-wrap" id="fmw-filter-college">
+                <button class="filter-multi-btn" id="filter-college" onclick="toggleCimMultiFilter('filter-college', event)">All Colleges ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-filter-college"></div>
                 <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
             </div>
         </div>
@@ -339,10 +338,9 @@
         </div>
         <div class="filter-group">
             <label>Campus:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the campus where the program is offered (e.g. Boston, Oakland, Online).</span></span></label>
-            <div class="filter-select-wrap">
-                <select id="filter-campus" onchange="applyFilters(); updateClearButtons()">
-                    <option value="">All Campuses</option>
-                </select>
+            <div class="filter-multi-wrap" id="fmw-filter-campus">
+                <button class="filter-multi-btn" id="filter-campus" onclick="toggleCimMultiFilter('filter-campus', event)">All Campuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-filter-campus"></div>
                 <span class="filter-clear" onclick="clearFilter('filter-campus')" title="Clear">&times;</span>
             </div>
         </div>

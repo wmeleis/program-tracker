@@ -220,8 +220,8 @@ function switchView(view) {
     document.querySelectorAll('.proposal-btn').forEach(btn => btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact', 'active-complete'));
     document.querySelectorAll('.smart-view-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.kind-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById('filter-college').value = '';
-    document.getElementById('filter-campus').value = '';
+    cimMultiSel('filter-college').clear(); _updateCimMultiBtn('filter-college');
+    cimMultiSel('filter-campus').clear();  _updateCimMultiBtn('filter-campus');
     document.getElementById('filter-approver').value = '';
     document.getElementById('filter-step').value = '';
     document.getElementById('filter-search').value = '';
@@ -413,22 +413,15 @@ function getCatalogCollege(page) {
 }
 
 function populateCatalogCollegeFilter() {
-    const sel = document.getElementById('filter-college');
-    if (!sel) return;
     const counts = new Map();
     for (const p of allCatalogPages || []) {
         const c = getCatalogCollege(p);
         counts.set(c, (counts.get(c) || 0) + 1);
     }
-    const prev = sel.value;
-    const opts = Array.from(counts.entries())
+    const items = Array.from(counts.entries())
         .sort((a, b) => abbreviateCollege(a[0]).localeCompare(abbreviateCollege(b[0])))
-        .map(([name, count]) => `<option value="${escapeHtml(name)}">${escapeHtml(abbreviateCollege(name))} (${count})</option>`)
-        .join('');
-    sel.innerHTML = '<option value="">All Colleges</option>' + opts;
-    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
-        sel.value = prev;
-    }
+        .map(([name, count]) => ({ value: name, label: abbreviateCollege(name), count }));
+    renderCimMulti('filter-college', items);
 }
 
 function populateCatalogApproverFilter() {
@@ -503,12 +496,12 @@ function buildSearchMatcher(query) {
 }
 
 function getCatalogBaseFiltered(excludeFilter) {
-    const collegeFilter = excludeFilter === 'college' ? '' : (document.getElementById('filter-college')?.value || '');
+    const collegeSel = excludeFilter === 'college' ? new Set() : cimMultiSel('filter-college');
     const approverFilter = excludeFilter === 'approver' ? '' : (document.getElementById('filter-approver')?.value || '');
     const searchRaw = excludeFilter === 'search' ? '' : (document.getElementById('filter-search')?.value || '');
     const matchSearch = buildSearchMatcher(searchRaw);
     let pages = (allCatalogPages || []).slice();
-    if (collegeFilter) pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    if (collegeSel.size) pages = pages.filter(p => collegeSel.has(getCatalogCollege(p)));
     if (approverFilter) pages = pages.filter(p => (p.user || '').trim() === approverFilter);
     if (searchRaw.trim()) pages = pages.filter(p =>
         matchSearch(p.id) || matchSearch(p.title));
@@ -568,11 +561,11 @@ function renderCatalogTable() {
     if (!container) return;
     const searchRaw = (document.getElementById('filter-search')?.value || '');
     const matchSearch = buildSearchMatcher(searchRaw);
-    const collegeFilter = document.getElementById('filter-college')?.value || '';
+    const collegeSel = cimMultiSel('filter-college');
     const approverFilter = document.getElementById('filter-approver')?.value || '';
     let pages = (allCatalogPages || []).slice();
-    if (collegeFilter) {
-        pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    if (collegeSel.size) {
+        pages = pages.filter(p => collegeSel.has(getCatalogCollege(p)));
     }
     if (approverFilter) {
         pages = pages.filter(p => (p.user || '').trim() === approverFilter);
@@ -628,9 +621,16 @@ function renderCatalogTable() {
 }
 
 function clearFilter(id) {
-    const el = document.getElementById(id);
-    if (el.tagName === 'SELECT') el.value = '';
-    else el.value = '';
+    if (cimMultiFilters[id]) {
+        cimMultiSel(id).clear();
+        // Re-render the checkbox list so boxes uncheck; button label resets.
+        const dd = document.getElementById('fmd-' + id);
+        if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+        _updateCimMultiBtn(id);
+    } else {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    }
     updateClearButtons();
     applyFilters();
 }
@@ -650,6 +650,65 @@ function updateClearButtons() {
     if (hs && clear) {
         clear.classList.toggle('visible', !!hs.value);
     }
+}
+
+// ── CIM College/Campus multi-select filters ────────────────────────────────
+// The College and Campus filters on the CIM tracker (Programs / Courses /
+// Catalog) are checkbox multi-selects backed by Sets, mirroring the Portfolio
+// filter dropdowns. OR semantics: an item passes if its value is in the set;
+// an empty set means "all". The button id is the filter id (e.g. filter-college);
+// the checkbox list lives in #fmd-<id>, wrapped by #fmw-<id>.
+const cimMultiFilters = {
+    'filter-college': new Set(),
+    'filter-campus':  new Set(),
+};
+function cimMultiSel(id) { return cimMultiFilters[id] || new Set(); }
+function _cimMultiAllLabel(id) {
+    return id === 'filter-college' ? 'All Colleges'
+         : id === 'filter-campus'  ? 'All Campuses' : 'All';
+}
+function _updateCimMultiBtn(id) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const set = cimMultiSel(id);
+    const wrap = document.getElementById('fmw-' + id);
+    const labelFor = id === 'filter-college' ? (v => abbreviateCollege(v)) : (v => v);
+    if (set.size === 0)      { btn.textContent = _cimMultiAllLabel(id) + ' ▾'; if (wrap) wrap.classList.remove('has-value'); }
+    else if (set.size === 1) { btn.textContent = labelFor([...set][0]) + ' ▾'; if (wrap) wrap.classList.add('has-value'); }
+    else                     { btn.textContent = set.size + ' selected ▾';     if (wrap) wrap.classList.add('has-value'); }
+}
+// items: [{value, label, count?}] (pre-sorted). Reflects the current Set state.
+function renderCimMulti(id, items) {
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) { _updateCimMultiBtn(id); return; }
+    const set = cimMultiSel(id);
+    const _attr = s => String(s).replace(/"/g, '&quot;');
+    dd.innerHTML = items.map(it => `
+        <label class="portfolio-col-check">
+            <input type="checkbox" ${set.has(it.value) ? 'checked' : ''}
+                   onchange="toggleCimMultiValue(${_attr(JSON.stringify(id))}, ${_attr(JSON.stringify(it.value))}, this.checked)">
+            ${escapeHtml(it.label)}${it.count != null ? ` (${it.count})` : ''}
+        </label>`).join('');
+    _updateCimMultiBtn(id);
+}
+function toggleCimMultiFilter(id, event) {
+    if (event) event.stopPropagation();
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) return;
+    const wasOpen = dd.classList.contains('open');
+    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => el.classList.remove('open'));
+    if (!wasOpen) dd.classList.add('open');
+}
+function toggleCimMultiValue(id, value, checked) {
+    const set = cimMultiSel(id);
+    if (checked) set.add(value); else set.delete(value);
+    _updateCimMultiBtn(id);
+    applyFilters();
+    updateClearButtons();
+}
+if (typeof window !== 'undefined') {
+    window.toggleCimMultiFilter = toggleCimMultiFilter;
+    window.toggleCimMultiValue = toggleCimMultiValue;
 }
 
 // The main tracked pipeline steps (canonical display stages)
@@ -1037,11 +1096,9 @@ async function loadCourseColleges() {
     try {
         const res = await fetch('/api/course_colleges');
         const data = await res.json();
-        const select = document.getElementById('filter-college');
         const colleges = (data.colleges || []).slice()
             .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
-        const options = colleges.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))}</option>`).join('');
-        select.innerHTML = '<option value="">All Colleges</option>' + options;
+        renderCimMulti('filter-college', colleges.map(c => ({ value: c, label: abbreviateCollege(c) })));
     } catch (e) {
         console.error('Failed to load course colleges:', e);
     }
@@ -1255,11 +1312,9 @@ async function loadColleges() {
     try {
         const res = await fetch('/api/colleges');
         const data = await res.json();
-        const select = document.getElementById('filter-college');
         const colleges = (data.colleges || []).slice()
             .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
-        const options = colleges.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))}</option>`).join('');
-        select.innerHTML = '<option value="">All Colleges</option>' + options;
+        renderCimMulti('filter-college', colleges.map(c => ({ value: c, label: abbreviateCollege(c) })));
     } catch (e) {
         console.error('Failed to load colleges:', e);
     }
@@ -1396,17 +1451,14 @@ function updatePipelineCounts(baseFiltered) {
 }
 
 function updateCollegeOptions(baseFiltered) {
-    const select = document.getElementById('filter-college');
-    const current = select.value;
     const counts = {};
     baseFiltered.forEach(item => {
         if (item.college) counts[item.college] = (counts[item.college] || 0) + 1;
     });
-    const sorted = Object.keys(counts).sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
-    select.innerHTML = '<option value="">All Colleges</option>' +
-        sorted.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))} (${counts[c]})</option>`).join('');
-    // Preserve selection if still valid
-    if (counts[current]) select.value = current;
+    const items = Object.keys(counts)
+        .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)))
+        .map(c => ({ value: c, label: abbreviateCollege(c), count: counts[c] }));
+    renderCimMulti('filter-college', items);
 }
 
 function renderPipeline(pipeline, baseFiltered) {
@@ -1660,9 +1712,7 @@ function populateCampusFilter() {
         if (c) campuses.add(c);
     });
     const sorted = Array.from(campuses).sort();
-    const select = document.getElementById('filter-campus');
-    select.innerHTML = '<option value="">All Campuses</option>' +
-        sorted.map(c => `<option value="${c}">${c}</option>`).join('');
+    renderCimMulti('filter-campus', sorted.map(c => ({ value: c, label: c })));
 }
 
 function populateStepFilter() {
@@ -1679,9 +1729,9 @@ function populateStepFilter() {
 // Apply all filters EXCEPT pipeline and any in the 'exclude' set
 function getBaseFiltered(approverProgramIds, exclude) {
     const ex = exclude || {};
-    const collegeFilter = document.getElementById('filter-college').value;
+    const collegeSel = cimMultiSel('filter-college');
     const stepFilter = document.getElementById('filter-step').value;
-    const campusFilter = document.getElementById('filter-campus').value;
+    const campusSel = cimMultiSel('filter-campus');
     const approverFilter = document.getElementById('filter-approver').value;
     const searchRaw = document.getElementById('filter-search').value;
     const matchSearch = buildSearchMatcher(searchRaw);
@@ -1735,14 +1785,14 @@ function getBaseFiltered(approverProgramIds, exclude) {
         if (!ex.kind && currentView === 'programs' && programKindFilter) {
             if (classifyProgramKind(item) !== programKindFilter) return false;
         }
-        if (!ex.college && collegeFilter && item.college !== collegeFilter) return false;
+        if (!ex.college && collegeSel.size && !collegeSel.has(item.college)) return false;
         if (currentView === 'courses') {
             const subjSel = document.getElementById('filter-subject');
             const subjectFilter = subjSel ? subjSel.value : '';
             if (subjectFilter && courseSubjectCode(item) !== subjectFilter) return false;
         }
         if (stepFilter && item.current_step !== stepFilter) return false;
-        if (currentView === 'programs' && campusFilter && extractCampus(item.name) !== campusFilter) return false;
+        if (currentView === 'programs' && campusSel.size && !campusSel.has(extractCampus(item.name))) return false;
         if (approverProgramIds && !approverProgramIds.has(item.id)) return false;
 
         // Search in name/title and code/banner_code. Supports `*` (any
@@ -1792,7 +1842,6 @@ async function applyFilters() {
         }
         return;
     }
-    const collegeFilter = document.getElementById('filter-college').value;
     const approverFilter = document.getElementById('filter-approver').value;
 
     // If approver filter is active, fetch programs/courses from API (or use static cache)
