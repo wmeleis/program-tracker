@@ -668,6 +668,35 @@ const cimMultiFilters = {
 // a set of {sentinel} hides every row with no read-site changes.
 const _FILTER_NONE = '__cim_filter_none__';
 function cimMultiSel(id) { return cimMultiFilters[id] || new Set(); }
+
+// Apply-on-close: checkbox multi-select dropdowns update their Set + button
+// label live but defer the (heavy) table re-render until the dropdown closes.
+// A dropdown marks itself dirty on each toggle; closing it commits & applies.
+const _multiFilterDirty = new Set();
+function _commitMultiFilter(id) {
+    if (!_multiFilterDirty.has(id)) return;
+    _multiFilterDirty.delete(id);
+    if (id === 'filter-college' || id === 'filter-campus') {   // CIM tab
+        applyFilters();
+        updateClearButtons();
+    } else if (id.indexOf('portfolio-filter-') === 0) {        // Portfolio tab
+        if (typeof _portfolioViewTouch === 'function') _portfolioViewTouch();
+        updateClearButtons();
+        renderPortfolioTable();
+    }
+}
+// Remove .open from a multi-select dropdown element and commit its deferred
+// selection. Used by every close path (outside-click, button toggle, opening
+// another dropdown).
+function _closeMultiDropdown(el) {
+    if (!el || !el.classList || !el.classList.contains('open')) return;
+    el.classList.remove('open');
+    const id = (el.id || '').replace(/^fmd-/, '');
+    if (id) _commitMultiFilter(id);
+}
+function _closeAllMultiDropdowns() {
+    document.querySelectorAll('.filter-multi-dropdown.open').forEach(_closeMultiDropdown);
+}
 function _cimMultiAllLabel(id) {
     return id === 'filter-college' ? 'All Colleges'
          : id === 'filter-campus'  ? 'All Campuses' : 'All';
@@ -713,7 +742,7 @@ function toggleCimMultiFilter(id, event) {
     const dd = document.getElementById('fmd-' + id);
     if (!dd) return;
     const wasOpen = dd.classList.contains('open');
-    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => el.classList.remove('open'));
+    _closeAllMultiDropdowns();       // close + commit any open dropdown (incl. this one)
     if (!wasOpen) dd.classList.add('open');
 }
 function toggleCimMultiAll(id) {
@@ -726,8 +755,7 @@ function toggleCimMultiAll(id) {
     const dd = document.getElementById('fmd-' + id);
     if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = nowAll; });
     _updateCimMultiBtn(id);
-    applyFilters();
-    updateClearButtons();
+    _multiFilterDirty.add(id);       // defer the table apply until the dropdown closes
 }
 // Rebuild the selection from the entry checkboxes' current state. All checked →
 // empty set (All); none checked → {sentinel} (None); otherwise the explicit set.
@@ -742,8 +770,7 @@ function toggleCimMultiValue(id) {
     const allBox = dd.querySelector('.filter-all-row input');
     if (allBox) allBox.checked = cimMultiSel(id).size === 0;
     _updateCimMultiBtn(id);
-    applyFilters();
-    updateClearButtons();
+    _multiFilterDirty.add(id);       // defer the table apply until the dropdown closes
 }
 if (typeof window !== 'undefined') {
     window.toggleCimMultiFilter = toggleCimMultiFilter;
@@ -5605,10 +5632,11 @@ function togglePortfolioCol(key, visible) {
 }
 
 document.addEventListener('click', e => {
-    // Close multi-select filter dropdowns on outside click
+    // Close multi-select filter dropdowns on outside click (commits deferred
+    // selection via _closeMultiDropdown → apply-on-close).
     document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => {
         const wrap = el.closest('.filter-multi-wrap');
-        if (wrap && !wrap.contains(e.target)) el.classList.remove('open');
+        if (wrap && !wrap.contains(e.target)) _closeMultiDropdown(el);
     });
     // Close column picker dropdown on outside click
     const picker = document.getElementById('portfolio-col-picker');
@@ -7229,9 +7257,9 @@ function togglePortfolioMultiFilter(id, e) {
     e.stopPropagation();
     const dd = document.getElementById('fmd-' + id);
     if (!dd) return;
-    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
-    // Close other open dropdowns
-    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => el.classList.remove('open'));
+    if (dd.classList.contains('open')) { _closeMultiDropdown(dd); return; }  // close + commit
+    // Close (and commit) other open dropdowns
+    _closeAllMultiDropdowns();
     const filterSetMap = {
         'portfolio-filter-college':    portfolioCollegeFilter,
         'portfolio-filter-campus':     portfolioCampusFilter,
@@ -7313,9 +7341,7 @@ function togglePortfolioMultiAll(id) {
     if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = nowAll; });
     _updateMultiFilterBtn(id, set);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
-    updateClearButtons();
-    _portfolioViewTouch();
-    renderPortfolioTable();
+    _multiFilterDirty.add(id);   // defer the table apply until the dropdown closes
 }
 
 // Rebuild the selection from the entry checkboxes. All checked → empty set
@@ -7335,9 +7361,7 @@ function togglePortfolioMultiValue(id) {
     if (allBox) allBox.checked = filterSet.size === 0;
     _updateMultiFilterBtn(id, filterSet);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
-    updateClearButtons();
-    _portfolioViewTouch();
-    renderPortfolioTable();
+    _multiFilterDirty.add(id);   // defer the table apply until the dropdown closes
 }
 
 function getPortfolioFiltered() {
