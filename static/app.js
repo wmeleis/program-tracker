@@ -5318,6 +5318,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Heuristic note for the "Needs SVT coordination" view: why an SVT entry with no CIM record is problematic — no CIM match, a possible match to an existing CIM program (likely a match failure / duplicate), or a bundled name that may need splitting.'},
     {key: 'cimchange',    label: 'CIM Change',
         help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
+    {key: 'ciminact',     label: 'Inactivating (CIM)',
+        help: 'Inactivation in progress per CIM: the current proposal is an Inactivation and it is still moving through the CIM workflow (not yet completed). Authoritative and covers all levels, unlike the graduate-only GTM flag or the often-incomplete OTP/SVT statuses.'},
     {key: 'inworkflow',   label: 'In CIM',
         help: 'Yes if the program exists in CourseLeaf CIM at all — either active in workflow, or already approved/historical. No if the portfolio entry comes only from an external feed (SVT, IPD, OTP) with no CIM record.'},
     {key: 'inactadmit',  label: 'Inactivation of Admission',
@@ -6061,6 +6063,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
     {key: 'otp',         label: 'OTP Status',       type: 'select', value: p => p.otp_status || ''},
+    {key: 'cim_inact',   label: 'CIM inactivation in progress', type: 'boolean', value: p => _cimInactivating(p) ? 'Y' : 'N'},
     {key: 'inact_admit', label: 'Inactivation of Admission', type: 'select', value: p => p.inactivation_admission || ''},
     {key: 'admit_today', label: 'Admitting Today',  type: 'boolean', value: p => { const v = _inactAdmittingToday(p); return v === 'Yes' ? 'Y' : v === 'No' ? 'N' : ''; }},
     {key: 'offering',    label: 'New Offering',     type: 'select', value: p => portfolioOfferingLabel(p)},
@@ -6768,6 +6771,14 @@ function _semesterToDate(s) {
 
 // Returns 'Yes' if the program is still admitting today, 'No' if admission has closed,
 // or '' if there is no inactivation admission date.
+// CIM says a program's inactivation is *in progress* when its current proposal
+// is an Inactivation and it's still moving through the CIM workflow (a step is
+// set = not yet completed). Authoritative and all-levels, unlike the graduate-
+// only gtm_inactivation or the often-blank OTP/SVT flags.
+function _cimInactivating(p) {
+    return p.cim_change_type === 'Inactivation' && !!p.cim_step;
+}
+
 function _inactAdmittingToday(p) {
     if (!p.inactivation_admission) return '';
     const cutoff = _semesterToDate(p.inactivation_admission);
@@ -7705,6 +7716,7 @@ function renderPortfolioTable() {
             case 'cimterm':   av = a.cim_eff_term || ''; bv = b.cim_eff_term || ''; break;
             case 'svtnote':   av = _svtCoordNote(a); bv = _svtCoordNote(b); break;
             case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
+            case 'ciminact':    av = _cimInactivating(a) ? '1' : '0'; bv = _cimInactivating(b) ? '1' : '0'; break;
             case 'inworkflow':  av = a.cim_program_id ? 'Yes' : 'No'; bv = b.cim_program_id ? 'Yes' : 'No'; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
             case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
@@ -8037,6 +8049,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('cimterm',   escapeHtml(_pfEffTermLabel(p)))}
         ${_pc('svtnote',   escapeHtml(_svtCoordNote(p)))}
         ${_pc('cimchange',   (activeInWorkflow && p.cim_change_type) ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
+        ${_pc('ciminact',    _cimInactivating(p) ? '<span class="portfolio-badge badge-bad">In progress</span>' : '')}
         ${_pc('inworkflow',  p.cim_program_id ? 'Yes' : 'No')}
         ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
         ${_pc('inacttoday', (() => {
@@ -8101,6 +8114,7 @@ function exportPortfolioCsv() {
             case 'cimterm':     return _pfEffTermLabel(p);
             case 'svtnote':     return _svtCoordNote(p);
             case 'cimchange':   return (p.cim_step && p.cim_change_type) ? p.cim_change_type : p.cim_program_id ? '' : '';
+            case 'ciminact':    return _cimInactivating(p) ? 'In progress' : '';
             case 'inworkflow':  return p.cim_program_id ? 'Yes' : 'No';
             case 'inactadmit':  return p.inactivation_admission || '';
             case 'inacttoday':  return _inactAdmittingToday(p) || '';
