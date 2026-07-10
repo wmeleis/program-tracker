@@ -470,7 +470,7 @@ header h1 {
 }
 
 .filter-clear {
-    display: inline-block;
+    display: none;               /* only shown when the filter has a value */
     cursor: pointer;
     color: #64748b;
     font-size: 11px;
@@ -489,6 +489,7 @@ header h1 {
 
 .filter-select-wrap.has-value .filter-clear,
 .filter-multi-wrap.has-value .filter-clear {
+    display: inline-block;
     color: var(--text);
 }
 
