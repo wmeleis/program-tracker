@@ -5194,6 +5194,44 @@ const PORTFOLIO_COLUMNS = [
         help: 'Notes (column M) from the "OTP Program Tracking" sheet of the Optimization, Withdrawal, and Deactivation Tracker — the April 2026 EMPL review notes (Boston-only).'},
 ];
 
+// Master's enrollment columns are generated dynamically from whatever years
+// the enrollment feed provides (the academic-year window rolls forward), so
+// they aren't hardcoded above. They're appended to PORTFOLIO_COLUMNS the first
+// time portfolio data loads. Keys: enr_total_YYYY / enr_new_YYYY. Hidden by
+// default (toggle via the Columns menu). Source: Master's Program Enrollment
+// Summary (Tableau, ProfessionalAdvancementNetwork), joined by CIM banner code.
+function _enrollmentYears() {
+    const ys = new Set();
+    (allPortfolioPrograms || []).forEach(p => {
+        if (p.enrollment) Object.keys(p.enrollment).forEach(y => ys.add(y));
+    });
+    return [...ys].sort();
+}
+function _ensureEnrollmentColumns() {
+    const have = new Set(PORTFOLIO_COLUMNS.map(c => c.key));
+    _enrollmentYears().forEach(y => {
+        [['total', 'Total'], ['new', 'New']].forEach(([m, label]) => {
+            const key = `enr_${m}_${y}`;
+            if (!have.has(key)) {
+                PORTFOLIO_COLUMNS.push({
+                    key, label: `${label} ${y}`, defaultHidden: true, enroll: {m, y},
+                    help: `${label === 'Total' ? 'Total' : 'New'} master's enrollment for ${y}, `
+                        + `from the Master's Program Enrollment Summary (Tableau), joined by CIM banner code.`,
+                });
+            }
+        });
+    });
+}
+// Numeric enrollment value for a program + enr_ column key, or '' if absent.
+function _enrValue(p, key) {
+    const m = /^enr_(total|new)_(\d{4})$/.exec(key);
+    if (!m || !p.enrollment) return '';
+    const rec = p.enrollment[m[2]];
+    if (!rec) return '';
+    const v = rec[m[1] === 'total' ? 't' : 'n'];
+    return (v === 0 || v) ? v : '';
+}
+
 // Tracks which column keys have ever existed in PORTFOLIO_COLUMNS at the
 // time a user last saved their picker selection. When new columns are added
 // to PORTFOLIO_COLUMNS, they default to visible (rather than being
@@ -6799,6 +6837,8 @@ async function loadPortfolioDashboard() {
         allPortfolioPrograms = pj.programs || [];
         allPortfolioPrograms.forEach(p => {
             p.concentrations = p.concentrations_json ? JSON.parse(p.concentrations_json) : [];
+            try { p.enrollment = p.enrollment_json ? JSON.parse(p.enrollment_json) : null; }
+            catch (e) { p.enrollment = null; }
         });
         await _hydratePortfolioTeamViews(pj);
         portfolioExpandedIds = new Set();
@@ -7377,6 +7417,7 @@ function _syncLayoutButtons() {
 
 function renderPortfolioTable() {
     _syncLayoutButtons();
+    _ensureEnrollmentColumns();   // register dynamic per-year enrollment columns
     if (portfolioLayout === 'matrix') return renderPortfolioMatrix();
     const container = document.getElementById('programs-table-container');
     if (!container) return;
@@ -7443,6 +7484,11 @@ function renderPortfolioTable() {
         if (!portfolioSortKey || portfolioSortKey === 'name') {
             return ((a.college || '').localeCompare(b.college || '') ||
                     (a.program_name || '').localeCompare(b.program_name || '')) * portfolioSortDir;
+        }
+        if (portfolioSortKey.startsWith('enr_')) {
+            const na = parseFloat(_enrValue(a, portfolioSortKey));
+            const nb = parseFloat(_enrValue(b, portfolioSortKey));
+            return ((isNaN(na) ? -Infinity : na) - (isNaN(nb) ? -Infinity : nb)) * portfolioSortDir;
         }
         switch (portfolioSortKey) {
             case 'degree':    av = extractPortfolioDegree(a.program_name); bv = extractPortfolioDegree(b.program_name); break;
@@ -7810,6 +7856,8 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('exitmasters', escapeHtml(p.exit_masters || ''))}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
         ${_pc('emplreview', escapeHtml(p.otp_notes || ''))}
+        ${PORTFOLIO_COLUMNS.filter(c => c.enroll).map(c =>
+            _pc(c.key, escapeHtml(String(isPortfolioConc ? '' : _enrValue(p, c.key))), 'enr-cell')).join('')}
     </tr>`;
 }
 
@@ -7872,7 +7920,9 @@ function exportPortfolioCsv() {
             case 'perfscore2025':   return p.performance_score_2025 != null ? String(p.performance_score_2025) : '';
             case 'notes':       return p.note || '';
             case 'emplreview':  return p.otp_notes || '';
-            default:            return '';
+            default:
+                if (key.startsWith('enr_')) return isConc ? '' : String(_enrValue(p, key));
+                return '';
         }
     }
 

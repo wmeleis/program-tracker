@@ -43,6 +43,7 @@ XLSX_PATH   = os.path.join(_FEEDS_DIR, "portfolio_sharepoint.xlsx")
 TSV_PATH    = os.path.join(_FEEDS_DIR, "portfolio_smartsheet.tsv")
 ROSTER_PATH = os.path.join(_FEEDS_DIR, "portfolio_roster.tsv")
 GLS_PATH    = os.path.join(_FEEDS_DIR, "portfolio_gls.csv")
+ENROLLMENT_PATH = os.path.join(_FEEDS_DIR, "portfolio_enrollment.csv")
 SCORING_2025_PATH = os.path.expanduser(
     "~/committees/nu-docs/Programs/Program review/Program review 2025/"
     "Graduate Program Scoring-Boston-for WM-9-16-25.xlsx"
@@ -710,6 +711,43 @@ _STOP = {'', 'and', 'the', 'of', 'in', 'for', 'a', 'an', 'at', 'to', 'with',
 def _gls_key_words(s):
     """Return a frozenset of meaningful words from a string, for GLS matching."""
     return frozenset(w for w in re.split(r'[\W_]+', s.lower()) if w and w not in _STOP)
+
+
+def parse_enrollment(path=ENROLLMENT_PATH):
+    """Parse the Master's enrollment CSV (Tableau long format) into:
+      by_cc          — {(program_code, campus_norm): {year: {'t':total,'n':new}}}
+      code_campuses  — {program_code: set(campus_norm)}
+    Keeps only the 'Total YYYY' and 'New YYYY' measures (averages / completed
+    apps / plus-one are ignored). Enrollment is keyed by CIM banner code +
+    campus; the overlay in ingest() joins it to portfolio rows by banner_code.
+    """
+    import csv as _csv
+    by_cc = {}
+    code_campuses = {}
+    if not os.path.exists(path):
+        return by_cc, code_campuses
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            for r in _csv.DictReader(f):
+                code = (r.get('Program Code') or '').strip()
+                if not code:
+                    continue
+                m = re.match(r'^(Total|New)\s+(\d{4})$', (r.get('Measure Names') or '').strip())
+                if not m:
+                    continue
+                metric, year = m.group(1), m.group(2)
+                val = (r.get('Measure Values') or '').strip().replace(',', '')
+                try:
+                    num = int(float(val))
+                except ValueError:
+                    continue
+                campus = _normalize_campus((r.get('Campus Name') or '').split(',')[0].strip())
+                by_cc.setdefault((code, campus), {}).setdefault(year, {})[
+                    't' if metric == 'Total' else 'n'] = num
+                code_campuses.setdefault(code, set()).add(campus)
+    except Exception as e:
+        print(f"  Enrollment parse error: {e}")
+    return by_cc, code_campuses
 
 
 def parse_gls(path=GLS_PATH):
@@ -2162,8 +2200,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         'gtm_entered_date': '',
         'cim_eff_term': '',
         'catalog_years': '',
+        'enrollment_json': '',
         'last_refreshed': now,
     }
+
+    # Master's enrollment (Tableau) — keyed by CIM banner code + campus.
+    enr_by_cc, enr_code_campuses = parse_enrollment()
 
     def _make_row(pid, program_name, college, campus, cim_id=None,
                   cim_step='', cim_completion_date='', cim_change_type=''):
@@ -2291,6 +2333,14 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         # program's CIM records so an inactivation and a re-add both register.
         row['catalog_years'] = _catalog_years_label(
             _cim_catalog_events(raw_by_key.get(_seed_dedup_key(name), [r])), _CATALOG_WINDOW)
+        # Master's enrollment overlay: join by banner code + campus. Exact
+        # (code, campus) only — a single banner code is shared across campus
+        # deployments in CIM, so a per-campus feed row must not bleed onto a
+        # sibling deployment (e.g. Bioengineering MSBioE Boston vs Toronto).
+        _bcode = (r['banner_code'] or '').strip()
+        _enr = enr_by_cc.get((_bcode, campus_resolved)) if _bcode else None
+        if _enr:
+            row['enrollment_json'] = json.dumps(_enr, separators=(',', ':'))
         # GTM (enrollment-management) signals — graduate programs only.
         if (r['program_type'] or '') == 'Graduate':
             new_off = r['new_offering'] or ''

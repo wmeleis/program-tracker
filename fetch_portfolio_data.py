@@ -943,6 +943,92 @@ def fetch_gls_tableau():
         _req('POST', signout_url, token=auth_token)
 
 
+def fetch_enrollment_tableau():
+    """Download the Master's Program Enrollment Summary CSV from Tableau.
+
+    Same REST + PAT flow as fetch_gls_tableau(), but signs into the
+    ProfessionalAdvancementNetwork site (the token owner has access to it).
+    Enrollment changes at most termly, so this is rate-limited to once per 7
+    days via data/last_enrollment_fetch. Saves portfolio_enrollment.csv.
+    """
+    import requests as _requests
+
+    print("\n--- Master's Enrollment Tableau CSV ---")
+
+    stamp = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'last_enrollment_fetch')
+    if os.path.exists(stamp):
+        age_d = (time.time() - os.path.getmtime(stamp)) / 86400.0
+        if age_d < 7:
+            print(f"  Skipping (last fetch {age_d:.1f}d ago, < 7d)")
+            return
+
+    pat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'tableau_pat.json')
+    if not os.path.exists(pat_path):
+        print(f"  No credentials file at {pat_path} — skipping")
+        return
+    with open(pat_path) as f:
+        creds = json.load(f)
+
+    server  = creds['server'].rstrip('/')
+    api_ver = '3.24'
+    # This view lives on a different site than the GLS feed's default.
+    site_name = 'ProfessionalAdvancementNetwork'
+    view_url_name = 'MastersProgramEnrollmentSummaryAY2022-2026'
+
+    sess = _requests.Session()
+    sess.headers.update({'Content-Type': 'application/json', 'Accept': 'application/json'})
+
+    def _req(method, url, body=None, token=None, accept=None, timeout=60):
+        if accept:
+            sess.headers['Accept'] = accept
+        if token:
+            sess.headers['X-Tableau-Auth'] = token
+        resp = sess.request(method, url, json=body, timeout=timeout)
+        return resp.status_code, resp.content
+
+    status, raw = _req('POST', f"{server}/api/{api_ver}/auth/signin", body={
+        'credentials': {
+            'personalAccessTokenName': creds['token_name'],
+            'personalAccessTokenSecret': creds['token_secret'],
+            'site': {'contentUrl': site_name},
+        }
+    })
+    if status != 200:
+        print(f"  Tableau sign-in failed (HTTP {status}): {raw[:200]}")
+        _record_feed_health('Enrollment (Tableau)', False, f'sign-in HTTP {status}')
+        return
+    signin_data = json.loads(raw)
+    auth_token = signin_data['credentials']['token']
+    site_id    = signin_data['credentials']['site']['id']
+    print(f"  Signed in to {site_name} (site id={site_id[:8]}…)")
+
+    try:
+        view_url = (f"{server}/api/{api_ver}/sites/{site_id}/views"
+                    f"?filter=viewUrlName:eq:{view_url_name}")
+        status, raw = _req('GET', view_url, token=auth_token)
+        views = json.loads(raw).get('views', {}).get('view', []) if status == 200 else []
+        if not views:
+            print(f"  View '{view_url_name}' not found (HTTP {status}) — skipping")
+            _record_feed_health('Enrollment (Tableau)', False, 'view not found')
+            return
+        view_id = views[0]['id']
+        print(f"  Found view: {views[0].get('name')} (id={view_id[:8]}…)")
+
+        data_url = f"{server}/api/{api_ver}/sites/{site_id}/views/{view_id}/data"
+        status, raw = _req('GET', data_url, token=auth_token, accept='*/*', timeout=120)
+        if status != 200:
+            print(f"  CSV download failed (HTTP {status}): {raw[:200]}")
+            _record_feed_health('Enrollment (Tableau)', False, f'CSV download HTTP {status}')
+            return
+        csv_text = raw.decode('utf-8-sig')
+        out = os.path.join(OUTPUT_DIR, "portfolio_enrollment.csv")
+        if _save_validated('Enrollment (Tableau)', out, csv_text, 'csv'):
+            with open(stamp, 'w') as f:
+                f.write(time.strftime('%Y-%m-%d %H:%M:%S'))
+    finally:
+        _req('POST', f"{server}/api/{api_ver}/auth/signout", token=auth_token)
+
+
 def wait_for_load_by_idx(tab_idx, timeout=30):
     """Wait for readyState == 'complete' on a tab identified by index."""
     deadline = time.time() + timeout
@@ -968,4 +1054,5 @@ if __name__ == "__main__":
     fetch_svt_sheet()         # was fetch_roster_dashboards() — now API-based
     fetch_gtm_sheet()         # Go To Market Roster 2.0
     fetch_gls_tableau()
+    fetch_enrollment_tableau()  # Master's Program Enrollment Summary (weekly)
     print("\nDone.")

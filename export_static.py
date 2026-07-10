@@ -925,6 +925,9 @@ function __staticInit() {
                 p.concentrations = p.concentrations_json
                     ? JSON.parse(p.concentrations_json) : [];
             } catch (e) { p.concentrations = []; }
+            try {
+                p.enrollment = p.enrollment_json ? JSON.parse(p.enrollment_json) : null;
+            } catch (e) { p.enrollment = null; }
         });
         if (typeof portfolioTeamViews !== 'undefined') {
             portfolioTeamViews = D.team_views || [];

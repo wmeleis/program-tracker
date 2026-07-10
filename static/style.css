@@ -2686,3 +2686,6 @@ body.cim-filters-collapsed .kind-filter-section,
 body.cim-filters-collapsed .smart-actions-section,
 body.cim-filters-collapsed section.filters-section,
 body.cim-filters-collapsed #portfolio-filters { display: none !important; }
+
+/* Master's enrollment numeric columns — right-aligned */
+.enr-cell { text-align: right; font-variant-numeric: tabular-nums; }
