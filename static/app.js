@@ -6842,8 +6842,18 @@ function _getPortfolioFilterValues() {
         'portfolio-filter-inworkflow': ['Yes', 'No'],
         'portfolio-filter-inactadmit': [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
             (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0)),
-        'portfolio-filter-catalogyear': [...new Set(programs.flatMap(
-            p => (p.catalog_years || '').split(/,\s*/)).filter(Boolean))].sort(),
+        'portfolio-filter-catalogyear': (() => {
+            const ys = new Set();
+            let anyBlank = false;
+            programs.forEach(p => {
+                const v = (p.catalog_years || '').split(/,\s*/).filter(Boolean);
+                if (v.length) v.forEach(y => ys.add(y));
+                else anyBlank = true;
+            });
+            const out = [...ys].sort();
+            if (anyBlank) out.push('(none)');   // isolate blank (inactivated / out-of-window)
+            return out;
+        })(),
     };
 }
 
@@ -7063,7 +7073,8 @@ function getPortfolioFiltered() {
     if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
     if (portfolioCatalogYearFilter.size) rows = rows.filter(p => {
         const ys = (p.catalog_years || '').split(/,\s*/).filter(Boolean);
-        return [...portfolioCatalogYearFilter].some(y => ys.includes(y));
+        return [...portfolioCatalogYearFilter].some(
+            y => y === '(none)' ? ys.length === 0 : ys.includes(y));
     });
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     // Advanced filter tree (from the Views builder) — ANDed with everything above.
