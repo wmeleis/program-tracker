@@ -662,6 +662,11 @@ const cimMultiFilters = {
     'filter-college': new Set(),
     'filter-campus':  new Set(),
 };
+// Sentinel that matches no real value. A filter set containing only this means
+// "None selected → show nothing" (distinct from an empty set, which means
+// "All → no restriction"). Because every read is `set.size && !set.has(value)`,
+// a set of {sentinel} hides every row with no read-site changes.
+const _FILTER_NONE = '__cim_filter_none__';
 function cimMultiSel(id) { return cimMultiFilters[id] || new Set(); }
 function _cimMultiAllLabel(id) {
     return id === 'filter-college' ? 'All Colleges'
@@ -673,9 +678,10 @@ function _updateCimMultiBtn(id) {
     const set = cimMultiSel(id);
     const wrap = document.getElementById('fmw-' + id);
     const labelFor = id === 'filter-college' ? (v => abbreviateCollege(v)) : (v => v);
-    if (set.size === 0)      { btn.textContent = _cimMultiAllLabel(id) + ' ▾'; if (wrap) wrap.classList.remove('has-value'); }
-    else if (set.size === 1) { btn.textContent = labelFor([...set][0]) + ' ▾'; if (wrap) wrap.classList.add('has-value'); }
-    else                     { btn.textContent = set.size + ' selected ▾';     if (wrap) wrap.classList.add('has-value'); }
+    if (set.size === 0)          { btn.textContent = _cimMultiAllLabel(id) + ' ▾'; if (wrap) wrap.classList.remove('has-value'); }
+    else if (set.has(_FILTER_NONE)) { btn.textContent = 'None ▾';                  if (wrap) wrap.classList.add('has-value'); }
+    else if (set.size === 1)     { btn.textContent = labelFor([...set][0]) + ' ▾'; if (wrap) wrap.classList.add('has-value'); }
+    else                         { btn.textContent = set.size + ' selected ▾';     if (wrap) wrap.classList.add('has-value'); }
 }
 // items: [{value, label, count?}] (pre-sorted). Reflects the current Set state.
 function renderCimMulti(id, items) {
@@ -706,10 +712,14 @@ function _syncCimAllBox(id) {
     if (all) all.checked = cimMultiSel(id).size === 0;
 }
 function toggleCimMultiAll(id) {
-    cimMultiSel(id).clear();
+    // Toggle: All (empty → show everything) ⇄ None ({sentinel} → show nothing).
+    const set = cimMultiSel(id);
+    if (set.size === 0) { set.add(_FILTER_NONE); }   // was All → None
+    else { set.clear(); }                            // None/some → All
     const dd = document.getElementById('fmd-' + id);
     if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.checked = cb.closest('.filter-all-row') != null;   // only "All" stays checked
+        // "All" row checked only in the All (empty) state; all value boxes clear.
+        cb.checked = cb.closest('.filter-all-row') ? (set.size === 0) : false;
     });
     _updateCimMultiBtn(id);
     applyFilters();
@@ -725,6 +735,7 @@ function toggleCimMultiFilter(id, event) {
 }
 function toggleCimMultiValue(id, value, checked) {
     const set = cimMultiSel(id);
+    set.delete(_FILTER_NONE);   // picking a real value leaves the "None" state
     if (checked) set.add(value); else set.delete(value);
     _syncCimAllBox(id);
     _updateCimMultiBtn(id);
@@ -6999,6 +7010,9 @@ function _updateMultiFilterBtn(id, filterSet) {
     if (filterSet.size === 0) {
         btn.textContent = (ALL_LABEL[id] || 'All') + ' ▾';
         if (wrap) wrap.classList.remove('has-value');
+    } else if (filterSet.has(_FILTER_NONE)) {
+        btn.textContent = 'None ▾';
+        if (wrap) wrap.classList.add('has-value');
     } else if (filterSet.size === 1) {
         btn.textContent = labelFor([...filterSet][0]) + ' ▾';
         if (wrap) wrap.classList.add('has-value');
@@ -7130,12 +7144,34 @@ function togglePortfolioMultiFilter(id, e) {
     dd.classList.add('open');
 }
 
+function _portfolioFilterSetMap() {
+    return {
+        'portfolio-filter-college':     portfolioCollegeFilter,
+        'portfolio-filter-campus':      portfolioCampusFilter,
+        'portfolio-filter-otp':         portfolioOtpFilter,
+        'portfolio-filter-ipd':         portfolioIpdFilter,
+        'portfolio-filter-roster':      portfolioRosterFilter,
+        'portfolio-filter-substatus':   portfolioSubStatusFilter,
+        'portfolio-filter-speed':       portfolioSpeedFilter,
+        'portfolio-filter-gls':         portfolioGlsFilter,
+        'portfolio-filter-cim':         portfolioCimFilter,
+        'portfolio-filter-cimchange':   portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow':  portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit':  portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
+    };
+}
 function togglePortfolioMultiAll(id) {
-    if (_portfolioFilterVars[id]) _portfolioFilterVars[id]();   // clears the set + updates the button
+    const filterSetMap = _portfolioFilterSetMap();
+    const set = filterSetMap[id];
+    if (!set) return;
+    // Toggle: All (empty → everything) ⇄ None ({sentinel} → nothing).
+    if (set.size === 0) { set.add(_FILTER_NONE); } else { set.clear(); }
     const dd = document.getElementById('fmd-' + id);
     if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.checked = cb.closest('.filter-all-row') != null;    // only "All" stays checked
+        cb.checked = cb.closest('.filter-all-row') ? (set.size === 0) : false;
     });
+    _updateMultiFilterBtn(id, set);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
     updateClearButtons();
     _portfolioViewTouch();
@@ -7160,6 +7196,7 @@ function togglePortfolioMultiValue(id, value, checked) {
     };
     const filterSet = filterSetMap[id];
     if (!filterSet) return;
+    filterSet.delete(_FILTER_NONE);   // picking a real value leaves the "None" state
     if (checked) filterSet.add(value);
     else filterSet.delete(value);
     const dd = document.getElementById('fmd-' + id);
