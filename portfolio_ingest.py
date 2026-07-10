@@ -1215,6 +1215,45 @@ _COLLEGE_BLOCKLIST = {
     'new york',
 }
 
+# The set of *canonical* college names (the alias map's target values). Used to
+# validate a per-concentration college attribution: we only accept it when it
+# maps to one of these, otherwise it's noise (a fragment, a track label, a
+# "(available only as a second concentration)" note, etc.).
+_CANONICAL_COLLEGES = set(_COLLEGE_ALIASES.values())
+
+
+def _canonical_college_only(raw):
+    """Return the canonical college name for `raw` ONLY if it's a recognized
+    college; otherwise ''. Prevents stray heading/menu text from being stored
+    as a bogus concentration college."""
+    nc = _normalize_college(raw)
+    return nc if nc in _CANONICAL_COLLEGES else ''
+
+
+def _split_conc_college(text):
+    """Split a concentration heading/anchor into (clean_name, college).
+
+    UIP interdisciplinary programs attribute each concentration to a managing
+    college after an em/en-dash or a spaced hyphen, e.g.
+      "Human-AI Collaboration Systems - College of Engineering"
+      "Marketing—D'Amore-McKim School of Business"
+    We split on the LAST such separator whose trailing text is a *recognized*
+    college (so internal hyphens like "Human-AI" and non-college trailers are
+    left alone), returning the college and the name with the attribution
+    stripped. College names need not contain the word "College" (handles
+    D'Amore-McKim, School of Law, Office of the Provost)."""
+    college = ''
+    cut = None
+    for m in re.finditer(r'\s*[—–]\s*|\s+-\s+', text):
+        col = _canonical_college_only(text[m.end():].strip())
+        if col:
+            college = col
+            cut = m.start()
+    if cut is not None:
+        text = text[:cut]
+    text = text.rstrip(' *†—–-').strip()
+    return text, college
+
 
 # ---------------------------------------------------------------------------
 # Inactivation-of-Admission helpers
@@ -1523,11 +1562,7 @@ def _extract_concentrations_from_html(html):
         # from the heading so the displayed name is just the concentration
         # topic. CIM authors are inconsistent: some use em-dashes, some use
         # plain hyphens.
-        conc_college = ''
-        m_col = re.search(r'\s*(?:[—]|\s-)\s*(.*\bCollege\b.*)$', h)
-        if m_col:
-            conc_college = _normalize_college(m_col.group(1).strip())
-            h = h[:m_col.start()].strip()
+        h, conc_college = _split_conc_college(h)
         h = re.sub(r'\s*\([Oo]ptional\)$', '', h).strip()
         h = re.sub(r'\s*\([Rr]equired\)$', '', h).strip()
         h = h.rstrip('*† ').strip()
@@ -1598,12 +1633,16 @@ def _extract_concentrations_from_html(html):
             trailing = re.sub(r'<[^>]+>', '', am.group(2)).replace('\xa0', ' ')
             trailing = re.sub(r'\s+', ' ', trailing).strip()
             trailing = re.sub(r'^[\s—–-]+', '', trailing).strip()  # drop leading dash/em-dash
+            # College may sit in the trailing text (after </a>) or be embedded in
+            # the anchor text itself ("Marketing—D'Amore-McKim School of Business").
+            name, name_college = _split_conc_college(name)
+            college = _canonical_college_only(trailing) or name_college
             if not name or name.lower() in seen or name.lower() in _anchor_skip:
                 continue
             if name.lower().endswith('options'):
                 continue
             seen.add(name.lower())
-            results.append({'name': name, 'college': _normalize_college(trailing)})
+            results.append({'name': name, 'college': college})
     return results
 
 
@@ -1627,6 +1666,9 @@ def _normalize_college(college):
         return ''.join(ch for ch in unicodedata.normalize('NFD', s)
                        if unicodedata.category(ch) != 'Mn')
     key = _no_diacritics(c).lower()
+    # Normalize curly apostrophes/quotes to straight so CIM's "D’Amore-McKim"
+    # (U+2019) matches the straight-apostrophe alias keys.
+    key = key.replace('’', "'").replace('‘', "'")
     if key in _COLLEGE_BLOCKLIST:
         return ''
     # Try direct match first, then a punctuation-stripped variant so
