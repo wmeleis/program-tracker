@@ -7167,7 +7167,7 @@ function _matrixConcCell(info) {
     if (!info) return '<td class="mx-cell mx-empty"></td>';
     const badge = info.status === 'new'
         ? '<span class="conc-status conc-workflow">In workflow</span>'
-        : '<span class="conc-status conc-existing">Existing</span>';
+        : '';
     const svt = info.svt_status ? `<span class="mx-sub">${escapeHtml(info.svt_status)}</span>` : '';
     return `<td class="mx-cell mx-present">${badge}${svt}</td>`;
 }
@@ -7618,9 +7618,7 @@ function renderPortfolioConcRow(name, search, college, parentCollege, parentCamp
     // "In workflow" (added in the current proposal), with the SVT development
     // status appended when we have one for this concentration.
     let badge = '';
-    if (status === 'existing') {
-        badge = ' <span class="conc-status conc-existing">Existing</span>';
-    } else if (status === 'new') {
+    if (status === 'new') {
         const svt = svtStatus ? ` · SVT: ${escapeHtml(svtStatus)}` : '';
         badge = ` <span class="conc-status conc-workflow">In workflow${svt}</span>`;
     } else if (svtStatus) {
