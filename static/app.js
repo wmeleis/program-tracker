@@ -5319,7 +5319,7 @@ const PORTFOLIO_COLUMNS = [
     {key: 'cimchange',    label: 'CIM Change',
         help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
     {key: 'ciminact',     label: 'Inactivation in Progress',
-        help: 'Inactivation in progress: the program’s current CIM proposal is an inactivation still moving through the CIM workflow (not yet completed).'},
+        help: 'Inactivation in progress: the program has a CIM inactivation and isn’t fully wound down — still moving through the CIM workflow (including teach-out) or still admitting students.'},
     {key: 'inworkflow',   label: 'In CIM',
         help: 'Yes if the program exists in CourseLeaf CIM at all — either active in workflow, or already approved/historical. No if the portfolio entry comes only from an external feed (SVT, IPD, OTP) with no CIM record.'},
     {key: 'inactadmit',  label: 'Inactivation of Admission',
@@ -6074,7 +6074,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
     {key: 'otp',         label: 'OTP Status',       type: 'select', value: p => p.otp_status || ''},
     {key: 'cim_inact',   label: 'Inactivation in Progress', type: 'boolean', value: p => _cimInactivating(p) ? 'Y' : 'N',
-        help: 'Yes when the program’s current CIM proposal is an inactivation still moving through the CIM workflow (not yet completed).'},
+        help: 'Yes when the program has a CIM inactivation and isn’t fully wound down — still moving through the CIM workflow (including teach-out) or still admitting students.'},
     {key: 'inact_admit', label: 'Inactivation of Admission', type: 'select', value: p => p.inactivation_admission || ''},
     {key: 'admit_today', label: 'Admitting Today',  type: 'boolean', value: p => { const v = _inactAdmittingToday(p); return v === 'Yes' ? 'Y' : v === 'No' ? 'N' : ''; }},
     {key: 'offering',    label: 'New Offering',     type: 'select', value: p => portfolioOfferingLabel(p)},
@@ -6802,14 +6802,16 @@ function _semesterToDate(s) {
     return new Date(year, month, 1);
 }
 
-// Returns 'Yes' if the program is still admitting today, 'No' if admission has closed,
-// or '' if there is no inactivation admission date.
-// CIM says a program's inactivation is *in progress* when its current proposal
-// is an Inactivation and it's still moving through the CIM workflow (a step is
-// set = not yet completed). Authoritative and all-levels, unlike the graduate-
-// only gtm_inactivation or the often-blank OTP/SVT flags.
+// A program's inactivation is *in progress* when its current CIM proposal is an
+// Inactivation and the program is not fully wound down yet — still moving
+// through the CIM workflow (including Program Teach-Out) OR still admitting
+// students (inactivation approved but admissions not yet ended). All-levels.
 function _cimInactivating(p) {
-    return p.cim_change_type === 'Inactivation' && !!p.cim_step;
+    if (p.cim_change_type !== 'Inactivation') return false;
+    // In progress = the program has a CIM inactivation and is not fully wound
+    // down: still moving through the workflow (including Program Teach-Out) OR
+    // the inactivation is approved but the program is still admitting students.
+    return !!p.cim_step || _inactAdmittingToday(p) === 'Yes';
 }
 
 function _inactAdmittingToday(p) {
@@ -7888,7 +7890,10 @@ function renderPortfolioTable() {
             // twice; the survivors are SVT/IPD-only (in development, not yet
             // in the catalog).
             portfolioConcs
-                .filter(c => !curriculumConcKeys.has(_concNorm(c.program_name || '')))
+                // Suppress a linked "X with Concentration in Y" sub-row when a
+                // curriculum concentration for Y is already shown — compare the
+                // extracted topic, not the full linked name.
+                .filter(c => !curriculumConcKeys.has(_concNorm(_shortConcName(c.program_name || ''))))
                 .forEach(c => rowHtml.push(renderPortfolioRow(
                     c, {isPortfolioConc: true, parent: p})));
         }
@@ -7939,6 +7944,25 @@ function renderPortfolioTable() {
 function _concNorm(s) {
     s = (s || '').toLowerCase().replace(/\bconcentrations?\b/g, '').replace(/\bsystems?\b/g, '');
     return s.replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// Extract the concentration topic from a linked sub-row's full program name
+// ("Robotics with Concentration in Computer Science, MS" → "Computer Science").
+// Module-level so both the row display and the curriculum-vs-linked de-dup use
+// the same extraction. Falls back to the full name when no pattern matches.
+function _shortConcName(full) {
+    const n = (full || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    let m;
+    // ORDER MATTERS — specific patterns before the generic one.
+    m = n.match(/^.+?,\s*concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    m = n.match(/^.+?\s+with\s+Concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    m = n.match(/^.+?\s*[-—]\s*(.+?)\s+Concentration,?\s+[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    return n;
 }
 
 function renderPortfolioConcRow(name, search, college, parentCollege, parentCampus, status, svtStatus) {
@@ -8062,32 +8086,7 @@ function renderPortfolioRow(p, opts = {}) {
         : ' class="program-name-cell"';
 
     // For nested concentration sub-rows, prefer a short display name that
-    // shows just the concentration topic (not the parent program's name).
-    // Falls back to the full program name when no pattern matches.
-    function _shortConcName(full) {
-        const n = (full || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
-        let m;
-        // ORDER MATTERS — more specific patterns must come before generic
-        // "X Y Concentration" because the latter is greedy enough to match
-        // (and mis-capture) the former. See "Robotics with Concentration
-        // in Mechanical Engineering, MS" where the generic pattern would
-        // grab "with" as the capture group.
-        // "X, concentration in Y, DEG"  →  "Y"
-        m = n.match(/^.+?,\s*concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        // "X with Concentration in Y, DEG"  →  "Y"
-        m = n.match(/^.+?\s+with\s+Concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        // "X - Y Concentration, DEG"  →  "Y"
-        m = n.match(/^.+?\s*[-—]\s*(.+?)\s+Concentration,?\s+[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        // Generic fallback: "X CONCENTRATION_NAME Concentration ..., DEG"
-        //   →  "CONCENTRATION_NAME"
-        // e.g. "Bioengineering Biomedical Devices and Bioimaging Concentration Bridge Program, MS"
-        m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        return n;
-    }
+    // shows just the concentration topic (via the module-level _shortConcName).
     const displayName = isPortfolioConc
         ? _shortConcName(p.program_name)
         : normalizePortfolioName(stripCampusFromName(p.program_name));
