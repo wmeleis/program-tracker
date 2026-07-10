@@ -818,9 +818,9 @@ _BANNER_NONDEGREE_RE = re.compile(
     r'|special learning|performance-based admission|professional education'
     r'|double degree|medical school prep|teacher in context|\bfoundation\b'
     r'|\bspecial\b.*\b(gr|ug|student|prg|prof)\b', re.I)
-# Banner codes to skip outright: non-degree (ND…), special (SPEC…), and the
-# "-DE" distance-education duplicate rows.
-_BANNER_SKIP_CODE_RE = re.compile(r'-DE$|^(?:P-)?ND-|^(?:P-)?ND$|^(?:P-)?SPEC-', re.I)
+# Banner codes to skip outright: CPS "P-" programs (ignored per decision),
+# non-degree (ND…), special (SPEC…), and "-DE" distance-education duplicates.
+_BANNER_SKIP_CODE_RE = re.compile(r'^P-|-DE$|^ND-|^ND$|^SPEC-', re.I)
 
 
 def parse_banner_programs(path=BANNER_PMC_PATH):
@@ -2580,7 +2580,17 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         subject, degree, campus = _parse_cim_name(name)
         campus_resolved = _normalize_campus(campus) if campus else 'Boston'
         change_type = _STATUS_LABEL.get(r['status'] or '', r['status'] or '')
-        cim_meta[r['id']] = {'banner_code': (r['banner_code'] or '').strip(),
+        # banner_code for downstream joins (enrollment, Banner concentration/
+        # reconciliation): the deduped winner may lack a banner_code (e.g. a bare
+        # "…, MS" record) while a merged sibling carries it (…(Boston) = MS-CGTH).
+        # Take the winner's code, else any non-empty code from the dedup group.
+        _grp_bcode = (r['banner_code'] or '').strip()
+        if not _grp_bcode:
+            for _gr in raw_by_key.get(_seed_dedup_key(name), [r]):
+                if (_gr['banner_code'] or '').strip():
+                    _grp_bcode = _gr['banner_code'].strip()
+                    break
+        cim_meta[r['id']] = {'banner_code': _grp_bcode,
                              'subject': subject, 'degree': degree}
 
         pid = f"cim_{r['id']}"
@@ -2612,7 +2622,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         # (code, campus) only — a single banner code is shared across campus
         # deployments in CIM, so a per-campus feed row must not bleed onto a
         # sibling deployment (e.g. Bioengineering MSBioE Boston vs Toronto).
-        _bcode = (r['banner_code'] or '').strip()
+        # Uses the dedup-group banner_code so a bare winner still joins.
+        _bcode = _grp_bcode
         _enr = enr_by_cc.get((_bcode, campus_resolved)) if _bcode else None
         if _enr:
             row['enrollment_json'] = json.dumps(_enr, separators=(',', ':'))

@@ -5361,13 +5361,15 @@ function _enrollmentYears() {
 }
 function _ensureEnrollmentColumns() {
     const have = new Set(PORTFOLIO_COLUMNS.map(c => c.key));
-    _enrollmentYears().forEach(y => {
-        [['total', 'Total'], ['new', 'New']].forEach(([m, label]) => {
+    const years = _enrollmentYears();
+    // All "New {year}" columns first, then all "Total {year}" columns.
+    [['new', 'New'], ['total', 'Total']].forEach(([m, label]) => {
+        years.forEach(y => {
             const key = `enr_${m}_${y}`;
             if (!have.has(key)) {
                 PORTFOLIO_COLUMNS.push({
                     key, label: `${label} ${y}`, defaultHidden: true, enroll: {m, y},
-                    help: `${label === 'Total' ? 'Total' : 'New'} master's enrollment for ${y}, `
+                    help: `${label} master's enrollment for ${y}, `
                         + `from the Master's Program Enrollment Summary (Tableau), joined by CIM banner code.`,
                 });
             }
