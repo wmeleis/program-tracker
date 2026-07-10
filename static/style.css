@@ -2689,3 +2689,6 @@ body.cim-filters-collapsed #portfolio-filters { display: none !important; }
 
 /* Master's enrollment numeric columns — right-aligned */
 .enr-cell { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* "All" row at the top of multi-select filter dropdowns */
+.filter-multi-dropdown .filter-all-row { border-bottom: 1px solid #e5e7eb; margin-bottom: 2px; padding-bottom: 4px; font-weight: 500; }

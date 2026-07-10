@@ -683,13 +683,37 @@ function renderCimMulti(id, items) {
     if (!dd) { _updateCimMultiBtn(id); return; }
     const set = cimMultiSel(id);
     const _attr = s => String(s).replace(/"/g, '&quot;');
-    dd.innerHTML = items.map(it => `
+    // Leading "All" row: checked when nothing is selected; clicking it clears
+    // the selection (= show all). Mirrors the old single-select's "All …" option.
+    const allRow = `
+        <label class="portfolio-col-check filter-all-row">
+            <input type="checkbox" ${set.size === 0 ? 'checked' : ''}
+                   onchange="toggleCimMultiAll(${_attr(JSON.stringify(id))})">
+            ${escapeHtml(_cimMultiAllLabel(id))}
+        </label>`;
+    dd.innerHTML = allRow + items.map(it => `
         <label class="portfolio-col-check">
             <input type="checkbox" ${set.has(it.value) ? 'checked' : ''}
                    onchange="toggleCimMultiValue(${_attr(JSON.stringify(id))}, ${_attr(JSON.stringify(it.value))}, this.checked)">
             ${escapeHtml(it.label)}${it.count != null ? ` (${it.count})` : ''}
         </label>`).join('');
     _updateCimMultiBtn(id);
+}
+// Keep the leading "All" checkbox in sync (checked ⇔ nothing selected).
+function _syncCimAllBox(id) {
+    const dd = document.getElementById('fmd-' + id);
+    const all = dd && dd.querySelector('.filter-all-row input');
+    if (all) all.checked = cimMultiSel(id).size === 0;
+}
+function toggleCimMultiAll(id) {
+    cimMultiSel(id).clear();
+    const dd = document.getElementById('fmd-' + id);
+    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = cb.closest('.filter-all-row') != null;   // only "All" stays checked
+    });
+    _updateCimMultiBtn(id);
+    applyFilters();
+    updateClearButtons();
 }
 function toggleCimMultiFilter(id, event) {
     if (event) event.stopPropagation();
@@ -702,6 +726,7 @@ function toggleCimMultiFilter(id, event) {
 function toggleCimMultiValue(id, value, checked) {
     const set = cimMultiSel(id);
     if (checked) set.add(value); else set.delete(value);
+    _syncCimAllBox(id);
     _updateCimMultiBtn(id);
     applyFilters();
     updateClearButtons();
@@ -709,6 +734,7 @@ function toggleCimMultiValue(id, value, checked) {
 if (typeof window !== 'undefined') {
     window.toggleCimMultiFilter = toggleCimMultiFilter;
     window.toggleCimMultiValue = toggleCimMultiValue;
+    window.toggleCimMultiAll = toggleCimMultiAll;
 }
 
 // The main tracked pipeline steps (canonical display stages)
@@ -7087,13 +7113,33 @@ function togglePortfolioMultiFilter(id, e) {
     // _attr() escapes " → &quot; for HTML attribute context; the browser
     // decodes the entity back to " before evaluating the handler at click time.
     const _attr = s => s.replace(/"/g, '&quot;');
-    dd.innerHTML = display.map(v => `
+    // Leading "All" row: checked when nothing is selected; clicking it clears
+    // the selection (= show all).
+    const allRow = `
+        <label class="portfolio-col-check filter-all-row">
+            <input type="checkbox" ${(!filterSet || filterSet.size === 0) ? 'checked' : ''}
+                   onchange="togglePortfolioMultiAll(${_attr(JSON.stringify(id))})">
+            All
+        </label>`;
+    dd.innerHTML = allRow + display.map(v => `
         <label class="portfolio-col-check">
             <input type="checkbox" ${filterSet && filterSet.has(v) ? 'checked' : ''}
                    onchange="togglePortfolioMultiValue(${_attr(JSON.stringify(id))}, ${_attr(JSON.stringify(v))}, this.checked)">
             ${escapeHtml(labelFor(v))}
         </label>`).join('');
     dd.classList.add('open');
+}
+
+function togglePortfolioMultiAll(id) {
+    if (_portfolioFilterVars[id]) _portfolioFilterVars[id]();   // clears the set + updates the button
+    const dd = document.getElementById('fmd-' + id);
+    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = cb.closest('.filter-all-row') != null;    // only "All" stays checked
+    });
+    if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
+    updateClearButtons();
+    _portfolioViewTouch();
+    renderPortfolioTable();
 }
 
 function togglePortfolioMultiValue(id, value, checked) {
@@ -7116,6 +7162,9 @@ function togglePortfolioMultiValue(id, value, checked) {
     if (!filterSet) return;
     if (checked) filterSet.add(value);
     else filterSet.delete(value);
+    const dd = document.getElementById('fmd-' + id);
+    const allBox = dd && dd.querySelector('.filter-all-row input');
+    if (allBox) allBox.checked = filterSet.size === 0;
     _updateMultiFilterBtn(id, filterSet);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
     updateClearButtons();
