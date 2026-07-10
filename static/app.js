@@ -7493,9 +7493,7 @@ function _matrixProgramCell(p) {
 // One concentration cell for a given campus deployment.
 function _matrixConcCell(info) {
     if (!info) return '<td class="mx-cell mx-empty"></td>';
-    const badge = info.status === 'new'
-        ? '<span class="conc-status conc-workflow">In workflow</span>'
-        : '';
+    const badge = '';   // no "In workflow" label — rely on row colors
     const svt = info.svt_status ? `<span class="mx-sub">${escapeHtml(info.svt_status)}</span>` : '';
     return `<td class="mx-cell mx-present">${badge}${svt}</td>`;
 }
@@ -7991,16 +7989,11 @@ function renderPortfolioConcRow(name, search, college, parentCollege, parentCamp
             return '<td>—</td>';
         })
         .join('');
-    // Status badge: "Existing" (in the last-approved curriculum) vs
-    // "In workflow" (added in the current proposal), with the SVT development
-    // status appended when we have one for this concentration.
-    let badge = '';
-    if (status === 'new') {
-        const svt = svtStatus ? ` · SVT: ${escapeHtml(svtStatus)}` : '';
-        badge = ` <span class="conc-status conc-workflow">In workflow${svt}</span>`;
-    } else if (svtStatus) {
-        badge = ` <span class="conc-status conc-workflow">SVT: ${escapeHtml(svtStatus)}</span>`;
-    }
+    // No "In workflow" status badge — the row colors convey proposal status.
+    // Keep only the SVT development status when we have one for this concentration.
+    let badge = svtStatus
+        ? ` <span class="conc-status conc-workflow">SVT: ${escapeHtml(svtStatus)}</span>`
+        : '';
     return `<tr class="portfolio-row portfolio-curriculum-conc-row">
         <td class="program-name-cell">${hl}${badge}</td>
         ${cellHtml}
