@@ -71,6 +71,14 @@ EXIT_MASTERS_BANNERS = {
     'MS-CDSC',   # Cross-Disciplinary Science, MS — exit-master's only
 }
 
+# Exit-master's programs that have NO banner code (or are campus-specific), so
+# they can't be flagged via the banner set — matched by exact CIM program name.
+EXIT_MASTERS_PROGRAM_NAMES = {
+    'Bioengineering, MSBioE (Portland)',
+    'Electrical and Computer Engineering with Concentration in Hardware and Software for Machine Intelligence, MSECE (Oakland)',
+    'Electrical and Computer Engineering with Concentration in Microsystems, Materials, and Devices, MSECE (Oakland)',
+}
+
 
 # ---------------------------------------------------------------------------
 # Catalog-year membership (derived from CIM, not from scraping the catalog)
@@ -3978,12 +3986,14 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         pass
     n_exit = 0
     for r in tracker.values():
-        is_exit = r.get('cim_program_id') in exit_pids
+        is_exit = (r.get('cim_program_id') in exit_pids
+                   or r.get('program_name') in EXIT_MASTERS_PROGRAM_NAMES)
         r['exit_masters'] = 'Yes' if is_exit else 'No'
         if is_exit:
             n_exit += 1
     print(f"  Exit master's: {n_exit} programs flagged Yes "
-          f"({len(EXIT_MASTERS_BANNERS)} banner codes, {len(exit_pids)} matched in CIM)")
+          f"({len(EXIT_MASTERS_BANNERS)} banner codes + {len(EXIT_MASTERS_PROGRAM_NAMES)} names, "
+          f"{len(exit_pids)} matched in CIM)")
 
     # ── Write portfolio_programs ──────────────────────────────────────────────
     rows = list(tracker.values())

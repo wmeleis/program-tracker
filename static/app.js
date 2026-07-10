@@ -5819,6 +5819,7 @@ function _snapshotPortfolioFilters() {
         catalogyear:[...portfolioCatalogYearFilter],
         inacttoday: portfolioInactTodayFilter,
         inactprogress: portfolioInactProgressFilter,
+        exitmasters: portfolioExitMastersFilter,
         search:     portfolioSearch,
     };
 }
@@ -5849,6 +5850,7 @@ function _applyPortfolioFilters(f) {
     portfolioCatalogYearFilter = new Set(f.catalogyear || []);
     portfolioInactTodayFilter = f.inacttoday || '';
     portfolioInactProgressFilter = f.inactprogress || '';
+    portfolioExitMastersFilter = f.exitmasters || '';
     portfolioSearch           = f.search    || '';
     // Sync all UI controls to the restored state
     _syncPortfolioFilterUi();
@@ -5886,6 +5888,8 @@ function _syncPortfolioFilterUi() {
     if (itSel) itSel.value = portfolioInactTodayFilter;
     const ipSel = document.getElementById('portfolio-filter-inactprogress');
     if (ipSel) ipSel.value = portfolioInactProgressFilter;
+    const emSel = document.getElementById('portfolio-filter-exitmasters');
+    if (emSel) emSel.value = portfolioExitMastersFilter;
     // Search box
     const sb = document.getElementById('filter-search');
     if (sb && currentView === 'portfolio') sb.value = portfolioSearch;
@@ -6786,6 +6790,7 @@ if (typeof window !== 'undefined') {
 let portfolioInactAdmitFilter = new Set();
 let portfolioInactTodayFilter = '';
 let portfolioInactProgressFilter = '';   // '' | 'Yes' | 'No' — CIM inactivation in progress
+let portfolioExitMastersFilter = '';     // '' | 'Yes' | 'No' — exit-master's-only
 
 // "Fall 2026" → Date object for Sep 1 of that year (approximate start of Fall semester).
 function _semesterToDate(s) {
@@ -7184,6 +7189,7 @@ const _portfolioFilterVars = {
     'portfolio-filter-catalogyear': () => { portfolioCatalogYearFilter.clear(); _updateMultiFilterBtn('portfolio-filter-catalogyear', portfolioCatalogYearFilter); },
     'portfolio-filter-inacttoday': () => { portfolioInactTodayFilter = ''; },
     'portfolio-filter-inactprogress': () => { portfolioInactProgressFilter = ''; },
+    'portfolio-filter-exitmasters': () => { portfolioExitMastersFilter = ''; },
 };
 
 function clearPortfolioFilter(id) {
@@ -7356,6 +7362,7 @@ function getPortfolioFiltered() {
     });
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     if (portfolioInactProgressFilter)   rows = rows.filter(p => (_cimInactivating(p) ? 'Yes' : 'No') === portfolioInactProgressFilter);
+    if (portfolioExitMastersFilter)     rows = rows.filter(p => (p.exit_masters === 'Yes' ? 'Yes' : 'No') === portfolioExitMastersFilter);
     // Advanced filter tree (from the Views builder) — ANDed with everything above.
     if (portfolioFilterTree && (portfolioFilterTree.children || []).length)
         rows = rows.filter(p => evalPortfolioNode(p, portfolioFilterTree));
@@ -7777,7 +7784,7 @@ function renderPortfolioTable() {
         portfolioGlsFilter.size || portfolioCimFilter.size ||
         portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
         portfolioInactAdmitFilter.size || portfolioCatalogYearFilter.size ||
-        portfolioInactTodayFilter || portfolioInactProgressFilter || portfolioSearch;
+        portfolioInactTodayFilter || portfolioInactProgressFilter || portfolioExitMastersFilter || portfolioSearch;
 
     // Determine which programs should be auto-expanded (search matches a
     // curriculum concentration OR a linked concentration sub-row).
