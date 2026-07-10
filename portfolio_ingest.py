@@ -807,6 +807,161 @@ def parse_banner_pmc(path=BANNER_PMC_PATH):
     return by_code, by_sd
 
 
+# Banner program names / codes that are NOT trackable academic programs — the
+# same administrative buckets last week's manual reconciliation stripped:
+# minors, non-degree, undeclared/provisional, exchange/NUin/scholars/pathway/
+# special-student/transitional records, and general-studies catch-alls.
+_BANNER_NONDEGREE_RE = re.compile(
+    r'\bundeclar|\bundecid|\bprovisional\b|non-degree|\bindep|independent stud'
+    r'|\bminor\b|\bgnrl studies\b|general studies|\bexchange\b|\bnuin\b|\bscholars?\b'
+    r'|\btransitional\b|global pathway|pre[-\s]?college|\bimmerse\b|special student'
+    r'|special learning|performance-based admission|professional education'
+    r'|double degree|medical school prep|teacher in context|\bfoundation\b'
+    r'|\bspecial\b.*\b(gr|ug|student|prg|prof)\b', re.I)
+# Banner codes to skip outright: non-degree (ND…), special (SPEC…), and the
+# "-DE" distance-education duplicate rows.
+_BANNER_SKIP_CODE_RE = re.compile(r'-DE$|^(?:P-)?ND-|^(?:P-)?ND$|^(?:P-)?SPEC-', re.I)
+
+
+def parse_banner_programs(path=BANNER_PMC_PATH):
+    """Program-level view of the Banner PMC feed for reconciliation.
+    Returns (progs, by_sd):
+      progs : Program Code → {code, name, major, degree, statuses, campuses,
+                              active_campuses}  (active = Active/Future Active)
+      by_sd : (norm_subject, norm_degree) → set(Program Code)
+    Excludes combined/dual majors (Combined Major Ind.=Y) and non-degree /
+    undeclared / provisional records (per project decision)."""
+    import csv as _csv
+    progs, by_sd = {}, {}
+    if not os.path.exists(path):
+        return progs, by_sd
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            for r in _csv.DictReader(f):
+                if (r.get('Combined Major Ind.') or '').strip().upper() == 'Y':
+                    continue
+                code = (r.get('Program Code') or '').strip()
+                if not code or code == 'All' or _BANNER_SKIP_CODE_RE.search(code):
+                    continue
+                pname = (r.get('Program') or '').strip()
+                if _BANNER_NONDEGREE_RE.search(pname) or '/' in pname:
+                    continue   # non-degree/pathway or dual-major ("A/B") shorthand
+                status = (r.get('Status') or '').strip()
+                campus = _normalize_campus((r.get('Campus') or '').split(',')[0].strip())
+                major = _norm(r.get('Major') or '')
+                deg = _norm(_norm_degree(code.split('-')[0]))
+                p = progs.get(code)
+                if not p:
+                    p = progs[code] = {'code': code, 'name': pname, 'major': major,
+                                       'degree': deg, 'statuses': set(),
+                                       'campuses': set(), 'active_campuses': set()}
+                p['statuses'].add(status)
+                if campus:
+                    p['campuses'].add(campus)
+                    if status in ('Active', 'Future Active'):
+                        p['active_campuses'].add(campus)
+                if major and deg:
+                    by_sd.setdefault((major, deg), set()).add(code)
+    except Exception as e:
+        print(f"  Banner programs parse error: {e}")
+    return progs, by_sd
+
+
+def _reconcile_banner_portfolio(tracker, cim_meta):
+    """Program-level Banner ↔ portfolio reconciliation (data-quality queue).
+    Banner and the portfolio are meant to be in sync; this surfaces every
+    substantive difference. Returns four lists:
+      missing_in_portfolio : Banner-active programs with no portfolio match
+      missing_in_banner    : should-be-live portfolio programs absent from Banner
+      code_mismatch        : CIM banner_code ≠ Banner Program Code
+      campus_diff          : program's campus footprint differs
+    Excludes (per project decisions): combined/dual majors, non-degree/
+    undeclared/provisional, in-workflow proposals, and inactivations."""
+    progs, by_sd = parse_banner_programs()
+    if not progs:
+        return {}
+
+    # Portfolio program groups (CIM-seeded only), keyed by banner_code if present
+    # else (subject, degree). Collect campuses + lifecycle flags.
+    port = {}
+    for row in tracker.values():
+        cimid = row.get('cim_program_id')
+        if not cimid:
+            continue                      # external (SVT-added) rows are not Banner programs
+        meta = cim_meta.get(cimid, {})
+        bcode = (meta.get('banner_code') or '').strip()
+        subj = _norm(meta.get('subject') or '')
+        deg = _norm(_norm_degree(meta.get('degree') or ''))
+        # Skip minors and combined/dual majors on the CIM side too — Banner
+        # excludes them, so they'd otherwise show as false "missing in Banner".
+        nm = row.get('program_name', '')
+        if deg == 'minor' or re.search(r'\bminor\b', nm, re.I):
+            continue
+        if re.search(r'\S+\s+and\s+\S+.*,\s*(?:BA|BS|BACS|BSBA|BSCS)\b', nm):
+            continue                      # combined/dual major (ignored per decision)
+        key = ('c', bcode) if bcode else ('s', subj, deg)
+        g = port.get(key)
+        if not g:
+            g = port[key] = {'name': nm, 'bcode': bcode,
+                             'subj': subj, 'deg': deg, 'campuses': set(),
+                             'wf': False, 'inact': False, 'completed': False}
+        if row.get('campus'):
+            g['campuses'].add(_normalize_campus(row['campus']))
+        if row.get('cim_step'):
+            g['wf'] = True
+        if row.get('cim_change_type') == 'Inactivation':
+            g['inact'] = True
+        if row.get('cim_completion_date') and not row.get('cim_step'):
+            g['completed'] = True
+
+    def banner_codes_for(g):
+        if g['bcode'] and g['bcode'] in progs:
+            return {g['bcode']}
+        return set(by_sd.get((g['subj'], g['deg']), set()))
+
+    matched_codes = set()
+    missing_in_banner, code_mismatch, campus_diff = [], [], []
+    for g in port.values():
+        codes = banner_codes_for(g)
+        matched_codes |= codes
+        should_be_live = not g['wf'] and not g['inact']
+        if not codes:
+            # "Missing in Banner" excludes in-workflow proposals, inactivations,
+            # AND completed-history (per project decision) — leaving only
+            # currently-offered programs that Banner should have but doesn't.
+            if should_be_live and not g['completed']:
+                missing_in_banner.append({'program': g['name'], 'banner_code': g['bcode'] or '—'})
+            continue
+        if g['bcode'] and g['bcode'] not in progs:      # code differs from Banner
+            code_mismatch.append({'program': g['name'], 'cim_code': g['bcode'],
+                                  'banner_code': ', '.join(sorted(codes))})
+        if should_be_live and g['bcode'] in progs:      # campus footprint (code-matched only)
+            bcamp = set()
+            for c in codes:
+                bcamp |= progs[c]['active_campuses']
+            only_p = sorted(g['campuses'] - bcamp)
+            only_b = sorted(bcamp - g['campuses'])
+            if only_p or only_b:
+                campus_diff.append({'program': g['name'], 'banner_code': g['bcode'],
+                                    'only_portfolio': only_p, 'only_banner': only_b})
+
+    # A program the portfolio already has under a *different* code is a code
+    # variant (surfaced in code_mismatch), not truly missing — skip those here.
+    port_sd = {(g['subj'], g['deg']) for g in port.values() if g['subj'] and g['deg']}
+    missing_in_portfolio = []
+    for code, p in progs.items():
+        is_active = bool(p['active_campuses']) or (p['statuses'] & {'Active', 'Future Active'})
+        if is_active and code not in matched_codes and (p['major'], p['degree']) not in port_sd:
+            missing_in_portfolio.append({'banner_code': code, 'name': p['name']})
+
+    return {
+        'missing_in_portfolio': sorted(missing_in_portfolio, key=lambda x: x['name']),
+        'missing_in_banner':    sorted(missing_in_banner, key=lambda x: x['program']),
+        'code_mismatch':        sorted(code_mismatch, key=lambda x: x['program']),
+        'campus_diff':          sorted(campus_diff, key=lambda x: x['program']),
+    }
+
+
 def _banner_concs_for(meta, by_code, by_sd):
     """Return Banner concentration entries for a program, matched by banner_code
     first, then by (subject, degree). `meta` = {banner_code, subject, degree}."""
@@ -3866,6 +4021,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             'gls_mismatches': _gm,
             'concentration_college_discrepancies':
                 sorted(conc_college_discrepancies, key=lambda x: x['program']),
+            'banner_reconciliation': _reconcile_banner_portfolio(tracker, cim_meta),
         }
         with open(_mismatch_file, 'w') as _f:
             json.dump(_mismatch_data, _f, indent=2)

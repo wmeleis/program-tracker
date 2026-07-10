@@ -5042,6 +5042,46 @@ function renderConsoleContent(data) {
         html += '</details>';
     }
 
+    // ---- Banner ↔ Portfolio reconciliation (programs / codes / campuses) ----
+    const rec = mm.banner_reconciliation || {};
+    const recTotal = (rec.missing_in_portfolio || []).length + (rec.missing_in_banner || []).length
+                   + (rec.code_mismatch || []).length + (rec.campus_diff || []).length;
+    if (recTotal) {
+        html += `<h3 style="margin:22px 0 6px">Banner ↔ Portfolio reconciliation (${recTotal})</h3>`;
+        html += '<p style="color:#64748b;font-size:11px;margin:0 0 10px">Banner (Registrar system of record) and the portfolio are meant to be in sync. Excludes combined/dual majors, minors, non-degree/pathway records, in-workflow proposals, inactivations, and completed history.</p>';
+        const _simpleTable = (rows, cols, bg) => {
+            let t = `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px"><thead><tr style="background:${bg};text-align:left">`;
+            t += cols.map(c => `<th style="padding:4px 8px">${escapeHtml(c[0])}</th>`).join('') + '</tr></thead><tbody>';
+            for (const r of rows) {
+                t += '<tr style="border-top:1px solid #e2e8f0">' + cols.map(c => {
+                    let v = r[c[1]];
+                    if (Array.isArray(v)) v = v.join(', ');
+                    return `<td style="padding:4px 8px">${escapeHtml(v || '—')}</td>`;
+                }).join('') + '</tr>';
+            }
+            return t + '</tbody></table>';
+        };
+        const mip = rec.missing_in_portfolio || [];
+        html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">Active in Banner, not in portfolio (${mip.length})</h4>`;
+        html += mip.length ? _simpleTable(mip, [['Banner code','banner_code'],['Program','name']], '#fff1f2')
+                           : '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+        const mib = rec.missing_in_banner || [];
+        if (mib.length) {
+            html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">Tracked, not active in Banner (${mib.length})</h4>`;
+            html += _simpleTable(mib, [['Program','program'],['CIM code','banner_code']], '#fff1f2');
+        }
+        const cmm = rec.code_mismatch || [];
+        if (cmm.length) {
+            html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">Banner code ≠ CIM code (${cmm.length})</h4>`;
+            html += _simpleTable(cmm, [['Program','program'],['CIM code','cim_code'],['Banner code','banner_code']], '#fffbeb');
+        }
+        const cdf = rec.campus_diff || [];
+        if (cdf.length) {
+            html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">Campus footprint differs (${cdf.length})</h4>`;
+            html += _simpleTable(cdf, [['Program','program'],['Banner code','banner_code'],['Only in portfolio','only_portfolio'],['Only in Banner','only_banner']], '#fffbeb');
+        }
+    }
+
     // ---- Banner ↔ CIM concentration discrepancies ----
     const concDisc = mm.concentration_college_discrepancies || [];
     if (concDisc.length) {
