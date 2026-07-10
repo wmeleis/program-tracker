@@ -5134,6 +5134,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Owning college. From CIM XML for tracked programs; SVT/IPD-supplied values are normalized to the canonical CIM name so duplicates and abbreviations are merged.'},
     {key: 'campus',       label: 'Campus',
         help: 'Deployment campus. All online variants (Online, Primarily Online, "Online - Vancouver Requirements", etc.) are merged into a single "Online" campus.'},
+    {key: 'catalogyears', label: 'Catalog Years',
+        help: 'Catalog years the program is part of (current year plus two forward), derived from CIM: a proposal’s effective catalog and type set when a program enters and leaves. A pending inactivation still in workflow keeps the program in the current year and removes it from its effective year onward.'},
     {key: 'market2025',      label: '2025 Market Category', defaultHidden: true,
         help: 'Market category from the 2025 portfolio scoring workbook (Boston programs only).'},
     {key: 'perf2025',        label: '2025 Performance Category', defaultHidden: true,
@@ -5620,6 +5622,7 @@ function _snapshotPortfolioFilters() {
         cimchange:  [...portfolioCimChangeFilter],
         inworkflow: [...portfolioInWorkflowFilter],
         inactadmit: [...portfolioInactAdmitFilter],
+        catalogyear:[...portfolioCatalogYearFilter],
         inacttoday: portfolioInactTodayFilter,
         search:     portfolioSearch,
     };
@@ -5648,6 +5651,7 @@ function _applyPortfolioFilters(f) {
     portfolioCimChangeFilter = new Set(f.cimchange || []);
     portfolioInWorkflowFilter = new Set(f.inworkflow || []);
     portfolioInactAdmitFilter = new Set(f.inactadmit || []);
+    portfolioCatalogYearFilter = new Set(f.catalogyear || []);
     portfolioInactTodayFilter = f.inacttoday || '';
     portfolioSearch           = f.search    || '';
     // Sync all UI controls to the restored state
@@ -5670,6 +5674,7 @@ function _syncPortfolioFilterUi() {
         'portfolio-filter-cimchange': portfolioCimChangeFilter,
         'portfolio-filter-inworkflow':portfolioInWorkflowFilter,
         'portfolio-filter-inactadmit':portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear':portfolioCatalogYearFilter,
     };
     Object.entries(multiIds).forEach(([id, set]) => {
         const btn = document.getElementById(id);
@@ -5846,6 +5851,7 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'credential',  label: 'Credential',       type: 'select', value: p => extractPortfolioDegree(p.program_name) || ''},
     {key: 'college',     label: 'College',          type: 'select', value: p => p.college || ''},
     {key: 'campus',      label: 'Campus',           type: 'select', value: p => p.campus || ''},
+    {key: 'catalog_year',label: 'Catalog Year',     type: 'text',   value: p => p.catalog_years || ''},
     {key: 'in_cim',      label: 'In CIM',           type: 'boolean', value: p => p.cim_program_id ? 'Y' : 'N'},
     {key: 'cim_step',    label: 'CIM Step',         type: 'select', value: p => p.cim_step || ''},
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
@@ -6519,6 +6525,7 @@ let portfolioGlsFilter       = new Set();
 let portfolioCimFilter       = new Set();
 let portfolioCimChangeFilter  = new Set();
 let portfolioInWorkflowFilter = new Set();
+let portfolioCatalogYearFilter = new Set();   // Catalog Years (CIM-derived membership)
 
 // Toggle-button bridges to the existing multi-select filter Sets. The
 // dropdowns and the buttons share the same Set, so changing one updates
@@ -6835,6 +6842,8 @@ function _getPortfolioFilterValues() {
         'portfolio-filter-inworkflow': ['Yes', 'No'],
         'portfolio-filter-inactadmit': [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
             (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0)),
+        'portfolio-filter-catalogyear': [...new Set(programs.flatMap(
+            p => (p.catalog_years || '').split(/,\s*/)).filter(Boolean))].sort(),
     };
 }
 
@@ -6860,6 +6869,7 @@ function _updateMultiFilterBtn(id, filterSet) {
         'portfolio-filter-cimchange':  'All Changes',
         'portfolio-filter-inworkflow': 'All',
         'portfolio-filter-inactadmit': 'All Semesters',
+        'portfolio-filter-catalogyear': 'All Catalog Years',
     };
     if (filterSet.size === 0) {
         btn.textContent = (ALL_LABEL[id] || 'All') + ' ▾';
@@ -6881,6 +6891,7 @@ function populatePortfolioFilters() {
         'portfolio-filter-gls',
         'portfolio-filter-cim', 'portfolio-filter-cimchange',
         'portfolio-filter-inworkflow', 'portfolio-filter-inactadmit',
+        'portfolio-filter-catalogyear',
     ];
     const filterSetMap = {
         'portfolio-filter-college':    portfolioCollegeFilter,
@@ -6895,6 +6906,7 @@ function populatePortfolioFilters() {
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
         'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
     };
     multiIds.forEach(id => _updateMultiFilterBtn(id, filterSetMap[id] || new Set()));
     // Keep the button rows in sync with the underlying filter Sets.
@@ -6923,6 +6935,7 @@ const _portfolioFilterVars = {
     'portfolio-filter-cimchange':  () => { portfolioCimChangeFilter.clear();  _updateMultiFilterBtn('portfolio-filter-cimchange',  portfolioCimChangeFilter); },
     'portfolio-filter-inworkflow': () => { portfolioInWorkflowFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inworkflow', portfolioInWorkflowFilter); },
     'portfolio-filter-inactadmit': () => { portfolioInactAdmitFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inactadmit', portfolioInactAdmitFilter); },
+    'portfolio-filter-catalogyear': () => { portfolioCatalogYearFilter.clear(); _updateMultiFilterBtn('portfolio-filter-catalogyear', portfolioCatalogYearFilter); },
     'portfolio-filter-inacttoday': () => { portfolioInactTodayFilter = ''; },
 };
 
@@ -6957,6 +6970,7 @@ function togglePortfolioMultiFilter(id, e) {
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
         'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
     };
     const filterSet = filterSetMap[id];
     const valuesMap = _getPortfolioFilterValues();
@@ -6997,6 +7011,7 @@ function togglePortfolioMultiValue(id, value, checked) {
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
         'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
     };
     const filterSet = filterSetMap[id];
     if (!filterSet) return;
@@ -7046,6 +7061,10 @@ function getPortfolioFiltered() {
     if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
     if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? 'Yes' : 'No'));
     if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
+    if (portfolioCatalogYearFilter.size) rows = rows.filter(p => {
+        const ys = (p.catalog_years || '').split(/,\s*/).filter(Boolean);
+        return [...portfolioCatalogYearFilter].some(y => ys.includes(y));
+    });
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
     // Advanced filter tree (from the Views builder) — ANDed with everything above.
     if (portfolioFilterTree && (portfolioFilterTree.children || []).length)
@@ -7418,6 +7437,7 @@ function renderPortfolioTable() {
             case 'degree':    av = extractPortfolioDegree(a.program_name); bv = extractPortfolioDegree(b.program_name); break;
             case 'college':   av = a.college || '';  bv = b.college || '';  break;
             case 'campus':    av = a.campus  || '';  bv = b.campus  || '';  break;
+            case 'catalogyears': av = a.catalog_years || ''; bv = b.catalog_years || ''; break;
             case 'otp':       av = a.otp_status || ''; bv = b.otp_status || ''; break;
             case 'ipd':       av = a.ipd_status || ''; bv = b.ipd_status || ''; break;
             case 'svt':       av = a.svt_status || ''; bv = b.svt_status || ''; break;
@@ -7459,7 +7479,8 @@ function renderPortfolioTable() {
         portfolioRosterFilter.size || portfolioSubStatusFilter.size || portfolioSpeedFilter.size ||
         portfolioGlsFilter.size || portfolioCimFilter.size ||
         portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
-        portfolioInactAdmitFilter.size || portfolioInactTodayFilter || portfolioSearch;
+        portfolioInactAdmitFilter.size || portfolioCatalogYearFilter.size ||
+        portfolioInactTodayFilter || portfolioSearch;
 
     // Determine which programs should be auto-expanded (search matches a
     // curriculum concentration OR a linked concentration sub-row).
@@ -7745,6 +7766,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('degree',     isPortfolioConc ? 'Concentration' : extractPortfolioDegree(p.program_name))}
         ${_pc('college',    abbreviateCollege(effectiveCollege), null, effectiveCollege || '')}
         ${_pc('campus',     abbreviateCampus(effectiveCampus))}
+        ${_pc('catalogyears', escapeHtml(p.catalog_years || ''))}
         ${_pc('market2025',      market2025Badge)}
         ${_pc('perf2025',        perf2025Badge)}
         ${_pc('marketscore2025', escapeHtml(p.market_score_2025 || ''))}
@@ -7810,6 +7832,7 @@ function exportPortfolioCsv() {
             case 'degree':      return isConc ? 'Concentration' : extractPortfolioDegree(p.program_name);
             case 'college':     return (isConc && !p.college && parent) ? parent.college || '' : p.college || '';
             case 'campus':      return isConc && parent ? parent.campus || p.campus || '' : p.campus || '';
+            case 'catalogyears': return p.catalog_years || '';
             case 'otp':         return p.otp_status || '';
             case 'svt':         return p.svt_status || '';
             case 'substatus':   return p.roster_sub_status || '';

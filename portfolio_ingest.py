@@ -71,6 +71,85 @@ EXIT_MASTERS_BANNERS = {
 
 
 # ---------------------------------------------------------------------------
+# Catalog-year membership (derived from CIM, not from scraping the catalog)
+# ---------------------------------------------------------------------------
+# CIM is the ledger of every catalog change, so per-program membership in a
+# given catalog year is derivable from its proposals' effective catalog +
+# type. This is date-INDEPENDENT (no "active as of today" fragility): each
+# catalog year is its own yes/no. We only populate the current catalog year +
+# two forward — a single CIM snapshot can't reconstruct *past* years reliably
+# (continuing programs carry a "current catalog" surrogate, and we don't retain
+# full proposal history), so we don't claim them.
+def _current_catalog_start_year(today=None):
+    """START year of the catalog considered 'current' (e.g. 2026 → 2026-2027).
+    NU catalog years run fall→fall; the next year's catalog becomes the active
+    reference well before its fall, so we roll over in spring."""
+    d = today or datetime.now().date()
+    return d.year if d.month >= 5 else d.year - 1
+
+
+def _catalog_window(today=None):
+    """[current, current+1, current+2] START years."""
+    cur = _current_catalog_start_year(today)
+    return [cur, cur + 1, cur + 2]
+
+
+def _catalog_year_from_str(s):
+    """START year from a 'Catalog YYYY-YYYY' / 'YYYY-YYYY' string, or None."""
+    m = re.search(r'(\d{4})\s*-\s*\d{4}', s or '')
+    return int(m.group(1)) if m else None
+
+
+def _cim_catalog_events(rows, cur=None):
+    """Build [(start_year|None, kind, cim_id)] from a program's CIM records.
+    kind ∈ {'add','remove','edit'}. Effective year comes from completion_date
+    (the approved catalog) when set, else eff_cat (in-workflow proposals).
+    A *pending* (in-workflow) removal hasn't taken effect — it can't remove the
+    program from the already-open current catalog, so its effective year is
+    clamped to no earlier than next year (present now, gone from the future
+    effective year), per the planned-removal semantics."""
+    if cur is None:
+        cur = _current_catalog_start_year()
+    events = []
+    for r in rows:
+        yr = _catalog_year_from_str(r['completion_date']) or _catalog_year_from_str(r['eff_cat'])
+        status = (r['status'] or '')
+        in_wf = bool(r['current_step'])
+        kind = 'add' if status == 'Added' else 'remove' if status == 'Deactivated' else 'edit'
+        if kind == 'remove' and in_wf:
+            yr = yr if (yr and yr > cur) else cur + 1
+        try:
+            cid = int(r['id'])
+        except (TypeError, ValueError):
+            cid = 0
+        events.append((yr, kind, cid))
+    return events
+
+
+def _in_catalog(events, C):
+    """Is the program a member of catalog START-year C, given its CIM events?
+    The state during catalog C is set by the most recent *decision* in effect by
+    then — the event with the greatest effective year, tie-broken by the highest
+    CIM id (the latest proposal). A removal → absent, add/edit → present. This
+    lets a newer Change/re-add supersede an older Inactivation for the same year.
+    With no event on/before C, the program is absent only if it has a *future*
+    add (not yet created); otherwise it's pre-existing/continuing → present."""
+    prior = [(y, k, i) for (y, k, i) in events if y is not None and y <= C]
+    if prior:
+        _, kind, _ = max(prior, key=lambda e: (e[0], e[2]))
+        return kind != 'remove'
+    if any(k == 'add' and (y is not None and y > C) for (y, k, i) in events):
+        return False                          # future add → not created yet at C
+    return True                               # continuing / pre-existing
+
+
+def _catalog_years_label(events, window=None):
+    """Comma-joined 'YYYY-YYYY' labels for the catalog years the program is in."""
+    win = window if window is not None else _catalog_window()
+    return ', '.join(f"{y}-{y + 1}" for y in win if _in_catalog(events, y))
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -2082,6 +2161,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         'gtm_inactivation': '',
         'gtm_entered_date': '',
         'cim_eff_term': '',
+        'catalog_years': '',
         'last_refreshed': now,
     }
 
@@ -2137,7 +2217,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             return ('BOS',) + _cim_index_keys(subj, deg, 'Boston')
         return ('RAW', name)
 
-    by_name = {}  # dedup key → row
+    by_name = {}       # dedup key → winning row
+    raw_by_key = {}    # dedup key → ALL raw rows (for catalog-year computation,
+                       # which must see every proposal for a program, not just
+                       # the deduped winner — an inactivation + a re-add can
+                       # live in separate CIM records)
+    _CATALOG_WINDOW = _catalog_window()
     for r in raw_rows:
         name = (r['name'] or '').strip()
         if not name:
@@ -2147,6 +2232,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         if _PLUSONE_RE.match(name):
             continue
         key = _seed_dedup_key(name)
+        raw_by_key.setdefault(key, []).append(r)
         existing = by_name.get(key)
         if existing is None:
             by_name[key] = r
@@ -2201,6 +2287,10 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             )
         # CIM effective term (Banner code, e.g. "202710") — raw, for display/comparison.
         row['cim_eff_term'] = r['eff_term'] or ''
+        # Catalog-year membership (current + 2 forward), from ALL of this
+        # program's CIM records so an inactivation and a re-add both register.
+        row['catalog_years'] = _catalog_years_label(
+            _cim_catalog_events(raw_by_key.get(_seed_dedup_key(name), [r])), _CATALOG_WINDOW)
         # GTM (enrollment-management) signals — graduate programs only.
         if (r['program_type'] or '') == 'Graduate':
             new_off = r['new_offering'] or ''

@@ -133,6 +133,14 @@
             </div>
             <button class="portfolio-campus-shortcut" style="margin-left:14px" onclick="setPortfolioCampusBoston()" title="Filter to Boston only">Boston</button>
         </div>
+        <div class="filter-group">
+            <label>Catalog Year:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Catalog years the program is part of, derived from CIM's effective catalog and proposal history (current year plus two forward).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-catalogyear">
+                <button class="filter-multi-btn" id="portfolio-filter-catalogyear" onclick="togglePortfolioMultiFilter('portfolio-filter-catalogyear', event)">All Catalog Years ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-catalogyear"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-catalogyear')" title="Clear">&times;</span>
+            </div>
+        </div>
       </div>
       <div class="portfolio-filter-block portfolio-filter-block-2">
         <div class="pf-cim-row" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">

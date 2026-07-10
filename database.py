@@ -1365,7 +1365,8 @@ def init_portfolio_tables(conn):
             ready_for_gtm TEXT DEFAULT '',
             gtm_inactivation TEXT DEFAULT '',
             gtm_entered_date TEXT DEFAULT '',
-            cim_eff_term TEXT DEFAULT ''
+            cim_eff_term TEXT DEFAULT '',
+            catalog_years TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS portfolio_notes (
@@ -1392,7 +1393,7 @@ def init_portfolio_tables(conn):
                 'gtm_type', 'gtm_date', 'gtm_first_term', 'gtm_last_term', 'gtm_intake_terms',
                 'exit_masters', 'otp_notes',
                 'new_offering', 'ready_for_gtm', 'gtm_inactivation', 'gtm_entered_date',
-                'cim_eff_term'):
+                'cim_eff_term', 'catalog_years'):
         try:
             conn.execute(f"ALTER TABLE portfolio_programs ADD COLUMN {col} TEXT DEFAULT ''")
         except Exception:
@@ -1422,7 +1423,7 @@ def upsert_portfolio_program(row):
                  cim_change_type, inactivation_admission, proposal_stage,
                  gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms,
                  exit_masters, new_offering, ready_for_gtm, gtm_inactivation,
-                 gtm_entered_date, cim_eff_term)
+                 gtm_entered_date, cim_eff_term, catalog_years)
             VALUES
                 (:id, :program_name, :college, :campus,
                  :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1438,7 +1439,7 @@ def upsert_portfolio_program(row):
                  :cim_change_type, :inactivation_admission, :proposal_stage,
                  :gtm_type, :gtm_date, :gtm_first_term, :gtm_last_term, :gtm_intake_terms,
                  :exit_masters, :new_offering, :ready_for_gtm, :gtm_inactivation,
-                 :gtm_entered_date, :cim_eff_term)
+                 :gtm_entered_date, :cim_eff_term, :catalog_years)
             ON CONFLICT(id) DO UPDATE SET
                 program_name=excluded.program_name,
                 college=excluded.college,
@@ -1483,7 +1484,8 @@ def upsert_portfolio_program(row):
                 ready_for_gtm=excluded.ready_for_gtm,
                 gtm_inactivation=excluded.gtm_inactivation,
                 gtm_entered_date=excluded.gtm_entered_date,
-                cim_eff_term=excluded.cim_eff_term
+                cim_eff_term=excluded.cim_eff_term,
+                catalog_years=excluded.catalog_years
         """, row)
 
 
@@ -1508,7 +1510,7 @@ def replace_all_portfolio_programs(rows):
                      cim_change_type, inactivation_admission, proposal_stage,
                      gtm_type, gtm_date, gtm_first_term, gtm_last_term, gtm_intake_terms,
                      exit_masters, new_offering, ready_for_gtm, gtm_inactivation,
-                     gtm_entered_date, cim_eff_term)
+                     gtm_entered_date, cim_eff_term, catalog_years)
                 VALUES
                     (:id, :program_name, :college, :campus,
                      :otp_status, :otp_sub_status, :otp_market_potential,
@@ -1524,7 +1526,7 @@ def replace_all_portfolio_programs(rows):
                      :cim_change_type, :inactivation_admission, :proposal_stage,
                      :gtm_type, :gtm_date, :gtm_first_term, :gtm_last_term, :gtm_intake_terms,
                      :exit_masters, :new_offering, :ready_for_gtm, :gtm_inactivation,
-                     :gtm_entered_date, :cim_eff_term)
+                     :gtm_entered_date, :cim_eff_term, :catalog_years)
             """, row)
 
 
