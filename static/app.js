@@ -7343,7 +7343,15 @@ function getPortfolioFiltered() {
                          p.cim_change_type === 'Inactivation'))
         );
     }
-    if (portfolioCollegeFilter.size)    rows = rows.filter(p => portfolioCollegeFilter.has(p.college || ''));
+    if (portfolioCollegeFilter.size)    rows = rows.filter(p =>
+        portfolioCollegeFilter.has(p.college || '')
+        // Also keep a program whose OWN college doesn't match but which has an
+        // interdisciplinary concentration managed by the selected college
+        // (e.g. Khoury-managed Robotics/Machine Learning concentrations under a
+        // Provost-owned AI/Data Science MS). The matching concentrations are
+        // surfaced (and the parent auto-expanded) at render time.
+        || (p.concentrations || []).some(c => c && typeof c === 'object'
+                && c.college && portfolioCollegeFilter.has(c.college)));
     if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
     if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
     if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
@@ -7803,6 +7811,18 @@ function renderPortfolioTable() {
             }
         });
     }
+    // College filter: auto-expand a parent whose own college doesn't match but
+    // which is surfaced via a concentration managed by the selected college, so
+    // that interdisciplinary concentration is visible without a manual expand.
+    if (portfolioCollegeFilter.size) {
+        allPortfolioPrograms.forEach(p => {
+            if (portfolioCollegeFilter.has(p.college || '')) return;
+            if ((p.concentrations || []).some(c => c && typeof c === 'object'
+                    && c.college && portfolioCollegeFilter.has(c.college))) {
+                autoExpand.add(p.id);
+            }
+        });
+    }
     // Mirror to module scope so togglePortfolioConcentrations() can read it.
     _portfolioAutoExpand = autoExpand;
 
@@ -7850,6 +7870,12 @@ function renderPortfolioTable() {
                 const status  = (typeof c === 'string') ? ''  : (c && c.status) || '';
                 const svtStatus = (typeof c === 'string') ? '' : (c && c.svt_status) || '';
                 curriculumConcKeys.add(_concNorm(name));
+                // Under an active College filter, show only the concentrations
+                // whose managing college (own, else inherited from the parent)
+                // is selected — so filtering to a college surfaces its
+                // interdisciplinary concentrations without the parent's others.
+                if (portfolioCollegeFilter.size
+                        && !portfolioCollegeFilter.has(college || (p.college || ''))) return;
                 rowHtml.push(renderPortfolioConcRow(
                     name, portfolioSearch, college,
                     p.college || '', p.campus || '', status, svtStatus));
