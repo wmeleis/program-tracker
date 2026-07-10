@@ -1788,7 +1788,8 @@ function getBaseFiltered(approverProgramIds, exclude) {
         // Hide them from every program-side filter (courses don't have these).
         if (currentView === 'programs' && isTemplateProgram(item)) return false;
         // College perspective scopes everything to the selected college.
-        if (collegeScope && item.college !== collegeScope) return false;
+        if (collegeScope && item.college !== collegeScope
+                && !(item.concentration_colleges || []).includes(collegeScope)) return false;
         // Smart-view definitions:
         //   new    = submitted in the last 30 days (no other qualifier)
         //   recent = step advanced in the last 14 days BUT NOT a new submission
@@ -1825,7 +1826,8 @@ function getBaseFiltered(approverProgramIds, exclude) {
         if (!ex.kind && currentView === 'programs' && programKindFilter) {
             if (classifyProgramKind(item) !== programKindFilter) return false;
         }
-        if (!ex.college && collegeSel.size && !collegeSel.has(item.college)) return false;
+        if (!ex.college && collegeSel.size && !collegeSel.has(item.college)
+                && !(item.concentration_colleges || []).some(cc => collegeSel.has(cc))) return false;
         if (currentView === 'courses') {
             const subjSel = document.getElementById('filter-subject');
             const subjectFilter = subjSel ? subjSel.value : '';

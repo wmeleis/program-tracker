@@ -514,6 +514,32 @@ def get_all_programs():
         """).fetchall()]
 
 
+def get_program_concentration_colleges():
+    """Map each CIM program id → sorted list of DISTINCT colleges that manage
+    one of its concentrations (from portfolio_programs.concentrations_json).
+    Lets the CIM tab surface interdisciplinary programs under a college that
+    owns a concentration but not the parent program (e.g. Khoury under a
+    Provost-owned AI/Robotics MS)."""
+    import json as _json
+    out = {}
+    try:
+        with get_db() as conn:
+            for row in conn.execute(
+                "SELECT cim_program_id, concentrations_json FROM portfolio_programs "
+                "WHERE cim_program_id IS NOT NULL AND concentrations_json != ''"):
+                try:
+                    concs = _json.loads(row['concentrations_json'])
+                except Exception:
+                    continue
+                cols = {c.get('college') for c in concs
+                        if isinstance(c, dict) and c.get('college')}
+                if cols:
+                    out[row['cim_program_id']] = sorted(cols)
+    except Exception:
+        pass
+    return out
+
+
 def get_program_workflow(program_id):
     """Get workflow steps for a specific program."""
     with get_db() as conn:

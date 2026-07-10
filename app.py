@@ -135,7 +135,7 @@ def _static_no_cache(filename):
 @app.route('/api/programs')
 def api_programs():
     """Get all programs with active workflows."""
-    from database import get_db
+    from database import get_db, get_program_concentration_colleges
     programs = get_all_programs()
 
     # Flag programs that have a regulatory approved-courses match so the
@@ -145,8 +145,10 @@ def api_programs():
             "SELECT program_id FROM regulatory_approved_courses"
         ).fetchall()
         has_reg = {row['program_id'] for row in rows}
+    conc_colleges = get_program_concentration_colleges()
     for p in programs:
         p['has_regulatory'] = p['id'] in has_reg
+        p['concentration_colleges'] = conc_colleges.get(p['id'], [])
 
     # Group by type
     grouped = {}

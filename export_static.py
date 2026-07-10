@@ -151,8 +151,11 @@ def export_data():
             "SELECT program_id FROM regulatory_approved_courses"
         ).fetchall()
         has_reg = {row['program_id'] for row in rows}
+    from database import get_program_concentration_colleges
+    _conc_colleges = get_program_concentration_colleges()
     for p in programs:
         p['has_regulatory'] = p['id'] in has_reg
+        p['concentration_colleges'] = _conc_colleges.get(p['id'], [])
     pipeline_counts = get_pipeline_counts(TRACKED_ROLES, canonical_program_step)
     changes = get_recent_changes(limit=100)
     last_scan = get_last_scan()
