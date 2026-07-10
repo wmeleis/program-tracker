@@ -2111,31 +2111,48 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                OR (completion_date IS NOT NULL AND completion_date != '')
         """).fetchall()
 
-    # Deduplicate by name: prefer active, then highest id.
+    # Deduplicate: prefer active, then highest id.
     # Skip TEMPLATE entries — these are CIM scaffolding rows ("TEMPLATE: PhD Program …",
     # "Half Major Template: …") that are never real programs and have been removed from
     # the portfolio repeatedly. Filter them out at ingest so they can't re-seed.
     _TEMPLATE_RE = re.compile(r'^\s*(template\s*:|half\s+major\s+template\s*:)', re.I)
-    by_name = {}  # name → row
+
+    def _seed_dedup_key(name):
+        # A bare "Subject, Degree" name (no campus parenthetical, no em-dash
+        # deployment suffix) is, by the portfolio's own campus default, the
+        # Boston deployment — so it must collapse onto its explicit "…(Boston)"
+        # twin instead of showing as a second row. (CIM sometimes carries both a
+        # bare and a "(Boston)" record for the same program, e.g. Cell and Gene
+        # Therapies, MS ids 1292/1940/1943.) Everything else keeps its raw name
+        # as the key, so campus/em-dash deployment variants (Online, Primarily
+        # Online, —Online, Vancouver, …) stay as distinct rows.
+        subj, deg, camp = _parse_cim_name(name)
+        camp_r = _normalize_campus(camp) if camp else 'Boston'
+        if camp_r == 'Boston' and '—' not in name and '–' not in name:
+            return ('BOS',) + _cim_index_keys(subj, deg, 'Boston')
+        return ('RAW', name)
+
+    by_name = {}  # dedup key → row
     for r in raw_rows:
         name = (r['name'] or '').strip()
         if not name:
             continue
         if _TEMPLATE_RE.match(name):
             continue
-        existing = by_name.get(name)
+        key = _seed_dedup_key(name)
+        existing = by_name.get(key)
         if existing is None:
-            by_name[name] = r
+            by_name[key] = r
         else:
             # Prefer active (has current_step)
             existing_active = bool(existing['current_step'])
             this_active = bool(r['current_step'])
             if this_active and not existing_active:
-                by_name[name] = r
+                by_name[key] = r
             elif this_active == existing_active:
                 # Both same activity state — take highest id
                 if r['id'] > existing['id']:
-                    by_name[name] = r
+                    by_name[key] = r
 
     # Build tracker entries from deduplicated CIM rows
     # tracker: id → row dict
