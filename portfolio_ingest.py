@@ -66,6 +66,7 @@ def _safe_parse(label, fn):
 # CIM banner_code is in this set get exit_masters='Yes'; all others 'No'.
 EXIT_MASTERS_BANNERS = {
     'MS-POPU', 'MS-APNR', 'MS-BIOL', 'MS-MRES', 'MS-PSYC', 'MA-SOCI', 'MS-NETS',
+    'MS-CDSC',   # Cross-Disciplinary Science, MS — exit-master's only
 }
 
 
@@ -2116,6 +2117,10 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # "Half Major Template: …") that are never real programs and have been removed from
     # the portfolio repeatedly. Filter them out at ingest so they can't re-seed.
     _TEMPLATE_RE = re.compile(r'^\s*(template\s*:|half\s+major\s+template\s*:)', re.I)
+    # PlusOne (4+1) combined BS/MS pathways are no longer tracked in the catalog,
+    # so they're dropped from the portfolio entirely. Matches "PlusOne", "Plus One",
+    # "PlusOne:", "Plus One …", etc. at the start of the name.
+    _PLUSONE_RE = re.compile(r'^\s*plus\s?one\b', re.I)
 
     def _seed_dedup_key(name):
         # A bare "Subject, Degree" name (no campus parenthetical, no em-dash
@@ -2138,6 +2143,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         if not name:
             continue
         if _TEMPLATE_RE.match(name):
+            continue
+        if _PLUSONE_RE.match(name):
             continue
         key = _seed_dedup_key(name)
         existing = by_name.get(key)
