@@ -2195,11 +2195,29 @@ mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #f
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     box-shadow: 0 6px 16px rgba(0,0,0,0.10);
-    min-width: 150px;
+    min-width: 190px;
+    max-height: 60vh;
+    overflow-y: auto;
     z-index: 200;
     padding: 6px 4px;
 }
 .portfolio-col-dropdown.open { display: block; }
+.portfolio-col-search {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    padding: 2px 4px 6px;
+    border-bottom: 1px solid #f1f5f9;
+    margin-bottom: 4px;
+}
+.portfolio-col-search input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 12px;
+}
 .portfolio-col-check {
     display: flex;
     align-items: center;

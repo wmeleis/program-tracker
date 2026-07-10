@@ -5543,16 +5543,32 @@ if (typeof window !== 'undefined') window.startPortfolioColResize = startPortfol
 
 function _rebuildColDropdownItems(dd) {
     dd.innerHTML =
-        `<div class="portfolio-col-selectall">
+        `<div class="portfolio-col-search">
+            <input type="text" id="portfolio-col-search-input" placeholder="Search columns…"
+                   autocomplete="off" oninput="_filterColDropdown(this.value)"
+                   onclick="event.stopPropagation()">
+        </div>
+        <div class="portfolio-col-selectall">
             <button onclick="toggleAllPortfolioCols(true)">Select All</button>
             <button onclick="toggleAllPortfolioCols(false)">Unselect All</button>
         </div>` +
         PORTFOLIO_COLUMNS.map(c => `
-        <label class="portfolio-col-check">
+        <label class="portfolio-col-check" data-label="${escapeHtml((c.label || '').toLowerCase())}">
             <input type="checkbox" ${portfolioVisibleCols.has(c.key) ? 'checked' : ''}
                    onchange="togglePortfolioCol('${c.key}',this.checked)">
             ${c.label}
         </label>`).join('');
+}
+
+// Filter the column-picker list by label as the user types.
+function _filterColDropdown(q) {
+    q = (q || '').trim().toLowerCase();
+    const dd = document.getElementById('portfolio-col-dropdown');
+    if (!dd) return;
+    dd.querySelectorAll('.portfolio-col-check').forEach(lab => {
+        const hay = lab.getAttribute('data-label') || lab.textContent.toLowerCase();
+        lab.style.display = (!q || hay.includes(q)) ? '' : 'none';
+    });
 }
 
 function _savePortfolioCols() {
@@ -5577,6 +5593,8 @@ function togglePortfolioColPicker(e) {
     if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
     _rebuildColDropdownItems(dd);
     dd.classList.add('open');
+    const s = document.getElementById('portfolio-col-search-input');
+    if (s) setTimeout(() => s.focus(), 0);
 }
 
 function togglePortfolioCol(key, visible) {
