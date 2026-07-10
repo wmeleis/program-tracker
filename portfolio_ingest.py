@@ -44,6 +44,7 @@ TSV_PATH    = os.path.join(_FEEDS_DIR, "portfolio_smartsheet.tsv")
 ROSTER_PATH = os.path.join(_FEEDS_DIR, "portfolio_roster.tsv")
 GLS_PATH    = os.path.join(_FEEDS_DIR, "portfolio_gls.csv")
 ENROLLMENT_PATH = os.path.join(_FEEDS_DIR, "portfolio_enrollment.csv")
+BANNER_PMC_PATH = os.path.join(_FEEDS_DIR, "banner_program_major_concentration.csv")
 SCORING_2025_PATH = os.path.expanduser(
     "~/committees/nu-docs/Programs/Program review/Program review 2025/"
     "Graduate Program Scoring-Boston-for WM-9-16-25.xlsx"
@@ -748,6 +749,73 @@ def parse_enrollment(path=ENROLLMENT_PATH):
     except Exception as e:
         print(f"  Enrollment parse error: {e}")
     return by_cc, code_campuses
+
+
+# --- Banner Program/Major/Concentration — authoritative concentration college ---
+_CONC_STOP = {'for', 'and', 'the', 'of', 'in', 'a', 'an', 'to', 'with', '&'}
+
+
+def _conc_tokens(name):
+    """Significant lowercase tokens of a concentration name (stop-words dropped)."""
+    return [t for t in re.split(r'[^a-z0-9]+', (name or '').lower())
+            if t and t not in _CONC_STOP]
+
+
+def _conc_sim(a_toks, b_toks):
+    """Similarity of two concentration token lists, tolerant of Banner's
+    truncation (Banner clips names, e.g. 'Sustainability Infrastruct Env').
+    A token matches if one is a prefix of the other (≥3 chars)."""
+    if not a_toks or not b_toks:
+        return 0.0
+    def tok_match(x, y):
+        return x == y or (len(x) >= 3 and len(y) >= 3 and (x.startswith(y) or y.startswith(x)))
+    matched = sum(1 for bt in b_toks if any(tok_match(bt, at) for at in a_toks))
+    return matched / max(len(a_toks), len(b_toks))
+
+
+def parse_banner_pmc(path=BANNER_PMC_PATH):
+    """Parse the Banner Program/Major/Concentration CSV into two indexes for
+    concentration-college lookup:
+      by_code : Program Code            → [{conc, tokens, college}]
+      by_sd   : (norm_subject, degree)  → [{conc, tokens, college}]  (fallback
+                for the ~16 programs whose Banner code ≠ CIM banner_code)
+    Only rows with a *recognized* canonical college and a real concentration
+    (not blank / 'No Concentration') are kept."""
+    import csv as _csv
+    by_code, by_sd = {}, {}
+    if not os.path.exists(path):
+        return by_code, by_sd
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            for r in _csv.DictReader(f):
+                college = _canonical_college_only((r.get('College') or '').strip())
+                if not college:
+                    continue
+                conc = (r.get('Concentration ') or r.get('Concentration') or '').strip()
+                if not conc or conc.lower() in ('no concentration', 'none'):
+                    continue
+                entry = {'conc': conc, 'tokens': _conc_tokens(conc), 'college': college}
+                code = (r.get('Program Code') or '').strip()
+                if code:
+                    by_code.setdefault(code, []).append(entry)
+                subj = _norm(r.get('Major') or '')
+                deg = _norm(_norm_degree(code.split('-')[0])) if code else ''
+                if subj and deg:
+                    by_sd.setdefault((subj, deg), []).append(entry)
+    except Exception as e:
+        print(f"  Banner PMC parse error: {e}")
+    return by_code, by_sd
+
+
+def _banner_concs_for(meta, by_code, by_sd):
+    """Return Banner concentration entries for a program, matched by banner_code
+    first, then by (subject, degree). `meta` = {banner_code, subject, degree}."""
+    code = (meta.get('banner_code') or '').strip()
+    if code and code in by_code:
+        return by_code[code]
+    subj = _norm(meta.get('subject') or '')
+    deg = _norm(_norm_degree(meta.get('degree') or ''))
+    return by_sd.get((subj, deg), [])
 
 
 def parse_gls(path=GLS_PATH):
@@ -1639,7 +1707,7 @@ def _extract_concentrations_from_html(html):
             college = _canonical_college_only(trailing) or name_college
             if not name or name.lower() in seen or name.lower() in _anchor_skip:
                 continue
-            if name.lower().endswith('options'):
+            if re.search(r'\boptions?$', name, re.I):   # "Electives Option(s)", etc.
                 continue
             seen.add(name.lower())
             results.append({'name': name, 'college': college})
@@ -2249,6 +2317,14 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # Master's enrollment (Tableau) — keyed by CIM banner code + campus.
     enr_by_cc, enr_code_campuses = parse_enrollment()
 
+    # Banner Program/Major/Concentration (Tableau) — authoritative source for
+    # each concentration's managing college. Indexed by Program Code and by
+    # (subject, degree). cim_meta below records each seed program's banner_code +
+    # subject + degree so the concentration block can look these up.
+    banner_pmc_by_code, banner_pmc_by_sd = parse_banner_pmc()
+    cim_meta = {}   # cim_id → {banner_code, subject, degree}
+    conc_college_discrepancies = []   # Banner-vs-CIM concentration diffs (report)
+
     def _make_row(pid, program_name, college, campus, cim_id=None,
                   cim_step='', cim_completion_date='', cim_change_type=''):
         return dict(_EMPTY_TRACKING, **{
@@ -2349,6 +2425,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         subject, degree, campus = _parse_cim_name(name)
         campus_resolved = _normalize_campus(campus) if campus else 'Boston'
         change_type = _STATUS_LABEL.get(r['status'] or '', r['status'] or '')
+        cim_meta[r['id']] = {'banner_code': (r['banner_code'] or '').strip(),
+                             'subject': subject, 'degree': degree}
 
         pid = f"cim_{r['id']}"
         row = _make_row(
@@ -3370,6 +3448,15 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 ref_keys = None
             parent_complete = bool(row.get('cim_completion_date')) or not row.get('cim_step')
             svt_map = svt_by_parent.get(row.get('id'), {})
+            # Banner is authoritative for each concentration's managing college.
+            # Match this program's Banner concentrations (by code, else subject+
+            # degree) and, per concentration, take the college of the best
+            # token-similarity Banner match. Fall back to the CIM-extracted
+            # college when Banner has no match (e.g. brand-new proposals not yet
+            # live in Banner).
+            banner_concs = _banner_concs_for(cim_meta.get(cim_id, {}),
+                                             banner_pmc_by_code, banner_pmc_by_sd)
+            matched_banner = set()
             for c in concs:
                 key = _conc_norm(c['name'])
                 if ref_keys is not None:
@@ -3378,9 +3465,38 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     c['status'] = 'existing' if parent_complete else 'new'
                 if key in svt_map and svt_map[key]:
                     c['svt_status'] = svt_map[key]
+                if banner_concs:
+                    ctoks = _conc_tokens(c['name'])
+                    best, best_sim = None, 0.0
+                    for b in banner_concs:
+                        sim = _conc_sim(ctoks, b['tokens'])
+                        if sim > best_sim:
+                            best, best_sim = b, sim
+                    if best and best_sim >= 0.6:
+                        c['college'] = best['college']   # authoritative override
+                        matched_banner.add(best['conc'])
             row['concentrations_json'] = json.dumps(concs)
             n_with_concs += 1
+            # Discrepancy report (Banner ↔ CIM concentrations) for matched programs.
+            if banner_concs:
+                cim_names = [c['name'] for c in concs]
+                banner_only = [b['conc'] for b in banner_concs if b['conc'] not in matched_banner]
+                # de-dup banner_only preserving order
+                seen_bo = set(); banner_only = [x for x in banner_only if not (x in seen_bo or seen_bo.add(x))]
+                cim_only = []
+                for c in concs:
+                    ctoks = _conc_tokens(c['name'])
+                    if not any(_conc_sim(ctoks, b['tokens']) >= 0.6 for b in banner_concs):
+                        cim_only.append(c['name'])
+                if cim_only or banner_only:
+                    conc_college_discrepancies.append({
+                        'program': row.get('program_name', ''),
+                        'banner_code': cim_meta.get(cim_id, {}).get('banner_code', ''),
+                        'cim_only': cim_only,
+                        'banner_only': banner_only,
+                    })
         print(f"  Curriculum concentrations: {n_with_concs} programs have named concentrations")
+        print(f"  Banner concentration-college: {len(conc_college_discrepancies)} programs with CIM↔Banner concentration diffs")
 
     # ── Step 5.6: Portfolio data-quality overrides ───────────────────────────
     # REMOVE definitively-non-program entries; RENAME well-known canonical
@@ -3748,6 +3864,8 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             'ipd_added':      _ia,
             'otp_mismatches': _om,
             'gls_mismatches': _gm,
+            'concentration_college_discrepancies':
+                sorted(conc_college_discrepancies, key=lambda x: x['program']),
         }
         with open(_mismatch_file, 'w') as _f:
             json.dump(_mismatch_data, _f, indent=2)

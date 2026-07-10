@@ -5042,6 +5042,29 @@ function renderConsoleContent(data) {
         html += '</details>';
     }
 
+    // ---- Banner ↔ CIM concentration discrepancies ----
+    const concDisc = mm.concentration_college_discrepancies || [];
+    if (concDisc.length) {
+        html += `<details style="margin-top:16px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:#991b1b">Concentrations: Banner ↔ CIM differences (${concDisc.length})</summary>`;
+        html += '<p style="color:#64748b;font-size:11px;margin:6px 0 8px">Per program, concentrations found in the CIM curriculum but not Banner (Program/Major/Concentration), and vice-versa. Names are matched fuzzily (Banner truncates), so some rows are naming variants rather than true gaps. Banner is authoritative for the managing college.</p>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+        html += '<thead><tr style="background:#fff1f2;text-align:left">'
+             + '<th style="padding:4px 8px">Program</th>'
+             + '<th style="padding:4px 8px">Banner code</th>'
+             + '<th style="padding:4px 8px">In CIM, not Banner</th>'
+             + '<th style="padding:4px 8px">In Banner, not CIM</th>'
+             + '</tr></thead><tbody>';
+        for (const d of concDisc) {
+            html += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(d.program || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(d.banner_code || '—')}</td>
+                <td style="padding:4px 8px;color:#92400e">${(d.cim_only || []).map(escapeHtml).join('<br>') || '<span style="color:#94a3b8">—</span>'}</td>
+                <td style="padding:4px 8px;color:#1e40af">${(d.banner_only || []).map(escapeHtml).join('<br>') || '<span style="color:#94a3b8">—</span>'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></details>';
+    }
+
     return html;
 }
 
