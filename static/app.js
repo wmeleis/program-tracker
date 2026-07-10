@@ -6045,7 +6045,8 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'credential',  label: 'Credential',       type: 'select', value: p => extractPortfolioDegree(p.program_name) || ''},
     {key: 'college',     label: 'College',          type: 'select', value: p => p.college || ''},
     {key: 'campus',      label: 'Campus',           type: 'select', value: p => p.campus || ''},
-    {key: 'catalog_year',label: 'Catalog Year',     type: 'text',   value: p => p.catalog_years || ''},
+    {key: 'catalog_year',label: 'Catalog Year',     type: 'select', multi: p => (p.catalog_years || '').split(/,\s*/).filter(Boolean),
+        help: 'Catalog years the program is part of (current year + two forward), derived from CIM. Multi-valued: pick one or more years with "is one of".'},
     {key: 'in_cim',      label: 'In CIM',           type: 'boolean', value: p => p.cim_program_id ? 'Y' : 'N'},
     {key: 'cim_step',    label: 'CIM Step',         type: 'select', value: p => p.cim_step || ''},
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
@@ -6063,7 +6064,8 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
     {key: 'otp',         label: 'OTP Status',       type: 'select', value: p => p.otp_status || ''},
-    {key: 'cim_inact',   label: 'CIM inactivation in progress', type: 'boolean', value: p => _cimInactivating(p) ? 'Y' : 'N'},
+    {key: 'cim_inact',   label: 'CIM inactivation in progress', type: 'boolean', value: p => _cimInactivating(p) ? 'Y' : 'N',
+        help: 'Yes when CIM shows an inactivation proposal still moving through the workflow (not yet completed) — all levels, more complete than the graduate-only GTM flag or OTP/SVT.'},
     {key: 'inact_admit', label: 'Inactivation of Admission', type: 'select', value: p => p.inactivation_admission || ''},
     {key: 'admit_today', label: 'Admitting Today',  type: 'boolean', value: p => { const v = _inactAdmittingToday(p); return v === 'Yes' ? 'Y' : v === 'No' ? 'N' : ''; }},
     {key: 'offering',    label: 'New Offering',     type: 'select', value: p => portfolioOfferingLabel(p)},
@@ -6085,7 +6087,12 @@ function getPortfolioFieldValues(key) {
     const f = _pvField(key);
     if (!f) return [];
     const set = new Set();
-    (allPortfolioPrograms || []).forEach(p => set.add(f.value(p)));
+    (allPortfolioPrograms || []).forEach(p => {
+        // Multi-valued fields (e.g. Catalog Year, where a row belongs to several
+        // years) expose each value individually so the picker offers them all.
+        if (f.multi) (f.multi(p) || []).forEach(v => { if (v) set.add(v); });
+        else set.add(f.value(p));
+    });
     return [...set].sort((a, b) => String(a).localeCompare(String(b)));
 }
 
@@ -6107,8 +6114,20 @@ function evalPortfolioNode(p, node) {
 function evalPortfolioRule(p, rule) {
     const f = _pvField(rule.field);
     if (!f) return true;
-    let v = String(f.value(p) == null ? '' : f.value(p));
     const op = rule.op || '';
+    // Multi-valued field (e.g. Catalog Year): the row has a set of values; a
+    // rule matches if any selected value is in that set ("is one of" OR).
+    if (f.multi) {
+        const vals = (f.multi(p) || []).map(String).filter(Boolean);
+        if (op === 'is_set')   return vals.length > 0;
+        if (op === 'is_empty') return vals.length === 0;
+        const arr = Array.isArray(rule.value) ? rule.value : (rule.value ? [rule.value] : []);
+        if (!arr.length) return true;
+        const sel = new Set(arr);
+        const hit = vals.some(x => sel.has(x));
+        return op === 'not_in' ? !hit : hit;
+    }
+    let v = String(f.value(p) == null ? '' : f.value(p));
     if (op === 'is_set')   return v !== '';
     if (op === 'is_empty') return v === '';
     if (f.type === 'date') {
@@ -6353,7 +6372,10 @@ function _renderPvRule(rule, path) {
     const opSel = `<select onchange="pvbSetOp('${path}', this.value)">${
         _opsForPvType(f.type).map(([op, lbl]) => `<option value="${op}"${op === rule.op ? ' selected' : ''}>${lbl}</option>`).join('')
     }</select>`;
-    return `<div class="pvb-rule">${fieldSel}${opSel}${_renderPvRuleValue(rule, f, path)}
+    const help = f.help
+        ? `<span class="info-tip" onclick="event.stopPropagation()"><i class="tip-icon">i</i><span class="tip-bubble">${escapeHtml(f.help)}</span></span>`
+        : '';
+    return `<div class="pvb-rule">${fieldSel}${help}${opSel}${_renderPvRuleValue(rule, f, path)}
         <button class="pvb-iconbtn" title="Remove rule" onclick="pvbRemove('${path}')">✕</button></div>`;
 }
 
