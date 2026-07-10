@@ -5818,6 +5818,7 @@ function _snapshotPortfolioFilters() {
         inactadmit: [...portfolioInactAdmitFilter],
         catalogyear:[...portfolioCatalogYearFilter],
         inacttoday: portfolioInactTodayFilter,
+        inactprogress: portfolioInactProgressFilter,
         search:     portfolioSearch,
     };
 }
@@ -5847,6 +5848,7 @@ function _applyPortfolioFilters(f) {
     portfolioInactAdmitFilter = new Set(f.inactadmit || []);
     portfolioCatalogYearFilter = new Set(f.catalogyear || []);
     portfolioInactTodayFilter = f.inacttoday || '';
+    portfolioInactProgressFilter = f.inactprogress || '';
     portfolioSearch           = f.search    || '';
     // Sync all UI controls to the restored state
     _syncPortfolioFilterUi();
@@ -5882,6 +5884,8 @@ function _syncPortfolioFilterUi() {
     // Inact today select
     const itSel = document.getElementById('portfolio-filter-inacttoday');
     if (itSel) itSel.value = portfolioInactTodayFilter;
+    const ipSel = document.getElementById('portfolio-filter-inactprogress');
+    if (ipSel) ipSel.value = portfolioInactProgressFilter;
     // Search box
     const sb = document.getElementById('filter-search');
     if (sb && currentView === 'portfolio') sb.value = portfolioSearch;
@@ -6780,6 +6784,7 @@ if (typeof window !== 'undefined') {
 }
 let portfolioInactAdmitFilter = new Set();
 let portfolioInactTodayFilter = '';
+let portfolioInactProgressFilter = '';   // '' | 'Yes' | 'No' — CIM inactivation in progress
 
 // "Fall 2026" → Date object for Sep 1 of that year (approximate start of Fall semester).
 function _semesterToDate(s) {
@@ -7177,6 +7182,7 @@ const _portfolioFilterVars = {
     'portfolio-filter-inactadmit': () => { portfolioInactAdmitFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inactadmit', portfolioInactAdmitFilter); },
     'portfolio-filter-catalogyear': () => { portfolioCatalogYearFilter.clear(); _updateMultiFilterBtn('portfolio-filter-catalogyear', portfolioCatalogYearFilter); },
     'portfolio-filter-inacttoday': () => { portfolioInactTodayFilter = ''; },
+    'portfolio-filter-inactprogress': () => { portfolioInactProgressFilter = ''; },
 };
 
 function clearPortfolioFilter(id) {
@@ -7348,6 +7354,7 @@ function getPortfolioFiltered() {
             y => y === '(none)' ? ys.length === 0 : ys.includes(y));
     });
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
+    if (portfolioInactProgressFilter)   rows = rows.filter(p => (_cimInactivating(p) ? 'Yes' : 'No') === portfolioInactProgressFilter);
     // Advanced filter tree (from the Views builder) — ANDed with everything above.
     if (portfolioFilterTree && (portfolioFilterTree.children || []).length)
         rows = rows.filter(p => evalPortfolioNode(p, portfolioFilterTree));
@@ -7769,7 +7776,7 @@ function renderPortfolioTable() {
         portfolioGlsFilter.size || portfolioCimFilter.size ||
         portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
         portfolioInactAdmitFilter.size || portfolioCatalogYearFilter.size ||
-        portfolioInactTodayFilter || portfolioSearch;
+        portfolioInactTodayFilter || portfolioInactProgressFilter || portfolioSearch;
 
     // Determine which programs should be auto-expanded (search matches a
     // curriculum concentration OR a linked concentration sub-row).

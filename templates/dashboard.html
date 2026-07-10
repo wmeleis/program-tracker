@@ -165,6 +165,17 @@
             </div>
         </div>
         <div class="filter-group">
+            <label>Inactivation in Progress:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs whose current CIM proposal is an inactivation still moving through the CIM workflow (not yet completed).</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-inactprogress" onchange="portfolioInactProgressFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()">
+                    <option value="">— select —</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactprogress')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
             <label>Inact. of Admission:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Admissions inactivation status from the GLS Roster of Record.</span></span></label>
             <div class="filter-multi-wrap" id="fmw-portfolio-filter-inactadmit">
                 <button class="filter-multi-btn" id="portfolio-filter-inactadmit" onclick="togglePortfolioMultiFilter('portfolio-filter-inactadmit', event)">All Semesters ▾</button>
