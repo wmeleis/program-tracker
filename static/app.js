@@ -688,42 +688,25 @@ function renderCimMulti(id, items) {
     const dd = document.getElementById('fmd-' + id);
     if (!dd) { _updateCimMultiBtn(id); return; }
     const set = cimMultiSel(id);
-    const _attr = s => String(s).replace(/"/g, '&quot;');
-    // Leading "All" row: checked when nothing is selected; clicking it clears
-    // the selection (= show all). Mirrors the old single-select's "All …" option.
+    const _attr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    // "All" is a master checkbox: checked when every entry is selected (which we
+    // store as the empty set = "no restriction"). In that state all the value
+    // boxes render checked too; the "None" state ({sentinel}) renders them clear.
+    const allState = set.size === 0;
     const allRow = `
         <label class="portfolio-col-check filter-all-row">
-            <input type="checkbox" ${set.size === 0 ? 'checked' : ''}
+            <input type="checkbox" ${allState ? 'checked' : ''}
                    onchange="toggleCimMultiAll(${_attr(JSON.stringify(id))})">
             ${escapeHtml(_cimMultiAllLabel(id))}
         </label>`;
     dd.innerHTML = allRow + items.map(it => `
         <label class="portfolio-col-check">
-            <input type="checkbox" ${set.has(it.value) ? 'checked' : ''}
-                   onchange="toggleCimMultiValue(${_attr(JSON.stringify(id))}, ${_attr(JSON.stringify(it.value))}, this.checked)">
+            <input type="checkbox" class="filter-val-box" data-fval="${_attr(it.value)}"
+                   ${allState || set.has(it.value) ? 'checked' : ''}
+                   onchange="toggleCimMultiValue(${_attr(JSON.stringify(id))})">
             ${escapeHtml(it.label)}${it.count != null ? ` (${it.count})` : ''}
         </label>`).join('');
     _updateCimMultiBtn(id);
-}
-// Keep the leading "All" checkbox in sync (checked ⇔ nothing selected).
-function _syncCimAllBox(id) {
-    const dd = document.getElementById('fmd-' + id);
-    const all = dd && dd.querySelector('.filter-all-row input');
-    if (all) all.checked = cimMultiSel(id).size === 0;
-}
-function toggleCimMultiAll(id) {
-    // Toggle: All (empty → show everything) ⇄ None ({sentinel} → show nothing).
-    const set = cimMultiSel(id);
-    if (set.size === 0) { set.add(_FILTER_NONE); }   // was All → None
-    else { set.clear(); }                            // None/some → All
-    const dd = document.getElementById('fmd-' + id);
-    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        // "All" row checked only in the All (empty) state; all value boxes clear.
-        cb.checked = cb.closest('.filter-all-row') ? (set.size === 0) : false;
-    });
-    _updateCimMultiBtn(id);
-    applyFilters();
-    updateClearButtons();
 }
 function toggleCimMultiFilter(id, event) {
     if (event) event.stopPropagation();
@@ -733,11 +716,31 @@ function toggleCimMultiFilter(id, event) {
     document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => el.classList.remove('open'));
     if (!wasOpen) dd.classList.add('open');
 }
-function toggleCimMultiValue(id, value, checked) {
-    const set = cimMultiSel(id);
-    set.delete(_FILTER_NONE);   // picking a real value leaves the "None" state
-    if (checked) set.add(value); else set.delete(value);
-    _syncCimAllBox(id);
+function toggleCimMultiAll(id) {
+    // Master toggle: check every entry (All → show everything) ⇄ clear every
+    // entry (None → show nothing). "All" is stored as the empty set; "None" as
+    // the no-match sentinel, so the read logic needs no change.
+    const wasAll = cimMultiSel(id).size === 0;
+    cimMultiFilters[id] = wasAll ? new Set([_FILTER_NONE]) : new Set();
+    const nowAll = cimMultiSel(id).size === 0;
+    const dd = document.getElementById('fmd-' + id);
+    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = nowAll; });
+    _updateCimMultiBtn(id);
+    applyFilters();
+    updateClearButtons();
+}
+// Rebuild the selection from the entry checkboxes' current state. All checked →
+// empty set (All); none checked → {sentinel} (None); otherwise the explicit set.
+function toggleCimMultiValue(id) {
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) return;
+    const boxes = [...dd.querySelectorAll('.filter-val-box')];
+    const selected = boxes.filter(cb => cb.checked).map(cb => cb.dataset.fval);
+    if (selected.length === boxes.length)      cimMultiFilters[id] = new Set();               // all → All
+    else if (selected.length === 0)            cimMultiFilters[id] = new Set([_FILTER_NONE]);  // none → None
+    else                                       cimMultiFilters[id] = new Set(selected);
+    const allBox = dd.querySelector('.filter-all-row input');
+    if (allBox) allBox.checked = cimMultiSel(id).size === 0;
     _updateCimMultiBtn(id);
     applyFilters();
     updateClearButtons();
@@ -7126,19 +7129,22 @@ function togglePortfolioMultiFilter(id, e) {
     // escapeHtml() only escapes <,>,& (not "), so it doesn't help here.
     // _attr() escapes " → &quot; for HTML attribute context; the browser
     // decodes the entity back to " before evaluating the handler at click time.
-    const _attr = s => s.replace(/"/g, '&quot;');
-    // Leading "All" row: checked when nothing is selected; clicking it clears
-    // the selection (= show all).
+    const _attr = s => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    // "All" is a master checkbox: checked when every entry is selected (stored as
+    // the empty set = "no restriction"). In that state the value boxes render
+    // checked too; the "None" state ({sentinel}) renders them clear.
+    const allState = !filterSet || filterSet.size === 0;
     const allRow = `
         <label class="portfolio-col-check filter-all-row">
-            <input type="checkbox" ${(!filterSet || filterSet.size === 0) ? 'checked' : ''}
+            <input type="checkbox" ${allState ? 'checked' : ''}
                    onchange="togglePortfolioMultiAll(${_attr(JSON.stringify(id))})">
             All
         </label>`;
     dd.innerHTML = allRow + display.map(v => `
         <label class="portfolio-col-check">
-            <input type="checkbox" ${filterSet && filterSet.has(v) ? 'checked' : ''}
-                   onchange="togglePortfolioMultiValue(${_attr(JSON.stringify(id))}, ${_attr(JSON.stringify(v))}, this.checked)">
+            <input type="checkbox" class="filter-val-box" data-fval="${_attr(String(v))}"
+                   ${allState || (filterSet && filterSet.has(v)) ? 'checked' : ''}
+                   onchange="togglePortfolioMultiValue(${_attr(JSON.stringify(id))})">
             ${escapeHtml(labelFor(v))}
         </label>`).join('');
     dd.classList.add('open');
@@ -7165,12 +7171,13 @@ function togglePortfolioMultiAll(id) {
     const filterSetMap = _portfolioFilterSetMap();
     const set = filterSetMap[id];
     if (!set) return;
-    // Toggle: All (empty → everything) ⇄ None ({sentinel} → nothing).
-    if (set.size === 0) { set.add(_FILTER_NONE); } else { set.clear(); }
+    // Master toggle: check every entry (All → everything) ⇄ clear every entry
+    // (None → nothing). "All" is the empty set; "None" the no-match sentinel.
+    const wasAll = set.size === 0;
+    if (wasAll) { set.add(_FILTER_NONE); } else { set.clear(); }
+    const nowAll = set.size === 0;
     const dd = document.getElementById('fmd-' + id);
-    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.checked = cb.closest('.filter-all-row') ? (set.size === 0) : false;
-    });
+    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = nowAll; });
     _updateMultiFilterBtn(id, set);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
     updateClearButtons();
@@ -7178,29 +7185,20 @@ function togglePortfolioMultiAll(id) {
     renderPortfolioTable();
 }
 
-function togglePortfolioMultiValue(id, value, checked) {
-    const filterSetMap = {
-        'portfolio-filter-college':    portfolioCollegeFilter,
-        'portfolio-filter-campus':     portfolioCampusFilter,
-        'portfolio-filter-otp':        portfolioOtpFilter,
-        'portfolio-filter-ipd':        portfolioIpdFilter,
-        'portfolio-filter-roster':     portfolioRosterFilter,
-        'portfolio-filter-substatus':  portfolioSubStatusFilter,
-        'portfolio-filter-speed':      portfolioSpeedFilter,
-        'portfolio-filter-gls':        portfolioGlsFilter,
-        'portfolio-filter-cim':        portfolioCimFilter,
-        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
-        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
-        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
-        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
-    };
-    const filterSet = filterSetMap[id];
+// Rebuild the selection from the entry checkboxes. All checked → empty set
+// (All); none checked → {sentinel} (None); otherwise the explicit set.
+function togglePortfolioMultiValue(id) {
+    const filterSet = _portfolioFilterSetMap()[id];
     if (!filterSet) return;
-    filterSet.delete(_FILTER_NONE);   // picking a real value leaves the "None" state
-    if (checked) filterSet.add(value);
-    else filterSet.delete(value);
     const dd = document.getElementById('fmd-' + id);
-    const allBox = dd && dd.querySelector('.filter-all-row input');
+    if (!dd) return;
+    const boxes = [...dd.querySelectorAll('.filter-val-box')];
+    const selected = boxes.filter(cb => cb.checked).map(cb => cb.dataset.fval);
+    filterSet.clear();
+    if (selected.length === 0)                 filterSet.add(_FILTER_NONE);   // none → None
+    else if (selected.length < boxes.length)   selected.forEach(v => filterSet.add(v));
+    // (all checked → leave empty = All)
+    const allBox = dd.querySelector('.filter-all-row input');
     if (allBox) allBox.checked = filterSet.size === 0;
     _updateMultiFilterBtn(id, filterSet);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
