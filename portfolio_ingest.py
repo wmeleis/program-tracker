@@ -2767,30 +2767,6 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 if row:
                     return row, mt
 
-        # Specialized-master fallback: SVT frequently lists a program generically
-        # as "MS" while CIM/Banner uses a specialized master's code (MSIS, MSBioE,
-        # MSCS, MSFin, …). Match a same-subject, same-campus CIM program whose
-        # degree *specializes* the generic one (starts with it), preferring the
-        # base degree over a Bridge/Connect/Align variant. Prevents SVT adding a
-        # duplicate (e.g. "MS in Information Systems, Online" vs CIM MSIS—Online).
-        if norm_deg in ('ms', 'ma'):
-            cands = []
-            for (subj_k, deg_k), rows in cim_nameDeg_index.items():
-                if subj_k != norm_subj or not deg_k.startswith(norm_deg) or deg_k == norm_deg:
-                    continue
-                # The deployment ("Online", "Oakland", …) may be the campus field
-                # OR encoded as a suffix in the degree ("msis-online"), since
-                # em-dash deployments aren't parsed into campus. Accept either.
-                deg_tokens = set(deg_k.replace('-', ' ').split())
-                for r in rows:
-                    campus_ok = _norm_campus(r.get('campus', '')) == norm_campus_str
-                    deg_has_campus = bool(norm_campus_str) and norm_campus_str in deg_tokens
-                    if campus_ok or deg_has_campus:
-                        cands.append(((0 if campus_ok else 1), len(deg_k), deg_k, r))
-            if cands:
-                cands.sort(key=lambda x: (x[0], x[1], x[2]))   # campus-field match, then base degree
-                return cands[0][3], 'name_deg'
-
         return None, None
 
     # Mismatch accumulators
@@ -3146,7 +3122,18 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             # names is NOT a match — e.g. DNP-NUAN exists only for Boston, but
             # the SVT row is the Seattle deployment. Fall through to name-rescue
             # / leave unmatched for coordination instead of borrowing Boston.
-            if len(candidates) == 1 and camp_norm in ('', candidates[0]['campus']):
+            # A lone banner-code candidate matches when the SVT campus is
+            # unspecified/equal, OR when the candidate's program NAME already
+            # names that campus. The banner code is authoritative and often
+            # deployment-specific (e.g. MSIS-INSY-O = the MSIS—Online program,
+            # whose campus field is stored as Boston because the "—Online"
+            # deployment lives in the name, not the campus field). Confirming via
+            # the name lets the exact code match without borrowing a genuinely
+            # different-campus program (DNP-NUAN Boston vs an SVT Seattle row,
+            # whose name would NOT contain "Seattle").
+            _cand_name = (candidates[0]['row'].get('program_name') or '').lower()
+            if len(candidates) == 1 and (camp_norm in ('', candidates[0]['campus'])
+                    or (camp_norm and camp_norm.lower() in _cand_name)):
                 matched = candidates[0]['row']
             else:
                 # Multiple campuses share the banner_code — pick the one whose
