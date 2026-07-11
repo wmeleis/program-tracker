@@ -220,8 +220,8 @@ function switchView(view) {
     document.querySelectorAll('.proposal-btn').forEach(btn => btn.classList.remove('active-all', 'active-new', 'active-edit', 'active-inact', 'active-complete'));
     document.querySelectorAll('.smart-view-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.kind-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById('filter-college').value = '';
-    document.getElementById('filter-campus').value = '';
+    cimMultiSel('filter-college').clear(); _updateCimMultiBtn('filter-college');
+    cimMultiSel('filter-campus').clear();  _updateCimMultiBtn('filter-campus');
     document.getElementById('filter-approver').value = '';
     document.getElementById('filter-step').value = '';
     document.getElementById('filter-search').value = '';
@@ -260,7 +260,8 @@ function switchView(view) {
     if (view === 'portfolio') {
         cimHdrBtns.forEach(b => b.style.display = 'none');
         if (authBtn) authBtn.style.display = '';   // keep CIM connection status visible
-        if (lastUpdatedEl) lastUpdatedEl.style.display = 'none';
+        // #last-updated stays visible on Portfolio — it's part of the always-on
+        // freshness line under the title, not a CIM-only control.
         if (scanStatusEl)  scanStatusEl.style.display  = 'none';
         if (progressEl)    progressEl.style.display    = 'none';
         if (portfolioFilters)    portfolioFilters.style.display = 'flex';
@@ -325,6 +326,14 @@ function switchView(view) {
 
     // Show/hide the OTP/College perspective toggle for the new view.
     syncPerspectiveUI();
+
+    // Collapsible filters: the "▸ Filters" toggle applies to ALL views. It sits
+    // above every view's filter content and the collapse CSS hides the right
+    // sections per view (program/course controls, catalog dropdowns, portfolio
+    // filter bar + view tiles).
+    const cimFilterToggleRow = document.getElementById('cim-filter-toggle-row');
+    if (cimFilterToggleRow) cimFilterToggleRow.style.display = 'block';
+    applyCimFiltersState();
 
     // Reload appropriate data
     if (view === 'programs') {
@@ -404,22 +413,15 @@ function getCatalogCollege(page) {
 }
 
 function populateCatalogCollegeFilter() {
-    const sel = document.getElementById('filter-college');
-    if (!sel) return;
     const counts = new Map();
     for (const p of allCatalogPages || []) {
         const c = getCatalogCollege(p);
         counts.set(c, (counts.get(c) || 0) + 1);
     }
-    const prev = sel.value;
-    const opts = Array.from(counts.entries())
+    const items = Array.from(counts.entries())
         .sort((a, b) => abbreviateCollege(a[0]).localeCompare(abbreviateCollege(b[0])))
-        .map(([name, count]) => `<option value="${escapeHtml(name)}">${escapeHtml(abbreviateCollege(name))} (${count})</option>`)
-        .join('');
-    sel.innerHTML = '<option value="">All Colleges</option>' + opts;
-    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
-        sel.value = prev;
-    }
+        .map(([name, count]) => ({ value: name, label: abbreviateCollege(name), count }));
+    renderCimMulti('filter-college', items);
 }
 
 function populateCatalogApproverFilter() {
@@ -494,12 +496,12 @@ function buildSearchMatcher(query) {
 }
 
 function getCatalogBaseFiltered(excludeFilter) {
-    const collegeFilter = excludeFilter === 'college' ? '' : (document.getElementById('filter-college')?.value || '');
+    const collegeSel = excludeFilter === 'college' ? new Set() : cimMultiSel('filter-college');
     const approverFilter = excludeFilter === 'approver' ? '' : (document.getElementById('filter-approver')?.value || '');
     const searchRaw = excludeFilter === 'search' ? '' : (document.getElementById('filter-search')?.value || '');
     const matchSearch = buildSearchMatcher(searchRaw);
     let pages = (allCatalogPages || []).slice();
-    if (collegeFilter) pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    if (collegeSel.size) pages = pages.filter(p => collegeSel.has(getCatalogCollege(p)));
     if (approverFilter) pages = pages.filter(p => (p.user || '').trim() === approverFilter);
     if (searchRaw.trim()) pages = pages.filter(p =>
         matchSearch(p.id) || matchSearch(p.title));
@@ -559,11 +561,11 @@ function renderCatalogTable() {
     if (!container) return;
     const searchRaw = (document.getElementById('filter-search')?.value || '');
     const matchSearch = buildSearchMatcher(searchRaw);
-    const collegeFilter = document.getElementById('filter-college')?.value || '';
+    const collegeSel = cimMultiSel('filter-college');
     const approverFilter = document.getElementById('filter-approver')?.value || '';
     let pages = (allCatalogPages || []).slice();
-    if (collegeFilter) {
-        pages = pages.filter(p => getCatalogCollege(p) === collegeFilter);
+    if (collegeSel.size) {
+        pages = pages.filter(p => collegeSel.has(getCatalogCollege(p)));
     }
     if (approverFilter) {
         pages = pages.filter(p => (p.user || '').trim() === approverFilter);
@@ -619,9 +621,16 @@ function renderCatalogTable() {
 }
 
 function clearFilter(id) {
-    const el = document.getElementById(id);
-    if (el.tagName === 'SELECT') el.value = '';
-    else el.value = '';
+    if (cimMultiFilters[id]) {
+        cimMultiSel(id).clear();
+        // Re-render the checkbox list so boxes uncheck; button label resets.
+        const dd = document.getElementById('fmd-' + id);
+        if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+        _updateCimMultiBtn(id);
+    } else {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    }
     updateClearButtons();
     applyFilters();
 }
@@ -641,6 +650,132 @@ function updateClearButtons() {
     if (hs && clear) {
         clear.classList.toggle('visible', !!hs.value);
     }
+}
+
+// ── CIM College/Campus multi-select filters ────────────────────────────────
+// The College and Campus filters on the CIM tracker (Programs / Courses /
+// Catalog) are checkbox multi-selects backed by Sets, mirroring the Portfolio
+// filter dropdowns. OR semantics: an item passes if its value is in the set;
+// an empty set means "all". The button id is the filter id (e.g. filter-college);
+// the checkbox list lives in #fmd-<id>, wrapped by #fmw-<id>.
+const cimMultiFilters = {
+    'filter-college': new Set(),
+    'filter-campus':  new Set(),
+};
+// Sentinel that matches no real value. A filter set containing only this means
+// "None selected → show nothing" (distinct from an empty set, which means
+// "All → no restriction"). Because every read is `set.size && !set.has(value)`,
+// a set of {sentinel} hides every row with no read-site changes.
+const _FILTER_NONE = '__cim_filter_none__';
+function cimMultiSel(id) { return cimMultiFilters[id] || new Set(); }
+
+// Apply-on-close: checkbox multi-select dropdowns update their Set + button
+// label live but defer the (heavy) table re-render until the dropdown closes.
+// A dropdown marks itself dirty on each toggle; closing it commits & applies.
+const _multiFilterDirty = new Set();
+function _commitMultiFilter(id) {
+    if (!_multiFilterDirty.has(id)) return;
+    _multiFilterDirty.delete(id);
+    if (id === 'filter-college' || id === 'filter-campus') {   // CIM tab
+        applyFilters();
+        updateClearButtons();
+    } else if (id.indexOf('portfolio-filter-') === 0) {        // Portfolio tab
+        if (typeof _portfolioViewTouch === 'function') _portfolioViewTouch();
+        updateClearButtons();
+        renderPortfolioTable();
+    }
+}
+// Remove .open from a multi-select dropdown element and commit its deferred
+// selection. Used by every close path (outside-click, button toggle, opening
+// another dropdown).
+function _closeMultiDropdown(el) {
+    if (!el || !el.classList || !el.classList.contains('open')) return;
+    el.classList.remove('open');
+    const id = (el.id || '').replace(/^fmd-/, '');
+    if (id) _commitMultiFilter(id);
+}
+function _closeAllMultiDropdowns() {
+    document.querySelectorAll('.filter-multi-dropdown.open').forEach(_closeMultiDropdown);
+}
+function _cimMultiAllLabel(id) {
+    return id === 'filter-college' ? 'All Colleges'
+         : id === 'filter-campus'  ? 'All Campuses' : 'All';
+}
+function _updateCimMultiBtn(id) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const set = cimMultiSel(id);
+    const wrap = document.getElementById('fmw-' + id);
+    const labelFor = id === 'filter-college' ? (v => abbreviateCollege(v)) : (v => v);
+    if (set.size === 0)          { btn.textContent = _cimMultiAllLabel(id) + ' ▾'; if (wrap) wrap.classList.remove('has-value'); }
+    else if (set.has(_FILTER_NONE)) { btn.textContent = 'None ▾';                  if (wrap) wrap.classList.add('has-value'); }
+    else if (set.size === 1)     { btn.textContent = labelFor([...set][0]) + ' ▾'; if (wrap) wrap.classList.add('has-value'); }
+    else                         { btn.textContent = set.size + ' selected ▾';     if (wrap) wrap.classList.add('has-value'); }
+}
+// items: [{value, label, count?}] (pre-sorted). Reflects the current Set state.
+function renderCimMulti(id, items) {
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) { _updateCimMultiBtn(id); return; }
+    const set = cimMultiSel(id);
+    const _attr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    // "All" is a master checkbox: checked when every entry is selected (which we
+    // store as the empty set = "no restriction"). In that state all the value
+    // boxes render checked too; the "None" state ({sentinel}) renders them clear.
+    const allState = set.size === 0;
+    const allRow = `
+        <label class="portfolio-col-check filter-all-row">
+            <input type="checkbox" ${allState ? 'checked' : ''}
+                   onchange="toggleCimMultiAll(${_attr(JSON.stringify(id))})">
+            ${escapeHtml(_cimMultiAllLabel(id))}
+        </label>`;
+    dd.innerHTML = allRow + items.map(it => `
+        <label class="portfolio-col-check">
+            <input type="checkbox" class="filter-val-box" data-fval="${_attr(it.value)}"
+                   ${allState || set.has(it.value) ? 'checked' : ''}
+                   onchange="toggleCimMultiValue(${_attr(JSON.stringify(id))})">
+            ${escapeHtml(it.label)}${it.count != null ? ` (${it.count})` : ''}
+        </label>`).join('');
+    _updateCimMultiBtn(id);
+}
+function toggleCimMultiFilter(id, event) {
+    if (event) event.stopPropagation();
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) return;
+    const wasOpen = dd.classList.contains('open');
+    _closeAllMultiDropdowns();       // close + commit any open dropdown (incl. this one)
+    if (!wasOpen) dd.classList.add('open');
+}
+function toggleCimMultiAll(id) {
+    // Master toggle: check every entry (All → show everything) ⇄ clear every
+    // entry (None → show nothing). "All" is stored as the empty set; "None" as
+    // the no-match sentinel, so the read logic needs no change.
+    const wasAll = cimMultiSel(id).size === 0;
+    cimMultiFilters[id] = wasAll ? new Set([_FILTER_NONE]) : new Set();
+    const nowAll = cimMultiSel(id).size === 0;
+    const dd = document.getElementById('fmd-' + id);
+    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = nowAll; });
+    _updateCimMultiBtn(id);
+    _multiFilterDirty.add(id);       // defer the table apply until the dropdown closes
+}
+// Rebuild the selection from the entry checkboxes' current state. All checked →
+// empty set (All); none checked → {sentinel} (None); otherwise the explicit set.
+function toggleCimMultiValue(id) {
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) return;
+    const boxes = [...dd.querySelectorAll('.filter-val-box')];
+    const selected = boxes.filter(cb => cb.checked).map(cb => cb.dataset.fval);
+    if (selected.length === boxes.length)      cimMultiFilters[id] = new Set();               // all → All
+    else if (selected.length === 0)            cimMultiFilters[id] = new Set([_FILTER_NONE]);  // none → None
+    else                                       cimMultiFilters[id] = new Set(selected);
+    const allBox = dd.querySelector('.filter-all-row input');
+    if (allBox) allBox.checked = cimMultiSel(id).size === 0;
+    _updateCimMultiBtn(id);
+    _multiFilterDirty.add(id);       // defer the table apply until the dropdown closes
+}
+if (typeof window !== 'undefined') {
+    window.toggleCimMultiFilter = toggleCimMultiFilter;
+    window.toggleCimMultiValue = toggleCimMultiValue;
+    window.toggleCimMultiAll = toggleCimMultiAll;
 }
 
 // The main tracked pipeline steps (canonical display stages)
@@ -875,7 +1010,72 @@ async function loadDashboard() {
     // — until the user happened to click a filter that re-ran applyFilters.
     updateSmartViewCounts();
     applyFilters();
+    loadSourceHealth();
 }
+
+// ── Source-data status bar ──────────────────────────────────────────────────
+// ALWAYS visible (all views, local app): shows the last data-refresh time and
+// the app build time. Turns amber and lists offenders when any upstream source
+// hasn't had a successful refresh within the server's threshold. Driven by
+// /api/source_health; on the static site the fetch fails and nothing renders.
+async function loadSourceHealth() {
+    try {
+        const res = await fetch('/api/source_health');
+        if (!res.ok) return;
+        renderSourceHealthBanner(await res.json());
+    } catch (_) { /* static site / server down: no bar */ }
+}
+function _fmtStaleAge(hrs) {
+    if (hrs == null) return 'never';
+    const d = Math.round(hrs / 24);
+    if (hrs >= 24) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+    return Math.max(1, Math.round(hrs)) + 'h ago';
+}
+function _fmtDT(iso) {
+    if (!iso) return '—';
+    try {
+        return new Date(iso).toLocaleString('en-US', {
+            timeZone: 'America/New_York', month: 'short', day: 'numeric',
+            year: 'numeric', hour: 'numeric', minute: '2-digit'
+        }) + ' ET';
+    } catch (_) { return iso; }
+}
+function renderSourceHealthBanner(data) {
+    // ALWAYS-visible info: app build time in the header (the last-refresh time is
+    // already shown alongside it by loadScanStatus in #last-updated).
+    const buildEl = document.getElementById('app-build');
+    if (buildEl) buildEl.textContent = data.build_time ? ('Build: ' + _fmtDT(data.build_time)) : '';
+    // The amber BANNER appears ONLY when a source is stale.
+    let bar = document.getElementById('source-health-banner');
+    const stale = ((data && data.sources) || []).filter(s => s.stale);
+    if (!stale.length) { if (bar) bar.remove(); return; }
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'source-health-banner';
+        document.body.insertBefore(bar, document.body.firstChild);
+    }
+    const items = stale.map(s => `${escapeHtml(s.name)} (${_fmtStaleAge(s.age_hours)})`).join(', ');
+    bar.innerHTML = `<span class="shb-icon">⚠</span>`
+        + `<span>Source data out of date — no refresh in over ${data.threshold_days} days: `
+        + `<strong>${items}</strong></span>`;
+}
+
+// ── Collapsible CIM filters (programs/courses) ──────────────────────────────
+// Mirrors the student/section tracker's "▸ Filters" toggle. Hides the filter
+// controls (scope bar, proposal/kind/smart-view buttons, dropdown filters); the
+// pipeline summary stays visible. Remembered per-browser; defaults open.
+let _cimFiltersOpen = (localStorage.getItem('cim-filters-open') !== 'false');
+function applyCimFiltersState() {
+    document.body.classList.toggle('cim-filters-collapsed', !_cimFiltersOpen);
+    const btn = document.getElementById('cim-filter-toggle-btn');
+    if (btn) btn.textContent = _cimFiltersOpen ? '▾ Filters' : '▸ Filters';
+}
+function toggleCimFilters() {
+    _cimFiltersOpen = !_cimFiltersOpen;
+    try { localStorage.setItem('cim-filters-open', _cimFiltersOpen); } catch (_) {}
+    applyCimFiltersState();
+}
+window.toggleCimFilters = toggleCimFilters;
 
 async function loadPipeline() {
     try {
@@ -963,11 +1163,9 @@ async function loadCourseColleges() {
     try {
         const res = await fetch('/api/course_colleges');
         const data = await res.json();
-        const select = document.getElementById('filter-college');
         const colleges = (data.colleges || []).slice()
             .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
-        const options = colleges.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))}</option>`).join('');
-        select.innerHTML = '<option value="">All Colleges</option>' + options;
+        renderCimMulti('filter-college', colleges.map(c => ({ value: c, label: abbreviateCollege(c) })));
     } catch (e) {
         console.error('Failed to load course colleges:', e);
     }
@@ -1181,11 +1379,9 @@ async function loadColleges() {
     try {
         const res = await fetch('/api/colleges');
         const data = await res.json();
-        const select = document.getElementById('filter-college');
         const colleges = (data.colleges || []).slice()
             .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
-        const options = colleges.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))}</option>`).join('');
-        select.innerHTML = '<option value="">All Colleges</option>' + options;
+        renderCimMulti('filter-college', colleges.map(c => ({ value: c, label: abbreviateCollege(c) })));
     } catch (e) {
         console.error('Failed to load colleges:', e);
     }
@@ -1268,6 +1464,10 @@ async function loadScanStatus() {
             const d = new Date(data.last_scan.scan_time);
             updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
+        // App build time — set here (runs on every view) so it's reliable even
+        // when loadSourceHealth (loadDashboard-only) doesn't run, e.g. Portfolio.
+        const buildEl = document.getElementById('app-build');
+        if (buildEl && data.build_time) buildEl.textContent = 'Build: ' + _fmtDT(data.build_time);
     } catch (e) {
         console.error('Failed to load scan status:', e);
     }
@@ -1278,6 +1478,15 @@ async function loadScanStatus() {
 function updatePipelineCounts(baseFiltered) {
     const pipeline = currentView === 'courses' ? cachedCoursePipeline : cachedPipeline;
     if (!pipeline.length) return;
+    // Initial-load race guard: /api/pipeline (tile counts) can resolve before
+    // /api/programs populates allPrograms. If a tile is clicked in that window,
+    // recounting from an empty source would zero EVERY tile and stick until the
+    // next applyFilters. Skip the recount while the source data is still empty;
+    // loadPrograms()/loadDashboard() re-run applyFilters once it arrives. (A
+    // legitimately empty result set — e.g. a search that matches nothing — still
+    // zeroes correctly because the source array itself is non-empty.)
+    const srcData = currentView === 'courses' ? allCourses : allPrograms;
+    if (!srcData.length) return;
     const isCourses = currentView === 'courses';
     // Recount each pipeline step from filtered data. Program tiles use canonical
     // stage names (e.g. "Program Setup" covers Catalog Setup / Editor / Banner /
@@ -1309,17 +1518,14 @@ function updatePipelineCounts(baseFiltered) {
 }
 
 function updateCollegeOptions(baseFiltered) {
-    const select = document.getElementById('filter-college');
-    const current = select.value;
     const counts = {};
     baseFiltered.forEach(item => {
         if (item.college) counts[item.college] = (counts[item.college] || 0) + 1;
     });
-    const sorted = Object.keys(counts).sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)));
-    select.innerHTML = '<option value="">All Colleges</option>' +
-        sorted.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(abbreviateCollege(c))} (${counts[c]})</option>`).join('');
-    // Preserve selection if still valid
-    if (counts[current]) select.value = current;
+    const items = Object.keys(counts)
+        .sort((a, b) => abbreviateCollege(a).localeCompare(abbreviateCollege(b)))
+        .map(c => ({ value: c, label: abbreviateCollege(c), count: counts[c] }));
+    renderCimMulti('filter-college', items);
 }
 
 function renderPipeline(pipeline, baseFiltered) {
@@ -1573,9 +1779,7 @@ function populateCampusFilter() {
         if (c) campuses.add(c);
     });
     const sorted = Array.from(campuses).sort();
-    const select = document.getElementById('filter-campus');
-    select.innerHTML = '<option value="">All Campuses</option>' +
-        sorted.map(c => `<option value="${c}">${c}</option>`).join('');
+    renderCimMulti('filter-campus', sorted.map(c => ({ value: c, label: c })));
 }
 
 function populateStepFilter() {
@@ -1592,9 +1796,9 @@ function populateStepFilter() {
 // Apply all filters EXCEPT pipeline and any in the 'exclude' set
 function getBaseFiltered(approverProgramIds, exclude) {
     const ex = exclude || {};
-    const collegeFilter = document.getElementById('filter-college').value;
+    const collegeSel = cimMultiSel('filter-college');
     const stepFilter = document.getElementById('filter-step').value;
-    const campusFilter = document.getElementById('filter-campus').value;
+    const campusSel = cimMultiSel('filter-campus');
     const approverFilter = document.getElementById('filter-approver').value;
     const searchRaw = document.getElementById('filter-search').value;
     const matchSearch = buildSearchMatcher(searchRaw);
@@ -1611,7 +1815,8 @@ function getBaseFiltered(approverProgramIds, exclude) {
         // Hide them from every program-side filter (courses don't have these).
         if (currentView === 'programs' && isTemplateProgram(item)) return false;
         // College perspective scopes everything to the selected college.
-        if (collegeScope && item.college !== collegeScope) return false;
+        if (collegeScope && item.college !== collegeScope
+                && !(item.concentration_colleges || []).includes(collegeScope)) return false;
         // Smart-view definitions:
         //   new    = submitted in the last 30 days (no other qualifier)
         //   recent = step advanced in the last 14 days BUT NOT a new submission
@@ -1648,14 +1853,15 @@ function getBaseFiltered(approverProgramIds, exclude) {
         if (!ex.kind && currentView === 'programs' && programKindFilter) {
             if (classifyProgramKind(item) !== programKindFilter) return false;
         }
-        if (!ex.college && collegeFilter && item.college !== collegeFilter) return false;
+        if (!ex.college && collegeSel.size && !collegeSel.has(item.college)
+                && !(item.concentration_colleges || []).some(cc => collegeSel.has(cc))) return false;
         if (currentView === 'courses') {
             const subjSel = document.getElementById('filter-subject');
             const subjectFilter = subjSel ? subjSel.value : '';
             if (subjectFilter && courseSubjectCode(item) !== subjectFilter) return false;
         }
         if (stepFilter && item.current_step !== stepFilter) return false;
-        if (currentView === 'programs' && campusFilter && extractCampus(item.name) !== campusFilter) return false;
+        if (currentView === 'programs' && campusSel.size && !campusSel.has(extractCampus(item.name))) return false;
         if (approverProgramIds && !approverProgramIds.has(item.id)) return false;
 
         // Search in name/title and code/banner_code. Supports `*` (any
@@ -1705,7 +1911,6 @@ async function applyFilters() {
         }
         return;
     }
-    const collegeFilter = document.getElementById('filter-college').value;
     const approverFilter = document.getElementById('filter-approver').value;
 
     // If approver filter is active, fetch programs/courses from API (or use static cache)
@@ -4835,6 +5040,28 @@ function renderConsoleContent(data) {
         html += '</tbody></table>';
     }
 
+    const svtPending = mm.svt_pending_analysis || [];
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">SVT concentrations pending analysis (${svtPending.length})</h4>`;
+    html += '<p style="color:#64748b;font-size:11px;margin:0 0 6px">Concentration proposals whose parent program is unclear or that bundle multiple concentrations — held out of the portfolio until a parent is assigned.</p>';
+    if (!svtPending.length) {
+        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+    } else {
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+        html += '<thead><tr style="background:#fffbeb;text-align:left">'
+             + '<th style="padding:4px 8px">SVT Name</th>'
+             + '<th style="padding:4px 8px">SVT Campus</th>'
+             + '<th style="padding:4px 8px">Reason</th>'
+             + '</tr></thead><tbody>';
+        for (const p of svtPending) {
+            html += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(p.source_name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || '')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.reason || '')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
     // IPD sections removed — overlay disabled, source no longer consulted.
 
     html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">SVT entries with no CIM match (${svtMismatches.length})</h4>`;
@@ -4864,6 +5091,69 @@ function renderConsoleContent(data) {
             html += '</tbody></table>';
         }
         html += '</details>';
+    }
+
+    // ---- Banner ↔ Portfolio reconciliation (programs / codes / campuses) ----
+    const rec = mm.banner_reconciliation || {};
+    const recTotal = (rec.missing_in_portfolio || []).length + (rec.missing_in_banner || []).length
+                   + (rec.code_mismatch || []).length + (rec.campus_diff || []).length;
+    if (recTotal) {
+        html += `<h3 style="margin:22px 0 6px">Banner ↔ Portfolio reconciliation (${recTotal})</h3>`;
+        html += '<p style="color:#64748b;font-size:11px;margin:0 0 10px">Banner (Registrar system of record) and the portfolio are meant to be in sync. Excludes combined/dual majors, minors, non-degree/pathway records, in-workflow proposals, inactivations, and completed history.</p>';
+        const _simpleTable = (rows, cols, bg) => {
+            let t = `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px"><thead><tr style="background:${bg};text-align:left">`;
+            t += cols.map(c => `<th style="padding:4px 8px">${escapeHtml(c[0])}</th>`).join('') + '</tr></thead><tbody>';
+            for (const r of rows) {
+                t += '<tr style="border-top:1px solid #e2e8f0">' + cols.map(c => {
+                    let v = r[c[1]];
+                    if (Array.isArray(v)) v = v.join(', ');
+                    return `<td style="padding:4px 8px">${escapeHtml(v || '—')}</td>`;
+                }).join('') + '</tr>';
+            }
+            return t + '</tbody></table>';
+        };
+        const mip = rec.missing_in_portfolio || [];
+        html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">Active in Banner, not in portfolio (${mip.length})</h4>`;
+        html += mip.length ? _simpleTable(mip, [['Banner code','banner_code'],['Program','name']], '#fff1f2')
+                           : '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+        const mib = rec.missing_in_banner || [];
+        if (mib.length) {
+            html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">Tracked, not active in Banner (${mib.length})</h4>`;
+            html += _simpleTable(mib, [['Program','program'],['CIM code','banner_code']], '#fff1f2');
+        }
+        const cmm = rec.code_mismatch || [];
+        if (cmm.length) {
+            html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">Banner code ≠ CIM code (${cmm.length})</h4>`;
+            html += _simpleTable(cmm, [['Program','program'],['CIM code','cim_code'],['Banner code','banner_code']], '#fffbeb');
+        }
+        const cdf = rec.campus_diff || [];
+        if (cdf.length) {
+            html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">Campus footprint differs (${cdf.length})</h4>`;
+            html += _simpleTable(cdf, [['Program','program'],['Banner code','banner_code'],['Only in portfolio','only_portfolio'],['Only in Banner','only_banner']], '#fffbeb');
+        }
+    }
+
+    // ---- Banner ↔ CIM concentration discrepancies ----
+    const concDisc = mm.concentration_college_discrepancies || [];
+    if (concDisc.length) {
+        html += `<details style="margin-top:16px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:#991b1b">Concentrations: Banner ↔ CIM differences (${concDisc.length})</summary>`;
+        html += '<p style="color:#64748b;font-size:11px;margin:6px 0 8px">Per program, concentrations found in the CIM curriculum but not Banner (Program/Major/Concentration), and vice-versa. Names are matched fuzzily (Banner truncates), so some rows are naming variants rather than true gaps. Banner is authoritative for the managing college.</p>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+        html += '<thead><tr style="background:#fff1f2;text-align:left">'
+             + '<th style="padding:4px 8px">Program</th>'
+             + '<th style="padding:4px 8px">Banner code</th>'
+             + '<th style="padding:4px 8px">In CIM, not Banner</th>'
+             + '<th style="padding:4px 8px">In Banner, not CIM</th>'
+             + '</tr></thead><tbody>';
+        for (const d of concDisc) {
+            html += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(d.program || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(d.banner_code || '—')}</td>
+                <td style="padding:4px 8px;color:#92400e">${(d.cim_only || []).map(escapeHtml).join('<br>') || '<span style="color:#94a3b8">—</span>'}</td>
+                <td style="padding:4px 8px;color:#1e40af">${(d.banner_only || []).map(escapeHtml).join('<br>') || '<span style="color:#94a3b8">—</span>'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></details>';
     }
 
     return html;
@@ -5047,6 +5337,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Owning college. From CIM XML for tracked programs; SVT/IPD-supplied values are normalized to the canonical CIM name so duplicates and abbreviations are merged.'},
     {key: 'campus',       label: 'Campus',
         help: 'Deployment campus. All online variants (Online, Primarily Online, "Online - Vancouver Requirements", etc.) are merged into a single "Online" campus.'},
+    {key: 'catalogyears', label: 'Catalog Years',
+        help: 'Catalog years the program is part of (current year plus two forward), derived from CIM: a proposal’s effective catalog and type set when a program enters and leaves. A pending inactivation still in workflow keeps the program in the current year and removes it from its effective year onward.'},
     {key: 'market2025',      label: '2025 Market Category', defaultHidden: true,
         help: 'Market category from the 2025 portfolio scoring workbook (Boston programs only).'},
     {key: 'perf2025',        label: '2025 Performance Category', defaultHidden: true,
@@ -5077,6 +5369,8 @@ const PORTFOLIO_COLUMNS = [
         help: 'Heuristic note for the "Needs SVT coordination" view: why an SVT entry with no CIM record is problematic — no CIM match, a possible match to an existing CIM program (likely a match failure / duplicate), or a bundled name that may need splitting.'},
     {key: 'cimchange',    label: 'CIM Change',
         help: 'CIM proposal type for the current edit cycle: New (added), Change (edited), or Inactivation.'},
+    {key: 'ciminact',     label: 'Inactivation in Progress',
+        help: 'Inactivation in progress: the program has a CIM inactivation and isn’t fully wound down — still moving through the CIM workflow (including teach-out) or still admitting students.'},
     {key: 'inworkflow',   label: 'In CIM',
         help: 'Yes if the program exists in CourseLeaf CIM at all — either active in workflow, or already approved/historical. No if the portfolio entry comes only from an external feed (SVT, IPD, OTP) with no CIM record.'},
     {key: 'inactadmit',  label: 'Inactivation of Admission',
@@ -5104,6 +5398,46 @@ const PORTFOLIO_COLUMNS = [
     {key: 'emplreview',   label: 'April 2026 EMPL Review',
         help: 'Notes (column M) from the "OTP Program Tracking" sheet of the Optimization, Withdrawal, and Deactivation Tracker — the April 2026 EMPL review notes (Boston-only).'},
 ];
+
+// Master's enrollment columns are generated dynamically from whatever years
+// the enrollment feed provides (the academic-year window rolls forward), so
+// they aren't hardcoded above. They're appended to PORTFOLIO_COLUMNS the first
+// time portfolio data loads. Keys: enr_total_YYYY / enr_new_YYYY. Hidden by
+// default (toggle via the Columns menu). Source: Master's Program Enrollment
+// Summary (Tableau, ProfessionalAdvancementNetwork), joined by CIM banner code.
+function _enrollmentYears() {
+    const ys = new Set();
+    (allPortfolioPrograms || []).forEach(p => {
+        if (p.enrollment) Object.keys(p.enrollment).forEach(y => ys.add(y));
+    });
+    return [...ys].sort();
+}
+function _ensureEnrollmentColumns() {
+    const have = new Set(PORTFOLIO_COLUMNS.map(c => c.key));
+    const years = _enrollmentYears();
+    // All "New {year}" columns first, then all "Total {year}" columns.
+    [['new', 'New'], ['total', 'Total']].forEach(([m, label]) => {
+        years.forEach(y => {
+            const key = `enr_${m}_${y}`;
+            if (!have.has(key)) {
+                PORTFOLIO_COLUMNS.push({
+                    key, label: `${label} ${y}`, defaultHidden: true, enroll: {m, y},
+                    help: `${label} master's enrollment for ${y}, `
+                        + `from the Master's Program Enrollment Summary (Tableau), joined by CIM banner code.`,
+                });
+            }
+        });
+    });
+}
+// Numeric enrollment value for a program + enr_ column key, or '' if absent.
+function _enrValue(p, key) {
+    const m = /^enr_(total|new)_(\d{4})$/.exec(key);
+    if (!m || !p.enrollment) return '';
+    const rec = p.enrollment[m[2]];
+    if (!rec) return '';
+    const v = rec[m[1] === 'total' ? 't' : 'n'];
+    return (v === 0 || v) ? v : '';
+}
 
 // Tracks which column keys have ever existed in PORTFOLIO_COLUMNS at the
 // time a user last saved their picker selection. When new columns are added
@@ -5258,16 +5592,32 @@ if (typeof window !== 'undefined') window.startPortfolioColResize = startPortfol
 
 function _rebuildColDropdownItems(dd) {
     dd.innerHTML =
-        `<div class="portfolio-col-selectall">
+        `<div class="portfolio-col-search">
+            <input type="text" id="portfolio-col-search-input" placeholder="Search columns…"
+                   autocomplete="off" oninput="_filterColDropdown(this.value)"
+                   onclick="event.stopPropagation()">
+        </div>
+        <div class="portfolio-col-selectall">
             <button onclick="toggleAllPortfolioCols(true)">Select All</button>
             <button onclick="toggleAllPortfolioCols(false)">Unselect All</button>
         </div>` +
         PORTFOLIO_COLUMNS.map(c => `
-        <label class="portfolio-col-check">
+        <label class="portfolio-col-check" data-label="${escapeHtml((c.label || '').toLowerCase())}">
             <input type="checkbox" ${portfolioVisibleCols.has(c.key) ? 'checked' : ''}
                    onchange="togglePortfolioCol('${c.key}',this.checked)">
             ${c.label}
         </label>`).join('');
+}
+
+// Filter the column-picker list by label as the user types.
+function _filterColDropdown(q) {
+    q = (q || '').trim().toLowerCase();
+    const dd = document.getElementById('portfolio-col-dropdown');
+    if (!dd) return;
+    dd.querySelectorAll('.portfolio-col-check').forEach(lab => {
+        const hay = lab.getAttribute('data-label') || lab.textContent.toLowerCase();
+        lab.style.display = (!q || hay.includes(q)) ? '' : 'none';
+    });
 }
 
 function _savePortfolioCols() {
@@ -5292,6 +5642,8 @@ function togglePortfolioColPicker(e) {
     if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
     _rebuildColDropdownItems(dd);
     dd.classList.add('open');
+    const s = document.getElementById('portfolio-col-search-input');
+    if (s) setTimeout(() => s.focus(), 0);
 }
 
 function togglePortfolioCol(key, visible) {
@@ -5302,10 +5654,11 @@ function togglePortfolioCol(key, visible) {
 }
 
 document.addEventListener('click', e => {
-    // Close multi-select filter dropdowns on outside click
+    // Close multi-select filter dropdowns on outside click (commits deferred
+    // selection via _closeMultiDropdown → apply-on-close).
     document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => {
         const wrap = el.closest('.filter-multi-wrap');
-        if (wrap && !wrap.contains(e.target)) el.classList.remove('open');
+        if (wrap && !wrap.contains(e.target)) _closeMultiDropdown(el);
     });
     // Close column picker dropdown on outside click
     const picker = document.getElementById('portfolio-col-picker');
@@ -5418,6 +5771,10 @@ const ADMIN_CIM_INACT_SVT_ACTIVE_VIEW = {
         { type: 'rule', field: 'cim_change', op: 'in', value: ['Inactivation'] },
         { type: 'rule', field: 'svt', op: 'is_set', value: [] },
         { type: 'rule', field: 'svt', op: 'not_in', value: ['Inactivation In Progress'] },
+        // Suppress agreement: when the SVT row is ITSELF an inactivation, SVT's
+        // "Complete"/"Intake" means the inactivation is in progress/done, which
+        // AGREES with CIM — not a conflict (e.g. Applied Physics, Cloud Software).
+        { type: 'rule', field: 'svt_type', op: 'not_in', value: ['Inactivation'] },
     ] } },
 };
 const ADMIN_CIM_DONE_SVT_BEHIND_VIEW = {
@@ -5529,7 +5886,10 @@ function _snapshotPortfolioFilters() {
         cimchange:  [...portfolioCimChangeFilter],
         inworkflow: [...portfolioInWorkflowFilter],
         inactadmit: [...portfolioInactAdmitFilter],
+        catalogyear:[...portfolioCatalogYearFilter],
         inacttoday: portfolioInactTodayFilter,
+        inactprogress: portfolioInactProgressFilter,
+        exitmasters: portfolioExitMastersFilter,
         search:     portfolioSearch,
     };
 }
@@ -5557,7 +5917,10 @@ function _applyPortfolioFilters(f) {
     portfolioCimChangeFilter = new Set(f.cimchange || []);
     portfolioInWorkflowFilter = new Set(f.inworkflow || []);
     portfolioInactAdmitFilter = new Set(f.inactadmit || []);
+    portfolioCatalogYearFilter = new Set(f.catalogyear || []);
     portfolioInactTodayFilter = f.inacttoday || '';
+    portfolioInactProgressFilter = f.inactprogress || '';
+    portfolioExitMastersFilter = f.exitmasters || '';
     portfolioSearch           = f.search    || '';
     // Sync all UI controls to the restored state
     _syncPortfolioFilterUi();
@@ -5579,6 +5942,7 @@ function _syncPortfolioFilterUi() {
         'portfolio-filter-cimchange': portfolioCimChangeFilter,
         'portfolio-filter-inworkflow':portfolioInWorkflowFilter,
         'portfolio-filter-inactadmit':portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear':portfolioCatalogYearFilter,
     };
     Object.entries(multiIds).forEach(([id, set]) => {
         const btn = document.getElementById(id);
@@ -5592,6 +5956,10 @@ function _syncPortfolioFilterUi() {
     // Inact today select
     const itSel = document.getElementById('portfolio-filter-inacttoday');
     if (itSel) itSel.value = portfolioInactTodayFilter;
+    const ipSel = document.getElementById('portfolio-filter-inactprogress');
+    if (ipSel) ipSel.value = portfolioInactProgressFilter;
+    const emSel = document.getElementById('portfolio-filter-exitmasters');
+    if (emSel) emSel.value = portfolioExitMastersFilter;
     // Search box
     const sb = document.getElementById('filter-search');
     if (sb && currentView === 'portfolio') sb.value = portfolioSearch;
@@ -5755,10 +6123,14 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'credential',  label: 'Credential',       type: 'select', value: p => extractPortfolioDegree(p.program_name) || ''},
     {key: 'college',     label: 'College',          type: 'select', value: p => p.college || ''},
     {key: 'campus',      label: 'Campus',           type: 'select', value: p => p.campus || ''},
+    {key: 'catalog_year',label: 'Catalog Year',     type: 'select',
+        multi: p => { const ys = (p.catalog_years || '').split(/,\s*/).filter(Boolean); return ys.length ? ys : ['(none)']; },
+        help: 'Catalog years the program is part of (current year + two forward), derived from CIM. Multi-valued: pick one or more years with "is one of"; "(none)" matches programs not in any of these catalog years.'},
     {key: 'in_cim',      label: 'In CIM',           type: 'boolean', value: p => p.cim_program_id ? 'Y' : 'N'},
     {key: 'cim_step',    label: 'CIM Step',         type: 'select', value: p => p.cim_step || ''},
     {key: 'cim_change',  label: 'CIM Change',       type: 'select', value: p => p.cim_change_type || ''},
     {key: 'svt',         label: 'SVT Status',       type: 'select', value: p => p.svt_status || ''},
+    {key: 'svt_type',    label: 'SVT Proposal Type', type: 'select', value: p => p.roster_proposal_type || ''},
     {key: 'launch',      label: 'SVT Launch Date',  type: 'select', value: p => p.roster_launch_date || ''},
     {key: 'cimterm',     label: 'CIM Effective Term', type: 'text',  value: p => _pfEffTermLabel(p)},
     {key: 'launch_overdue', label: 'SVT launch overdue',     type: 'boolean', value: p => _pfLaunchOverdue(p) ? 'Y' : 'N'},
@@ -5771,6 +6143,8 @@ const PORTFOLIO_FILTER_FIELDS = [
     {key: 'speed',       label: 'Speed to Market',  type: 'boolean', value: p => p.speed_to_market === 'True' ? 'Y' : p.speed_to_market === 'False' ? 'N' : ''},
     {key: 'gls',         label: 'GLS Status',       type: 'select', value: p => p.gls_status || ''},
     {key: 'otp',         label: 'OTP Status',       type: 'select', value: p => p.otp_status || ''},
+    {key: 'cim_inact',   label: 'Inactivation in Progress', type: 'boolean', value: p => _cimInactivating(p) ? 'Y' : 'N',
+        help: 'Yes when the program has a CIM inactivation and isn’t fully wound down — still moving through the CIM workflow (including teach-out) or still admitting students.'},
     {key: 'inact_admit', label: 'Inactivation of Admission', type: 'select', value: p => p.inactivation_admission || ''},
     {key: 'admit_today', label: 'Admitting Today',  type: 'boolean', value: p => { const v = _inactAdmittingToday(p); return v === 'Yes' ? 'Y' : v === 'No' ? 'N' : ''; }},
     {key: 'offering',    label: 'New Offering',     type: 'select', value: p => portfolioOfferingLabel(p)},
@@ -5792,7 +6166,12 @@ function getPortfolioFieldValues(key) {
     const f = _pvField(key);
     if (!f) return [];
     const set = new Set();
-    (allPortfolioPrograms || []).forEach(p => set.add(f.value(p)));
+    (allPortfolioPrograms || []).forEach(p => {
+        // Multi-valued fields (e.g. Catalog Year, where a row belongs to several
+        // years) expose each value individually so the picker offers them all.
+        if (f.multi) (f.multi(p) || []).forEach(v => { if (v) set.add(v); });
+        else set.add(f.value(p));
+    });
     return [...set].sort((a, b) => String(a).localeCompare(String(b)));
 }
 
@@ -5814,8 +6193,20 @@ function evalPortfolioNode(p, node) {
 function evalPortfolioRule(p, rule) {
     const f = _pvField(rule.field);
     if (!f) return true;
-    let v = String(f.value(p) == null ? '' : f.value(p));
     const op = rule.op || '';
+    // Multi-valued field (e.g. Catalog Year): the row has a set of values; a
+    // rule matches if any selected value is in that set ("is one of" OR).
+    if (f.multi) {
+        const vals = (f.multi(p) || []).map(String).filter(Boolean);
+        if (op === 'is_set')   return vals.length > 0;
+        if (op === 'is_empty') return vals.length === 0;
+        const arr = Array.isArray(rule.value) ? rule.value : (rule.value ? [rule.value] : []);
+        if (!arr.length) return true;
+        const sel = new Set(arr);
+        const hit = vals.some(x => sel.has(x));
+        return op === 'not_in' ? !hit : hit;
+    }
+    let v = String(f.value(p) == null ? '' : f.value(p));
     if (op === 'is_set')   return v !== '';
     if (op === 'is_empty') return v === '';
     if (f.type === 'date') {
@@ -6060,7 +6451,10 @@ function _renderPvRule(rule, path) {
     const opSel = `<select onchange="pvbSetOp('${path}', this.value)">${
         _opsForPvType(f.type).map(([op, lbl]) => `<option value="${op}"${op === rule.op ? ' selected' : ''}>${lbl}</option>`).join('')
     }</select>`;
-    return `<div class="pvb-rule">${fieldSel}${opSel}${_renderPvRuleValue(rule, f, path)}
+    const help = f.help
+        ? `<span class="info-tip" onclick="event.stopPropagation()"><i class="tip-icon">i</i><span class="tip-bubble">${escapeHtml(f.help)}</span></span>`
+        : '';
+    return `<div class="pvb-rule">${fieldSel}${help}${opSel}${_renderPvRuleValue(rule, f, path)}
         <button class="pvb-iconbtn" title="Remove rule" onclick="pvbRemove('${path}')">✕</button></div>`;
 }
 
@@ -6342,13 +6736,6 @@ function _portfolioViewTouch() {}
 
 // Update the Views button label + render the starred-view tile bar.
 function renderPortfolioViewTiles() {
-    // Views button — always "★ Views" (active view shown by the highlighted
-    // tile, not the button text), plus an ADMIN pill when ?admin=1 is set.
-    const btn = document.getElementById('portfolio-views-btn');
-    if (btn) {
-        btn.innerHTML = '★ Views' + (_pvIsAdmin() ? ' <span class="pv-admin-pill">ADMIN</span>' : '');
-    }
-
     const bar = document.getElementById('portfolio-view-tiles');
     if (!bar) return;
     if (currentView !== 'portfolio') { bar.style.display = 'none'; return; }
@@ -6378,7 +6765,9 @@ function renderPortfolioViewTiles() {
         } catch(_) { return '—'; }
     }
 
-    bar.innerHTML = tileViews.map(v => {
+    // Clickable "VIEWS" label opens the Views modal (replaces the header button).
+    const _viewsLabel = `<button class="view-tiles-label" onclick="openPortfolioViewsModal()" title="Open saved views — switch, star, or build a filter">VIEWS${_pvIsAdmin() ? ' <span class="pv-admin-pill">ADMIN</span>' : ''}</button>`;
+    bar.innerHTML = _viewsLabel + tileViews.map(v => {
         const cnt = countForView(v);
         const active = (v.id === 'all')
             ? (!portfolioActiveViewId || portfolioActiveViewId === 'all')
@@ -6432,6 +6821,7 @@ let portfolioGlsFilter       = new Set();
 let portfolioCimFilter       = new Set();
 let portfolioCimChangeFilter  = new Set();
 let portfolioInWorkflowFilter = new Set();
+let portfolioCatalogYearFilter = new Set();   // Catalog Years (CIM-derived membership)
 
 // Toggle-button bridges to the existing multi-select filter Sets. The
 // dropdowns and the buttons share the same Set, so changing one updates
@@ -6469,6 +6859,8 @@ if (typeof window !== 'undefined') {
 }
 let portfolioInactAdmitFilter = new Set();
 let portfolioInactTodayFilter = '';
+let portfolioInactProgressFilter = '';   // '' | 'Yes' | 'No' — CIM inactivation in progress
+let portfolioExitMastersFilter = '';     // '' | 'Yes' | 'No' — exit-master's-only
 
 // "Fall 2026" → Date object for Sep 1 of that year (approximate start of Fall semester).
 function _semesterToDate(s) {
@@ -6480,8 +6872,18 @@ function _semesterToDate(s) {
     return new Date(year, month, 1);
 }
 
-// Returns 'Yes' if the program is still admitting today, 'No' if admission has closed,
-// or '' if there is no inactivation admission date.
+// A program's inactivation is *in progress* when its current CIM proposal is an
+// Inactivation and the program is not fully wound down yet — still moving
+// through the CIM workflow (including Program Teach-Out) OR still admitting
+// students (inactivation approved but admissions not yet ended). All-levels.
+function _cimInactivating(p) {
+    if (p.cim_change_type !== 'Inactivation') return false;
+    // In progress = the program has a CIM inactivation and is not fully wound
+    // down: still moving through the workflow (including Program Teach-Out) OR
+    // the inactivation is approved but the program is still admitting students.
+    return !!p.cim_step || _inactAdmittingToday(p) === 'Yes';
+}
+
 function _inactAdmittingToday(p) {
     if (!p.inactivation_admission) return '';
     const cutoff = _semesterToDate(p.inactivation_admission);
@@ -6705,6 +7107,8 @@ async function loadPortfolioDashboard() {
         allPortfolioPrograms = pj.programs || [];
         allPortfolioPrograms.forEach(p => {
             p.concentrations = p.concentrations_json ? JSON.parse(p.concentrations_json) : [];
+            try { p.enrollment = p.enrollment_json ? JSON.parse(p.enrollment_json) : null; }
+            catch (e) { p.enrollment = null; }
         });
         await _hydratePortfolioTeamViews(pj);
         portfolioExpandedIds = new Set();
@@ -6748,6 +7152,18 @@ function _getPortfolioFilterValues() {
         'portfolio-filter-inworkflow': ['Yes', 'No'],
         'portfolio-filter-inactadmit': [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
             (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0)),
+        'portfolio-filter-catalogyear': (() => {
+            const ys = new Set();
+            let anyBlank = false;
+            programs.forEach(p => {
+                const v = (p.catalog_years || '').split(/,\s*/).filter(Boolean);
+                if (v.length) v.forEach(y => ys.add(y));
+                else anyBlank = true;
+            });
+            const out = [...ys].sort();
+            if (anyBlank) out.push('(none)');   // isolate blank (inactivated / out-of-window)
+            return out;
+        })(),
     };
 }
 
@@ -6773,10 +7189,14 @@ function _updateMultiFilterBtn(id, filterSet) {
         'portfolio-filter-cimchange':  'All Changes',
         'portfolio-filter-inworkflow': 'All',
         'portfolio-filter-inactadmit': 'All Semesters',
+        'portfolio-filter-catalogyear': 'All Catalog Years',
     };
     if (filterSet.size === 0) {
         btn.textContent = (ALL_LABEL[id] || 'All') + ' ▾';
         if (wrap) wrap.classList.remove('has-value');
+    } else if (filterSet.has(_FILTER_NONE)) {
+        btn.textContent = 'None ▾';
+        if (wrap) wrap.classList.add('has-value');
     } else if (filterSet.size === 1) {
         btn.textContent = labelFor([...filterSet][0]) + ' ▾';
         if (wrap) wrap.classList.add('has-value');
@@ -6794,6 +7214,7 @@ function populatePortfolioFilters() {
         'portfolio-filter-gls',
         'portfolio-filter-cim', 'portfolio-filter-cimchange',
         'portfolio-filter-inworkflow', 'portfolio-filter-inactadmit',
+        'portfolio-filter-catalogyear',
     ];
     const filterSetMap = {
         'portfolio-filter-college':    portfolioCollegeFilter,
@@ -6808,6 +7229,7 @@ function populatePortfolioFilters() {
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
         'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
     };
     multiIds.forEach(id => _updateMultiFilterBtn(id, filterSetMap[id] || new Set()));
     // Keep the button rows in sync with the underlying filter Sets.
@@ -6836,7 +7258,10 @@ const _portfolioFilterVars = {
     'portfolio-filter-cimchange':  () => { portfolioCimChangeFilter.clear();  _updateMultiFilterBtn('portfolio-filter-cimchange',  portfolioCimChangeFilter); },
     'portfolio-filter-inworkflow': () => { portfolioInWorkflowFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inworkflow', portfolioInWorkflowFilter); },
     'portfolio-filter-inactadmit': () => { portfolioInactAdmitFilter.clear(); _updateMultiFilterBtn('portfolio-filter-inactadmit', portfolioInactAdmitFilter); },
+    'portfolio-filter-catalogyear': () => { portfolioCatalogYearFilter.clear(); _updateMultiFilterBtn('portfolio-filter-catalogyear', portfolioCatalogYearFilter); },
     'portfolio-filter-inacttoday': () => { portfolioInactTodayFilter = ''; },
+    'portfolio-filter-inactprogress': () => { portfolioInactProgressFilter = ''; },
+    'portfolio-filter-exitmasters': () => { portfolioExitMastersFilter = ''; },
 };
 
 function clearPortfolioFilter(id) {
@@ -6854,9 +7279,9 @@ function togglePortfolioMultiFilter(id, e) {
     e.stopPropagation();
     const dd = document.getElementById('fmd-' + id);
     if (!dd) return;
-    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
-    // Close other open dropdowns
-    document.querySelectorAll('.filter-multi-dropdown.open').forEach(el => el.classList.remove('open'));
+    if (dd.classList.contains('open')) { _closeMultiDropdown(dd); return; }  // close + commit
+    // Close (and commit) other open dropdowns
+    _closeAllMultiDropdowns();
     const filterSetMap = {
         'portfolio-filter-college':    portfolioCollegeFilter,
         'portfolio-filter-campus':     portfolioCampusFilter,
@@ -6870,6 +7295,7 @@ function togglePortfolioMultiFilter(id, e) {
         'portfolio-filter-cimchange':  portfolioCimChangeFilter,
         'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
         'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
     };
     const filterSet = filterSetMap[id];
     const valuesMap = _getPortfolioFilterValues();
@@ -6886,40 +7312,78 @@ function togglePortfolioMultiFilter(id, e) {
     // escapeHtml() only escapes <,>,& (not "), so it doesn't help here.
     // _attr() escapes " → &quot; for HTML attribute context; the browser
     // decodes the entity back to " before evaluating the handler at click time.
-    const _attr = s => s.replace(/"/g, '&quot;');
-    dd.innerHTML = display.map(v => `
+    const _attr = s => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    // "All" is a master checkbox: checked when every entry is selected (stored as
+    // the empty set = "no restriction"). In that state the value boxes render
+    // checked too; the "None" state ({sentinel}) renders them clear.
+    const allState = !filterSet || filterSet.size === 0;
+    const allRow = `
+        <label class="portfolio-col-check filter-all-row">
+            <input type="checkbox" ${allState ? 'checked' : ''}
+                   onchange="togglePortfolioMultiAll(${_attr(JSON.stringify(id))})">
+            All
+        </label>`;
+    dd.innerHTML = allRow + display.map(v => `
         <label class="portfolio-col-check">
-            <input type="checkbox" ${filterSet && filterSet.has(v) ? 'checked' : ''}
-                   onchange="togglePortfolioMultiValue(${_attr(JSON.stringify(id))}, ${_attr(JSON.stringify(v))}, this.checked)">
+            <input type="checkbox" class="filter-val-box" data-fval="${_attr(String(v))}"
+                   ${allState || (filterSet && filterSet.has(v)) ? 'checked' : ''}
+                   onchange="togglePortfolioMultiValue(${_attr(JSON.stringify(id))})">
             ${escapeHtml(labelFor(v))}
         </label>`).join('');
     dd.classList.add('open');
 }
 
-function togglePortfolioMultiValue(id, value, checked) {
-    const filterSetMap = {
-        'portfolio-filter-college':    portfolioCollegeFilter,
-        'portfolio-filter-campus':     portfolioCampusFilter,
-        'portfolio-filter-otp':        portfolioOtpFilter,
-        'portfolio-filter-ipd':        portfolioIpdFilter,
-        'portfolio-filter-roster':     portfolioRosterFilter,
-        'portfolio-filter-substatus':  portfolioSubStatusFilter,
-        'portfolio-filter-speed':      portfolioSpeedFilter,
-        'portfolio-filter-gls':        portfolioGlsFilter,
-        'portfolio-filter-cim':        portfolioCimFilter,
-        'portfolio-filter-cimchange':  portfolioCimChangeFilter,
-        'portfolio-filter-inworkflow': portfolioInWorkflowFilter,
-        'portfolio-filter-inactadmit': portfolioInactAdmitFilter,
+function _portfolioFilterSetMap() {
+    return {
+        'portfolio-filter-college':     portfolioCollegeFilter,
+        'portfolio-filter-campus':      portfolioCampusFilter,
+        'portfolio-filter-otp':         portfolioOtpFilter,
+        'portfolio-filter-ipd':         portfolioIpdFilter,
+        'portfolio-filter-roster':      portfolioRosterFilter,
+        'portfolio-filter-substatus':   portfolioSubStatusFilter,
+        'portfolio-filter-speed':       portfolioSpeedFilter,
+        'portfolio-filter-gls':         portfolioGlsFilter,
+        'portfolio-filter-cim':         portfolioCimFilter,
+        'portfolio-filter-cimchange':   portfolioCimChangeFilter,
+        'portfolio-filter-inworkflow':  portfolioInWorkflowFilter,
+        'portfolio-filter-inactadmit':  portfolioInactAdmitFilter,
+        'portfolio-filter-catalogyear': portfolioCatalogYearFilter,
     };
-    const filterSet = filterSetMap[id];
+}
+function togglePortfolioMultiAll(id) {
+    const filterSetMap = _portfolioFilterSetMap();
+    const set = filterSetMap[id];
+    if (!set) return;
+    // Master toggle: check every entry (All → everything) ⇄ clear every entry
+    // (None → nothing). "All" is the empty set; "None" the no-match sentinel.
+    const wasAll = set.size === 0;
+    if (wasAll) { set.add(_FILTER_NONE); } else { set.clear(); }
+    const nowAll = set.size === 0;
+    const dd = document.getElementById('fmd-' + id);
+    if (dd) dd.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = nowAll; });
+    _updateMultiFilterBtn(id, set);
+    if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
+    _multiFilterDirty.add(id);   // defer the table apply until the dropdown closes
+}
+
+// Rebuild the selection from the entry checkboxes. All checked → empty set
+// (All); none checked → {sentinel} (None); otherwise the explicit set.
+function togglePortfolioMultiValue(id) {
+    const filterSet = _portfolioFilterSetMap()[id];
     if (!filterSet) return;
-    if (checked) filterSet.add(value);
-    else filterSet.delete(value);
+    const dd = document.getElementById('fmd-' + id);
+    if (!dd) return;
+    const boxes = [...dd.querySelectorAll('.filter-val-box')];
+    const selected = boxes.filter(cb => cb.checked).map(cb => cb.dataset.fval);
+    filterSet.clear();
+    if (selected.length === 0)                 filterSet.add(_FILTER_NONE);   // none → None
+    else if (selected.length < boxes.length)   selected.forEach(v => filterSet.add(v));
+    // (all checked → leave empty = All)
+    const allBox = dd.querySelector('.filter-all-row input');
+    if (allBox) allBox.checked = filterSet.size === 0;
     _updateMultiFilterBtn(id, filterSet);
     if (typeof _syncPortfolioButtonRows === 'function') _syncPortfolioButtonRows();
-    updateClearButtons();
-    _portfolioViewTouch();
-    renderPortfolioTable();
+    _multiFilterDirty.add(id);   // defer the table apply until the dropdown closes
 }
 
 function getPortfolioFiltered() {
@@ -6947,7 +7411,15 @@ function getPortfolioFiltered() {
                          p.cim_change_type === 'Inactivation'))
         );
     }
-    if (portfolioCollegeFilter.size)    rows = rows.filter(p => portfolioCollegeFilter.has(p.college || ''));
+    if (portfolioCollegeFilter.size)    rows = rows.filter(p =>
+        portfolioCollegeFilter.has(p.college || '')
+        // Also keep a program whose OWN college doesn't match but which has an
+        // interdisciplinary concentration managed by the selected college
+        // (e.g. Khoury-managed Robotics/Machine Learning concentrations under a
+        // Provost-owned AI/Data Science MS). The matching concentrations are
+        // surfaced (and the parent auto-expanded) at render time.
+        || (p.concentrations || []).some(c => c && typeof c === 'object'
+                && c.college && portfolioCollegeFilter.has(c.college)));
     if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
     if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
     if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
@@ -6959,7 +7431,14 @@ function getPortfolioFiltered() {
     if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
     if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? 'Yes' : 'No'));
     if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
+    if (portfolioCatalogYearFilter.size) rows = rows.filter(p => {
+        const ys = (p.catalog_years || '').split(/,\s*/).filter(Boolean);
+        return [...portfolioCatalogYearFilter].some(
+            y => y === '(none)' ? ys.length === 0 : ys.includes(y));
+    });
     if (portfolioInactTodayFilter)      rows = rows.filter(p => _inactAdmittingToday(p) === portfolioInactTodayFilter);
+    if (portfolioInactProgressFilter)   rows = rows.filter(p => (_cimInactivating(p) ? 'Yes' : 'No') === portfolioInactProgressFilter);
+    if (portfolioExitMastersFilter)     rows = rows.filter(p => (p.exit_masters === 'Yes' ? 'Yes' : 'No') === portfolioExitMastersFilter);
     // Advanced filter tree (from the Views builder) — ANDed with everything above.
     if (portfolioFilterTree && (portfolioFilterTree.children || []).length)
         rows = rows.filter(p => evalPortfolioNode(p, portfolioFilterTree));
@@ -7078,9 +7557,7 @@ function _matrixProgramCell(p) {
 // One concentration cell for a given campus deployment.
 function _matrixConcCell(info) {
     if (!info) return '<td class="mx-cell mx-empty"></td>';
-    const badge = info.status === 'new'
-        ? '<span class="conc-status conc-workflow">In workflow</span>'
-        : '<span class="conc-status conc-existing">Existing</span>';
+    const badge = '';   // no "In workflow" label — rely on row colors
     const svt = info.svt_status ? `<span class="mx-sub">${escapeHtml(info.svt_status)}</span>` : '';
     return `<td class="mx-cell mx-present">${badge}${svt}</td>`;
 }
@@ -7260,6 +7737,7 @@ function _syncLayoutButtons() {
 
 function renderPortfolioTable() {
     _syncLayoutButtons();
+    _ensureEnrollmentColumns();   // register dynamic per-year enrollment columns
     if (portfolioLayout === 'matrix') return renderPortfolioMatrix();
     const container = document.getElementById('programs-table-container');
     if (!container) return;
@@ -7327,10 +7805,16 @@ function renderPortfolioTable() {
             return ((a.college || '').localeCompare(b.college || '') ||
                     (a.program_name || '').localeCompare(b.program_name || '')) * portfolioSortDir;
         }
+        if (portfolioSortKey.startsWith('enr_')) {
+            const na = parseFloat(_enrValue(a, portfolioSortKey));
+            const nb = parseFloat(_enrValue(b, portfolioSortKey));
+            return ((isNaN(na) ? -Infinity : na) - (isNaN(nb) ? -Infinity : nb)) * portfolioSortDir;
+        }
         switch (portfolioSortKey) {
             case 'degree':    av = extractPortfolioDegree(a.program_name); bv = extractPortfolioDegree(b.program_name); break;
             case 'college':   av = a.college || '';  bv = b.college || '';  break;
             case 'campus':    av = a.campus  || '';  bv = b.campus  || '';  break;
+            case 'catalogyears': av = a.catalog_years || ''; bv = b.catalog_years || ''; break;
             case 'otp':       av = a.otp_status || ''; bv = b.otp_status || ''; break;
             case 'ipd':       av = a.ipd_status || ''; bv = b.ipd_status || ''; break;
             case 'svt':       av = a.svt_status || ''; bv = b.svt_status || ''; break;
@@ -7343,6 +7827,7 @@ function renderPortfolioTable() {
             case 'cimterm':   av = a.cim_eff_term || ''; bv = b.cim_eff_term || ''; break;
             case 'svtnote':   av = _svtCoordNote(a); bv = _svtCoordNote(b); break;
             case 'cimchange':   av = a.cim_change_type || ''; bv = b.cim_change_type || ''; break;
+            case 'ciminact':    av = _cimInactivating(a) ? '1' : '0'; bv = _cimInactivating(b) ? '1' : '0'; break;
             case 'inworkflow':  av = a.cim_program_id ? 'Yes' : 'No'; bv = b.cim_program_id ? 'Yes' : 'No'; break;
             case 'inactadmit':  av = a.inactivation_admission || ''; bv = b.inactivation_admission || ''; break;
             case 'inacttoday':  av = _inactAdmittingToday(a); bv = _inactAdmittingToday(b); break;
@@ -7372,7 +7857,8 @@ function renderPortfolioTable() {
         portfolioRosterFilter.size || portfolioSubStatusFilter.size || portfolioSpeedFilter.size ||
         portfolioGlsFilter.size || portfolioCimFilter.size ||
         portfolioCimChangeFilter.size || portfolioInWorkflowFilter.size ||
-        portfolioInactAdmitFilter.size || portfolioInactTodayFilter || portfolioSearch;
+        portfolioInactAdmitFilter.size || portfolioCatalogYearFilter.size ||
+        portfolioInactTodayFilter || portfolioInactProgressFilter || portfolioExitMastersFilter || portfolioSearch;
 
     // Determine which programs should be auto-expanded (search matches a
     // curriculum concentration OR a linked concentration sub-row).
@@ -7388,6 +7874,18 @@ function renderPortfolioTable() {
             }
             if (p.concentration_of && match(p.program_name)) {
                 autoExpand.add(p.concentration_of);
+            }
+        });
+    }
+    // College filter: auto-expand a parent whose own college doesn't match but
+    // which is surfaced via a concentration managed by the selected college, so
+    // that interdisciplinary concentration is visible without a manual expand.
+    if (portfolioCollegeFilter.size) {
+        allPortfolioPrograms.forEach(p => {
+            if (portfolioCollegeFilter.has(p.college || '')) return;
+            if ((p.concentrations || []).some(c => c && typeof c === 'object'
+                    && c.college && portfolioCollegeFilter.has(c.college))) {
+                autoExpand.add(p.id);
             }
         });
     }
@@ -7438,6 +7936,12 @@ function renderPortfolioTable() {
                 const status  = (typeof c === 'string') ? ''  : (c && c.status) || '';
                 const svtStatus = (typeof c === 'string') ? '' : (c && c.svt_status) || '';
                 curriculumConcKeys.add(_concNorm(name));
+                // Under an active College filter, show only the concentrations
+                // whose managing college (own, else inherited from the parent)
+                // is selected — so filtering to a college surfaces its
+                // interdisciplinary concentrations without the parent's others.
+                if (portfolioCollegeFilter.size
+                        && !portfolioCollegeFilter.has(college || (p.college || ''))) return;
                 rowHtml.push(renderPortfolioConcRow(
                     name, portfolioSearch, college,
                     p.college || '', p.campus || '', status, svtStatus));
@@ -7450,7 +7954,10 @@ function renderPortfolioTable() {
             // twice; the survivors are SVT/IPD-only (in development, not yet
             // in the catalog).
             portfolioConcs
-                .filter(c => !curriculumConcKeys.has(_concNorm(c.program_name || '')))
+                // Suppress a linked "X with Concentration in Y" sub-row when a
+                // curriculum concentration for Y is already shown — compare the
+                // extracted topic, not the full linked name.
+                .filter(c => !curriculumConcKeys.has(_concNorm(_shortConcName(c.program_name || ''))))
                 .forEach(c => rowHtml.push(renderPortfolioRow(
                     c, {isPortfolioConc: true, parent: p})));
         }
@@ -7503,6 +8010,25 @@ function _concNorm(s) {
     return s.replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+// Extract the concentration topic from a linked sub-row's full program name
+// ("Robotics with Concentration in Computer Science, MS" → "Computer Science").
+// Module-level so both the row display and the curriculum-vs-linked de-dup use
+// the same extraction. Falls back to the full name when no pattern matches.
+function _shortConcName(full) {
+    const n = (full || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    let m;
+    // ORDER MATTERS — specific patterns before the generic one.
+    m = n.match(/^.+?,\s*concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    m = n.match(/^.+?\s+with\s+Concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    m = n.match(/^.+?\s*[-—]\s*(.+?)\s+Concentration,?\s+[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i);
+    if (m) return m[1].trim();
+    return n;
+}
+
 function renderPortfolioConcRow(name, search, college, parentCollege, parentCampus, status, svtStatus) {
     const hl = search
         ? escapeHtml(name).replace(new RegExp(`(${escapeHtml(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
@@ -7527,18 +8053,11 @@ function renderPortfolioConcRow(name, search, college, parentCollege, parentCamp
             return '<td>—</td>';
         })
         .join('');
-    // Status badge: "Existing" (in the last-approved curriculum) vs
-    // "In workflow" (added in the current proposal), with the SVT development
-    // status appended when we have one for this concentration.
-    let badge = '';
-    if (status === 'existing') {
-        badge = ' <span class="conc-status conc-existing">Existing</span>';
-    } else if (status === 'new') {
-        const svt = svtStatus ? ` · SVT: ${escapeHtml(svtStatus)}` : '';
-        badge = ` <span class="conc-status conc-workflow">In workflow${svt}</span>`;
-    } else if (svtStatus) {
-        badge = ` <span class="conc-status conc-workflow">SVT: ${escapeHtml(svtStatus)}</span>`;
-    }
+    // No "In workflow" status badge — the row colors convey proposal status.
+    // Keep only the SVT development status when we have one for this concentration.
+    let badge = svtStatus
+        ? ` <span class="conc-status conc-workflow">SVT: ${escapeHtml(svtStatus)}</span>`
+        : '';
     return `<tr class="portfolio-row portfolio-curriculum-conc-row">
         <td class="program-name-cell">${hl}${badge}</td>
         ${cellHtml}
@@ -7626,32 +8145,7 @@ function renderPortfolioRow(p, opts = {}) {
         : ' class="program-name-cell"';
 
     // For nested concentration sub-rows, prefer a short display name that
-    // shows just the concentration topic (not the parent program's name).
-    // Falls back to the full program name when no pattern matches.
-    function _shortConcName(full) {
-        const n = (full || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
-        let m;
-        // ORDER MATTERS — more specific patterns must come before generic
-        // "X Y Concentration" because the latter is greedy enough to match
-        // (and mis-capture) the former. See "Robotics with Concentration
-        // in Mechanical Engineering, MS" where the generic pattern would
-        // grab "with" as the capture group.
-        // "X, concentration in Y, DEG"  →  "Y"
-        m = n.match(/^.+?,\s*concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        // "X with Concentration in Y, DEG"  →  "Y"
-        m = n.match(/^.+?\s+with\s+Concentration\s+in\s+(.+?),\s*[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        // "X - Y Concentration, DEG"  →  "Y"
-        m = n.match(/^.+?\s*[-—]\s*(.+?)\s+Concentration,?\s+[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        // Generic fallback: "X CONCENTRATION_NAME Concentration ..., DEG"
-        //   →  "CONCENTRATION_NAME"
-        // e.g. "Bioengineering Biomedical Devices and Bioimaging Concentration Bridge Program, MS"
-        m = n.match(/^\S+\s+(.+?)\s+Concentration\b.*?,\s*[A-Z]{1,7}\s*$/i);
-        if (m) return m[1].trim();
-        return n;
-    }
+    // shows just the concentration topic (via the module-level _shortConcName).
     const displayName = isPortfolioConc
         ? _shortConcName(p.program_name)
         : normalizePortfolioName(stripCampusFromName(p.program_name));
@@ -7660,6 +8154,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('degree',     isPortfolioConc ? 'Concentration' : extractPortfolioDegree(p.program_name))}
         ${_pc('college',    abbreviateCollege(effectiveCollege), null, effectiveCollege || '')}
         ${_pc('campus',     abbreviateCampus(effectiveCampus))}
+        ${_pc('catalogyears', escapeHtml(p.catalog_years || ''))}
         ${_pc('market2025',      market2025Badge)}
         ${_pc('perf2025',        perf2025Badge)}
         ${_pc('marketscore2025', escapeHtml(p.market_score_2025 || ''))}
@@ -7675,6 +8170,7 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('cimterm',   escapeHtml(_pfEffTermLabel(p)))}
         ${_pc('svtnote',   escapeHtml(_svtCoordNote(p)))}
         ${_pc('cimchange',   (activeInWorkflow && p.cim_change_type) ? escapeHtml(p.cim_change_type) : (p.cim_program_id ? '—' : ''))}
+        ${_pc('ciminact',    _cimInactivating(p) ? '<span class="portfolio-badge badge-bad">In progress</span>' : '')}
         ${_pc('inworkflow',  p.cim_program_id ? 'Yes' : 'No')}
         ${_pc('inactadmit',  escapeHtml(p.inactivation_admission || ''))}
         ${_pc('inacttoday', (() => {
@@ -7692,6 +8188,8 @@ function renderPortfolioRow(p, opts = {}) {
         ${_pc('exitmasters', escapeHtml(p.exit_masters || ''))}
         ${_pc('notes',   noteCell, 'portfolio-note-cell')}
         ${_pc('emplreview', escapeHtml(p.otp_notes || ''))}
+        ${PORTFOLIO_COLUMNS.filter(c => c.enroll).map(c =>
+            _pc(c.key, escapeHtml(String(isPortfolioConc ? '' : _enrValue(p, c.key))), 'enr-cell')).join('')}
     </tr>`;
 }
 
@@ -7725,6 +8223,7 @@ function exportPortfolioCsv() {
             case 'degree':      return isConc ? 'Concentration' : extractPortfolioDegree(p.program_name);
             case 'college':     return (isConc && !p.college && parent) ? parent.college || '' : p.college || '';
             case 'campus':      return isConc && parent ? parent.campus || p.campus || '' : p.campus || '';
+            case 'catalogyears': return p.catalog_years || '';
             case 'otp':         return p.otp_status || '';
             case 'svt':         return p.svt_status || '';
             case 'substatus':   return p.roster_sub_status || '';
@@ -7736,6 +8235,7 @@ function exportPortfolioCsv() {
             case 'cimterm':     return _pfEffTermLabel(p);
             case 'svtnote':     return _svtCoordNote(p);
             case 'cimchange':   return (p.cim_step && p.cim_change_type) ? p.cim_change_type : p.cim_program_id ? '' : '';
+            case 'ciminact':    return _cimInactivating(p) ? 'In progress' : '';
             case 'inworkflow':  return p.cim_program_id ? 'Yes' : 'No';
             case 'inactadmit':  return p.inactivation_admission || '';
             case 'inacttoday':  return _inactAdmittingToday(p) || '';
@@ -7753,7 +8253,9 @@ function exportPortfolioCsv() {
             case 'perfscore2025':   return p.performance_score_2025 != null ? String(p.performance_score_2025) : '';
             case 'notes':       return p.note || '';
             case 'emplreview':  return p.otp_notes || '';
-            default:            return '';
+            default:
+                if (key.startsWith('enr_')) return isConc ? '' : String(_enrValue(p, key));
+                return '';
         }
     }
 
@@ -7892,6 +8394,8 @@ function __staticInit() {
             const d = new Date(D.last_scan.scan_time);
             updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
+        const buildEl = document.getElementById('app-build');
+        if (buildEl && D.build_time) buildEl.textContent = 'Build: ' + _fmtDT(D.build_time);
 
         // Changes shown via smart view button, not separate section
 
@@ -7956,6 +8460,8 @@ function __staticInit() {
             const d = new Date(D.last_scan.scan_time);
             updatedEl.textContent = `Updated: ${d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'America/New_York'})} at ${d.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York'})} ET`;
         }
+        const buildEl = document.getElementById('app-build');
+        if (buildEl && D.build_time) buildEl.textContent = 'Build: ' + _fmtDT(D.build_time);
     }
 
     window.loadCatalogDashboard = async function() {
@@ -7983,6 +8489,9 @@ function __staticInit() {
                 p.concentrations = p.concentrations_json
                     ? JSON.parse(p.concentrations_json) : [];
             } catch (e) { p.concentrations = []; }
+            try {
+                p.enrollment = p.enrollment_json ? JSON.parse(p.enrollment_json) : null;
+            } catch (e) { p.enrollment = null; }
         });
         if (typeof portfolioTeamViews !== 'undefined') {
             portfolioTeamViews = D.team_views || [];

@@ -5040,6 +5040,28 @@ function renderConsoleContent(data) {
         html += '</tbody></table>';
     }
 
+    const svtPending = mm.svt_pending_analysis || [];
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">SVT concentrations pending analysis (${svtPending.length})</h4>`;
+    html += '<p style="color:#64748b;font-size:11px;margin:0 0 6px">Concentration proposals whose parent program is unclear or that bundle multiple concentrations — held out of the portfolio until a parent is assigned.</p>';
+    if (!svtPending.length) {
+        html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
+    } else {
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+        html += '<thead><tr style="background:#fffbeb;text-align:left">'
+             + '<th style="padding:4px 8px">SVT Name</th>'
+             + '<th style="padding:4px 8px">SVT Campus</th>'
+             + '<th style="padding:4px 8px">Reason</th>'
+             + '</tr></thead><tbody>';
+        for (const p of svtPending) {
+            html += `<tr style="border-top:1px solid #e2e8f0">
+                <td style="padding:4px 8px">${escapeHtml(p.source_name || '')}</td>
+                <td style="padding:4px 8px;color:#64748b">${escapeHtml(p.campus || '')}</td>
+                <td style="padding:4px 8px;color:#64748b;font-size:11px">${escapeHtml(p.reason || '')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
     // IPD sections removed — overlay disabled, source no longer consulted.
 
     html += `<h4 style="margin:0 0 4px;font-size:13px;color:#991b1b">SVT entries with no CIM match (${svtMismatches.length})</h4>`;

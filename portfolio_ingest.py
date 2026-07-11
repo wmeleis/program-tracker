@@ -519,14 +519,64 @@ _SVT_NAME_PREFIX_RE = re.compile(
     r')',
     re.I,
 )
+# Infix status words: "Global Studies launch in Seattle" / "DLP suspension in
+# Charlotte" embed a status verb between the subject and " in <campus>". Drop
+# just the verb so the remainder ("Global Studies in Seattle") parses as a
+# real program name + campus.
+_SVT_NAME_INFIX_RE = re.compile(
+    r'\s+(?:launch|suspension|inactivation|deactivation)\s+(?=in\s+\S)',
+    re.I,
+)
 
 
 def _strip_svt_prefix(name):
-    """Strip "Launch of (the) " / "Suspension of " status prefix so the
-    remaining text parses as a real program name."""
+    """Strip "Launch of (the) " / "Suspension of " status prefix (and the
+    "… launch/suspension in <campus>" infix) so the remaining text parses as a
+    real program name."""
     if not name:
         return name
-    return _SVT_NAME_PREFIX_RE.sub('', name).strip()
+    cleaned = _SVT_NAME_PREFIX_RE.sub('', name).strip()
+    cleaned = _SVT_NAME_INFIX_RE.sub(' ', cleaned).strip()
+    return cleaned
+
+
+_SVT_NOISE_RES = [
+    # "(post-bacc)" / "(post-baccalaureate)" qualifier
+    re.compile(r'\s*\(\s*post[\s-]*bacc(?:alaureate)?\s*\)', re.I),
+    # parenthetical concentration list: "(HSMI and MSMD Concentrations)"
+    re.compile(r'\s*\([^)]*concentrations?\s*\)', re.I),
+    # trailing "with <…> concentration(s)": "…with AI Concentration"
+    re.compile(r'\s+with\s+[^,]*?\s+concentrations?\b', re.I),
+    # deployment/pathway program suffix: "Connect (Bridge) Program", "(Bridge) Program",
+    # "Connect Program", "Bridge Program"
+    re.compile(r'\s+(?:connect\s+)?\(?bridge\)?\s+program\b', re.I),
+    re.compile(r'\s+connect\s+program\b', re.I),
+]
+
+
+def _svt_strip_program_noise(name):
+    """Strip concentration-list parentheticals, 'with X concentration' clauses,
+    '(post-bacc)' qualifiers, and 'Connect (Bridge) Program' deployment suffixes
+    from an SVT program name so the underlying program parses cleanly. Applied
+    only at the Path B synthesis stage (after concentration/code matching), so it
+    never suppresses genuine concentration-sub-row detection."""
+    out = (name or '')
+    for rx in _SVT_NOISE_RES:
+        out = rx.sub(' ', out)
+    # collapse whitespace and stray ", ," left behind
+    out = re.sub(r'\s*,\s*,', ',', out)
+    out = re.sub(r'\s{2,}', ' ', out).strip().strip(',').strip()
+    return out
+
+
+def _svt_courseleaf_id(courseleaf_key):
+    """Extract the CIM program id embedded in an SVT 'Courseleaf Key' value,
+    e.g. 'https://nextcatalog.northeastern.edu/programadmin/?key=1774' → 1774.
+    Returns an int, or None when the field is empty / non-numeric ('see notes')."""
+    if not courseleaf_key:
+        return None
+    m = re.search(r'[?&]key=(\d+)', courseleaf_key)
+    return int(m.group(1)) if m else None
 
 
 # SVT "How Can We Help You" picklist value → portfolio cim_change_type style
@@ -541,6 +591,26 @@ _SVT_HCWHY_TO_TYPE = {
     'Launch term change request':                 'Change',
     'Deploy Program to Network':                  'Network Deployment',
 }
+# SVT concentration proposals whose PARENT program is ambiguous or which bundle
+# multiple concentrations — they can't be auto-attached to a parent row and need
+# a human to identify the parent / split them. Routed to the "svt_pending_analysis"
+# bucket in portfolio_mismatches.json and kept OUT of the portfolio (they'd
+# otherwise show as garbled top-level program rows). Curated from Waleed's review
+# 2026-07-11; prune an entry once its parent is resolved (then it flows normally).
+# Matched on the SVT Program Name with whitespace collapsed + lowercased.
+def _norm_pending_name(s):
+    return re.sub(r'\s+', ' ', (s or '')).strip().lower()
+
+SVT_PENDING_ANALYSIS = {
+    _norm_pending_name(n) for n in (
+        'Cert and Concentration, Medical Science Liaison',
+        'Concentration Offerings in Network',
+        'MS in Bioengineering Biomedical Devices and Bioimaging Concentration Bridge Program',
+        'Master of Science in Bioengineering, concentration in Biomedical Devices and Bioimaging, Charlotte',
+        'Pharmaceutical Industry concentration and Research concentration in Doctor of Pharmacy program',
+    )
+}
+
 # HCWHY values that indicate this is NOT a program proposal — skipped silently
 # (they go into the non_programs bucket of portfolio_mismatches.json).
 _SVT_HCWHY_NON_PROGRAM = {
@@ -581,7 +651,7 @@ def parse_svt(path=None):
         'Program Code', 'Program Name', 'College', 'Campus',
         'Program Level', 'Degree Type', 'Status', 'Launch Sub-Status',
         'Speed to Market?', 'How Can We Help You', 'Actual Launch Date',
-        'UIP Program',
+        'UIP Program', 'Courseleaf Key', 'Initiative Type', 'Phase',
     }
 
     out = []
@@ -628,6 +698,15 @@ def parse_svt(path=None):
             'hcwhy':              rec.get('How Can We Help You', ''),
             'actual_launch_date': rec.get('Actual Launch Date', ''),
             'uip_program':        rec.get('UIP Program', ''),
+            # Courseleaf Key embeds the CIM program id (?key=N) — an authoritative
+            # direct link to the CIM record, far more robust than name matching.
+            'courseleaf_key':     rec.get('Courseleaf Key', ''),
+            # Initiative Type / Phase describe what the SVT entry IS (full degree/
+            # certificate program vs a concentration/course/product) and how far
+            # along it is — used to decide whether an unmatched row is a genuinely
+            # new program worth synthesizing into the portfolio.
+            'initiative_type':    rec.get('Initiative Type', ''),
+            'phase':              rec.get('Phase', ''),
         })
 
     return out
@@ -1046,8 +1125,11 @@ _CAMPUS_NAMES = {
 
 # Long-form degree name → short abbreviation
 _LONG_DEGREE_MAP = [
-    (re.compile(r'^masters?\s+of\s+science\s*(?:\([^)]*\))?\s*(?:in\s+)?', re.I), 'MS'),
-    (re.compile(r'^masters?\s+of\s+arts\s+(?:in\s+)?', re.I), 'MA'),
+    # Connector after the degree phrase is normally "in" but SVT free-text
+    # sometimes writes "Master of Science of X" — accept "of" too so the
+    # subject isn't left with a stray leading "of ".
+    (re.compile(r'^masters?\s+of\s+science\s*(?:\([^)]*\))?\s*(?:(?:in|of)\s+)?', re.I), 'MS'),
+    (re.compile(r'^masters?\s+of\s+arts\s+(?:(?:in|of)\s+)?', re.I), 'MA'),
     (re.compile(r'^masters?\s+of\s+business\s+administration\s*(?:in\s+)?', re.I), 'MBA'),
     (re.compile(r'^masters?\s+of\s+(?:public\s+)?health\s*(?:in\s+)?', re.I), 'MPH'),
     (re.compile(r'^masters?\s+of\s+fine\s+arts\s+(?:in\s+)?', re.I), 'MFA'),
@@ -1061,8 +1143,8 @@ _LONG_DEGREE_MAP = [
     (re.compile(r'^doctor\s+of\s+physical\s+therapy\s*(?:in\s+)?', re.I), 'DPT'),
     (re.compile(r'^doctor\s+of\s+professional\s+studies\s*(?:in\s+)?', re.I), 'DPS'),
     (re.compile(r'^doctor\s+of\s+law\s+and\s+policy\s*(?:in\s+)?', re.I), 'DLP'),
-    (re.compile(r'^bachelor\s+of\s+science\s*(?:in\s+)?', re.I), 'BS'),
-    (re.compile(r'^bachelor\s+of\s+arts\s*(?:in\s+)?', re.I), 'BA'),
+    (re.compile(r'^bachelor\s+of\s+science\s*(?:(?:in|of)\s+)?', re.I), 'BS'),
+    (re.compile(r'^bachelor\s+of\s+arts\s*(?:(?:in|of)\s+)?', re.I), 'BA'),
     (re.compile(r'^bachelor\s+of\s+fine\s+arts\s*(?:in\s+)?', re.I), 'BFA'),
     (re.compile(r'^graduate\s+certificate\s*(?:in\s+)?', re.I), 'Graduate Certificate'),
     (re.compile(r'^certificate\s*(?:in\s+)?', re.I), 'Graduate Certificate'),
@@ -1214,6 +1296,8 @@ _NON_PROGRAM_RE = re.compile(
     r'|^semester\s+in\s*:'                   # "Semester In: Rural Health Immersion"
     r'|\brural\s+health\s+immersion\b'       # safety net for the same entry
     r'|\bexecutive\s+credential\b'           # "Executive Credential in X"
+    r'|\bname\s+evaluation\b'                # "MS in XR - Name Evaluation" (name TBD, not a program)
+    r'|\bprior\s+learning\s+assessment\b'    # "Prior Learning Assessment- New Pathway to COE MS" (product offering)
     r'|\bgraduate\s+certificates\b'          # "Online Graduate Certificates with EDGE"
                                              # — plural form is always a meta
                                              # category/bundle, not a single
@@ -2585,6 +2669,10 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # Multiple campuses can share the same banner_code, so we resolve campus
     # ambiguity by also matching SVT's Campus field against the row's campus.
     cim_banner_index = {}
+    # CIM program id → surviving (deduped) tracker row. Maps EVERY id in each
+    # dedup group (not just the winner) so an SVT Courseleaf Key pointing at a
+    # collapsed duplicate still resolves to the row we kept.
+    cim_id_index = {}
 
     for r in by_name.values():
         name = r['name'] or ''
@@ -2661,6 +2749,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 else:
                     row['gtm_entered_date'] = today                # new transition into GTM
         tracker[pid] = row
+
+        # Map every dedup-group member id → this surviving row (Courseleaf-key
+        # lookups can point at a collapsed duplicate).
+        for _gr in raw_by_key.get(_seed_dedup_key(name), [r]):
+            cim_id_index[_gr['id']] = row
+        cim_id_index[r['id']] = row
 
         # Index by (subj, deg, campus)
         key3 = _cim_index_keys(subject, degree, campus_resolved)
@@ -2777,6 +2871,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     otp_mismatches = []
     gls_mismatches = []
     non_programs   = []  # entries from SVT/IPD that are clearly not degree programs
+    svt_pending    = []  # SVT concentration proposals awaiting parent identification
 
 
     # ─── Concentration-proposal preprocessor helpers ───────────────────────
@@ -3094,6 +3189,18 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 })
             continue
 
+        # Future-analysis list: concentration proposals whose parent is ambiguous
+        # or that bundle multiple concentrations. Park them on a tracked list and
+        # keep them out of the portfolio (they'd otherwise synthesize garbled
+        # top-level program rows). See SVT_PENDING_ANALYSIS.
+        if _norm_pending_name(original_name) in SVT_PENDING_ANALYSIS:
+            svt_pending.append({
+                'source_name': original_name,
+                'campus':      p.get('campus', ''),
+                'reason':      'concentration proposal — parent program not yet identified',
+            })
+            continue
+
         # Concentration-proposal entries (e.g. "MS in AI (New COE Concentration
         # in Human-AI Collaboration)") become a sub-row UNDER the parent program
         # rather than overwriting the parent's status. This must run BEFORE the
@@ -3111,6 +3218,22 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             continue
 
         camp_norm = _normalize_campus(p.get('campus', '')) if p.get('campus') else ''
+
+        # Path 0: authoritative match via SVT's Courseleaf Key (?key=N → CIM id).
+        # This is a direct structured link to the exact CIM record, immune to the
+        # name/banner-code parsing fragility that Paths A/B fight. Runs AFTER the
+        # non-program / market-research / concentration gates (a concentration
+        # proposal's key points at its PARENT program, so it must stay a sub-row)
+        # but BEFORE the fuzzy code/name paths.
+        _cl_id = _svt_courseleaf_id(p.get('courseleaf_key', ''))
+        if _cl_id is not None and _cl_id in cim_id_index:
+            _row0 = cim_id_index[_cl_id]
+            n_svt_matched += 1
+            _apply_svt_fields(_row0, p)
+            _new_col = _normalize_college(p.get('college') or '')
+            if not _row0.get('college') and _new_col:
+                _row0['college'] = _new_col
+            continue
 
         # Path A: match by Program Code → CIM banner_code.
         matched = None
@@ -3184,8 +3307,13 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         # name parsing (uses the existing _parse_external_name + _lookup_cim
         # flow). If still no match, synthesize a row from Program Level +
         # Degree Type + Program Name. Use cleaned_name (with "Launch of"/
-        # "Suspension of" prefix removed) for parsing.
-        subject, degree, campus_from_name = _parse_external_name(cleaned_name)
+        # "Suspension of" prefix removed), with concentration-list parentheticals
+        # and "Connect (Bridge) Program" deployment suffixes stripped so the base
+        # program parses cleanly (e.g. "MS Health Informatics with AI
+        # Concentration" → "Health Informatics, MS"). Safe here: real
+        # concentration sub-rows were already handled above.
+        subject, degree, campus_from_name = _parse_external_name(
+            _svt_strip_program_noise(cleaned_name))
         if not campus_from_name and camp_norm:
             campus_from_name = camp_norm
 
@@ -4045,10 +4173,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         _ia   = _dedup(sorted(ipd_added_log,  key=lambda x: x['name']), 'name', 'campus')
         _om   = _dedup(sorted(otp_mismatches, key=lambda x: x['source_name']), 'source_name')
         _gm   = _dedup(sorted(gls_mismatches, key=lambda x: x.get('source_name', '')), 'source_name')
+        _sp   = _dedup(sorted(svt_pending,    key=lambda x: x['source_name']), 'source_name', 'campus')
         _mismatch_data = {
             'updated_at':     now,
             'non_programs':   _np,
             'svt_added':      _sa,
+            'svt_pending_analysis': _sp,
             'svt_mismatches': _sm,
             'ipd_mismatches': _im,
             'ipd_added':      _ia,

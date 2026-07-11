@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Program Approval Tracker</title>
-    <link rel="stylesheet" href="style.css?v=1782919794">
+    <link rel="stylesheet" href="style.css?v=1783794152">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
 </div>
 <script>
 (function() {
-  const CACHE_BUST = 1782919794;
+  const CACHE_BUST = 1783794152;
   const REMEMBER_KEY = 'cim-tracker-key-v1';
   const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -239,6 +239,11 @@
     <header>
         <div class="header-left">
             <h1>Program Dashboard</h1>
+            <!-- Freshness line: last data refresh + app build (under the title, above the header's grey line) -->
+            <div id="freshness-row" class="freshness-row">
+                <span id="last-updated" class="last-updated"></span>
+                <span id="app-build" class="last-updated"></span>
+            </div>
         </div>
         <div class="header-middle">
             <div class="view-toggle">
@@ -253,7 +258,6 @@
             </div>
         </div>
         <div class="header-right">
-            <span id="last-updated" class="last-updated"></span>
             <span id="scan-status" class="scan-status"></span>
             <div id="progress-container" class="progress-container" style="display: none;">
                 <span id="progress-phase" class="progress-phase"></span>
@@ -261,16 +265,9 @@
             
             
             
-            
-            <!-- Portfolio-only actions: shown/hidden by switchView() -->
-            <span id="portfolio-header-actions" style="display:none; align-items:center; gap:8px;">
-                <button class="header-secondary-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
-                <button class="portfolio-col-picker-btn" id="portfolio-views-btn" onclick="openPortfolioViewsModal()">Views</button>
-                <div class="portfolio-col-picker" id="portfolio-col-picker" style="position:relative">
-                    <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
-                    <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
-                </div>
-            </span>
+            <!-- Portfolio actions moved out of the header: Export + Columns are in
+                 the table toolbar; Views opens via the clickable "VIEWS" label. -->
+            <span id="portfolio-header-actions" style="display:none; align-items:center; gap:8px;"></span>
         </div>
     </header>
 
@@ -283,6 +280,12 @@
 
     <!-- Portfolio starred-view tiles (quick-apply); only shown on Portfolio view -->
     <div id="portfolio-view-tiles" class="portfolio-view-tiles" style="display:none"></div>
+
+    <!-- Collapsible filters toggle (all views): sits BELOW the views and ABOVE
+         the filters; collapses the filter content only (not the views). -->
+    <div id="cim-filter-toggle-row" style="display:none">
+        <button id="cim-filter-toggle-btn" onclick="toggleCimFilters()">▸ Filters</button>
+    </div>
 
     <!-- Portfolio filter bar (visible only in portfolio view) -->
     <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
@@ -319,15 +322,23 @@
             </div>
             <button class="portfolio-campus-shortcut" style="margin-left:14px" onclick="setPortfolioCampusBoston()" title="Filter to Boston only">Boston</button>
         </div>
+        <div class="filter-group">
+            <label>Catalog Year:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Catalog years the program is part of, derived from CIM's effective catalog and proposal history (current year plus two forward).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-catalogyear">
+                <button class="filter-multi-btn" id="portfolio-filter-catalogyear" onclick="togglePortfolioMultiFilter('portfolio-filter-catalogyear', event)">All Catalog Years ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-catalogyear"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-catalogyear')" title="Clear">&times;</span>
+            </div>
+        </div>
       </div>
       <div class="portfolio-filter-block portfolio-filter-block-2">
         <div class="pf-cim-row" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
             <span class="portfolio-btn-row-label">CIM:</span>
             <button class="portfolio-incim-btn" data-incim="Yes" onclick="setPortfolioInCim(this,'Yes')"><span class="info-tip-wrap">In CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Program exists in CourseLeaf CIM — active in workflow or already approved/historical.</span></span></span></button>
             <button class="portfolio-incim-btn" data-incim="No"  onclick="setPortfolioInCim(this,'No')"><span class="info-tip-wrap">Not in CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Portfolio entry has no CIM record — appears only in external feeds (SVT, IPD, OTP).</span></span></span></button>
-            <button class="portfolio-cimchg-btn cimchg-new"   data-cimchg="New"          style="margin-left:24px" onclick="setPortfolioCimChange(this,'New')">New</button>
-            <button class="portfolio-cimchg-btn cimchg-edit"  data-cimchg="Change"       onclick="setPortfolioCimChange(this,'Change')">Change</button>
-            <button class="portfolio-cimchg-btn cimchg-inact" data-cimchg="Inactivation" onclick="setPortfolioCimChange(this,'Inactivation')">Inactivation</button>
+            <button class="portfolio-cimchg-btn cimchg-new"   data-cimchg="New"          style="margin-left:24px" onclick="setPortfolioCimChange(this,'New')"><span class="info-tip-wrap">New<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">CIM proposal type New — the current CIM proposal adds a new program.</span></span></span></button>
+            <button class="portfolio-cimchg-btn cimchg-edit"  data-cimchg="Change"       onclick="setPortfolioCimChange(this,'Change')"><span class="info-tip-wrap">Change<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">CIM proposal type Change — the current CIM proposal edits an existing program.</span></span></span></button>
+            <button class="portfolio-cimchg-btn cimchg-inact" data-cimchg="Inactivation" onclick="setPortfolioCimChange(this,'Inactivation')"><span class="info-tip-wrap">Inactivation<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">CIM proposal type Inactivation — the CIM proposal deactivates the program, whether the inactivation is in progress or already completed.</span></span></span></button>
             <button class="portfolio-status-btn" data-status="inworkflow" style="margin-left:24px" onclick="setPortfolioStatus('inworkflow')"><span class="info-tip-wrap">In Workflow<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with an active proposal currently moving through CIM approval steps.</span></span></span></button>
             <button class="portfolio-status-btn" data-status="catalog"    onclick="setPortfolioStatus('catalog')"><span class="info-tip-wrap">Completed Approval<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs approved at least once — either observed completing CIM, or currently undergoing a Change/Inactivation proposal (which implies a prior approval). A program in a new proposal still counts here AND in "In Workflow" until it completes.</span></span></span></button>
         </div>
@@ -340,6 +351,28 @@
             <div class="filter-select-wrap">
                 <select id="portfolio-filter-inacttoday" onchange="portfolioInactTodayFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()"></select>
                 <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inacttoday')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Inactivation in Progress:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with a CIM inactivation that isn't fully wound down — still moving through the CIM workflow (including teach-out) or still admitting students.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-inactprogress" onchange="portfolioInactProgressFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()">
+                    <option value="">— select —</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactprogress')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Exit Master's Only:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Exit-master's-only programs — awarded on the way out of a doctoral program, with no direct admission.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-exitmasters" onchange="portfolioExitMastersFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()">
+                    <option value="">— select —</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-exitmasters')" title="Clear">&times;</span>
             </div>
         </div>
         <div class="filter-group">
@@ -394,12 +427,20 @@
       </div>
     </section>
 
-    <!-- Portfolio table toolbar (result count only — actions moved to header) -->
+    <!-- Portfolio table toolbar (just above the list): result count + layout on
+         the left; Export + Columns on the right. -->
     <div id="portfolio-table-toolbar" style="display:none">
         <span id="portfolio-result-count" class="result-count"></span>
         <span class="portfolio-layout-toggle">
             <button class="portfolio-layout-btn active" data-layout="table" onclick="setPortfolioLayout('table')">Table</button>
             <button class="portfolio-layout-btn" data-layout="matrix" onclick="setPortfolioLayout('matrix')">Matrix</button>
+        </span>
+        <span class="portfolio-toolbar-actions">
+            <button class="portfolio-col-picker-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
+            <div class="portfolio-col-picker" id="portfolio-col-picker" style="position:relative">
+                <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
+                <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
+            </div>
         </span>
     </div>
 
@@ -491,10 +532,9 @@
     <section class="filters-section">
         <div class="filter-group">
             <label>College:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the college or school responsible for the program.</span></span></label>
-            <div class="filter-select-wrap">
-                <select id="filter-college" onchange="applyFilters(); updateClearButtons()">
-                    <option value="">All Colleges</option>
-                </select>
+            <div class="filter-multi-wrap" id="fmw-filter-college">
+                <button class="filter-multi-btn" id="filter-college" onclick="toggleCimMultiFilter('filter-college', event)">All Colleges ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-filter-college"></div>
                 <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
             </div>
         </div>
@@ -509,10 +549,9 @@
         </div>
         <div class="filter-group">
             <label>Campus:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the campus where the program is offered (e.g. Boston, Oakland, Online).</span></span></label>
-            <div class="filter-select-wrap">
-                <select id="filter-campus" onchange="applyFilters(); updateClearButtons()">
-                    <option value="">All Campuses</option>
-                </select>
+            <div class="filter-multi-wrap" id="fmw-filter-campus">
+                <button class="filter-multi-btn" id="filter-campus" onclick="toggleCimMultiFilter('filter-campus', event)">All Campuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-filter-campus"></div>
                 <span class="filter-clear" onclick="clearFilter('filter-campus')" title="Clear">&times;</span>
             </div>
         </div>
