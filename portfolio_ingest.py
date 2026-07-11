@@ -1729,11 +1729,14 @@ _EXPLICIT_CONC_PARENTS = [
      'Electrical Engineering and Music, BSEE', 'Boston'),
     # Bioengineering concentration variants — both the "Master of Science in
     # Bioengineering, concentration in X" and "Bioengineering, concentration
-    # in X" forms (also "Bioengineering X Concentration Bridge Program").
+    # in X" forms (also "Bioengineering X Concentration Bridge Program"). The
+    # real program's degree is MSBioE (not a bare MS), so the parent must be
+    # "Bioengineering, MSBioE" — otherwise no CIM match is found and a duplicate
+    # synthetic "Bioengineering, MS" parent gets fabricated.
     (re.compile(r'^(?:Master of Science in\s+)?Bioengineering[,\s]+concentration in ', re.I),
-     'Bioengineering, MS', None),
+     'Bioengineering, MSBioE', None),
     (re.compile(r'^Bioengineering\s+.+?\s+Concentration\b', re.I),
-     'Bioengineering, MS', None),
+     'Bioengineering, MSBioE', None),
     # Civil Engineering MSCivE concentrations whose concentration phrase has
     # internal commas (regex extraction fails on these).
     (re.compile(r'^Civil Engineering with Concentration in .+,\s*MSCivE\b', re.I),
