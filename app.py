@@ -1745,9 +1745,10 @@ def api_svt_overrides_get():
     """Return every SVT row joined with its current disposition override + the
     outcome the last ingest gave it, plus a CIM program list for the parent
     picker. Powers the Console 'SVT dispositions' editor."""
-    from database import get_all_svt_overrides, get_db
+    from database import get_all_svt_overrides, get_all_svt_seen, get_db
     from portfolio_ingest import parse_svt
     overrides = get_all_svt_overrides()
+    seen = get_all_svt_seen()
     # Per-row outcome from the last ingest.
     resolution = {}
     try:
@@ -1760,6 +1761,15 @@ def api_svt_overrides_get():
         key = p.get('svt_key', '')
         ov = overrides.get(key, {})
         res = resolution.get(key, {})
+        sv = seen.get(key, {})
+        last_changed  = sv.get('last_changed', '') or ''
+        last_reviewed = sv.get('last_reviewed', '') or ''
+        # Flagged for review = never reviewed, or changed since last reviewed.
+        flagged = bool(sv) and ((not last_reviewed) or (last_changed > last_reviewed))
+        try:
+            change_detail = _json.loads(sv.get('change_detail_json') or '[]') if flagged else []
+        except Exception:
+            change_detail = []
         rows.append({
             'svt_key':         key,
             'name':            p.get('program_name', ''),
@@ -1774,6 +1784,10 @@ def api_svt_overrides_get():
             'override_degree': ov.get('override_degree', ''),
             'override_campus': ov.get('override_campus', ''),
             'note':            ov.get('note', ''),
+            'flagged':         flagged,
+            'is_new':          bool(sv.get('is_new')),
+            'change_detail':   change_detail,
+            'last_changed':    last_changed,
         })
     # CIM program list for the concentration parent picker (active + history).
     with get_db() as conn:
@@ -1803,6 +1817,20 @@ def api_svt_overrides_post():
         note=(data.get('note') or ''),
     )
     return jsonify({'ok': True})
+
+
+@app.route('/api/svt_overrides/reviewed', methods=['POST'])
+def api_svt_reviewed():
+    """Mark one or more SVT entries as reviewed now (clears their new/changed
+    flag until their mapping fields change again)."""
+    from database import mark_svt_reviewed
+    data = request.get_json(force=True) or {}
+    keys = data.get('svt_keys') or ([data['svt_key']] if data.get('svt_key') else [])
+    keys = [k for k in keys if k]
+    if not keys:
+        return jsonify({'error': 'svt_keys required'}), 400
+    mark_svt_reviewed(keys)
+    return jsonify({'ok': True, 'count': len(keys)})
 
 
 @app.route('/api/svt_overrides/reingest', methods=['POST'])

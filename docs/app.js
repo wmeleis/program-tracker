@@ -4903,9 +4903,30 @@ async function loadSvtDispositions() {
         if (f) f.onchange = renderSvtDispositions;
         const rb = document.getElementById('svt-disp-reingest');
         if (rb) rb.onclick = svtReingest;
+        const mb = document.getElementById('svt-disp-reviewed');
+        if (mb) mb.onclick = svtMarkAllShownReviewed;
     } catch (e) {
         bodyEl.innerHTML = `<p style="color:#b91c1c">Could not load SVT dispositions: ${e.message}</p>`;
     }
+}
+
+async function svtMarkReviewed(keys) {
+    if (!keys.length) return;
+    await fetch('/api/svt_overrides/reviewed', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({svt_keys: keys})});
+    // Clear the flag locally and re-render so reviewed rows drop their highlight.
+    for (const r of _svtDispRows) if (keys.includes(r.svt_key)) { r.flagged = false; r.is_new = false; }
+    renderSvtDispositions();
+}
+
+function svtMarkAllShownReviewed() {
+    // Only the currently-rendered (filtered) flagged rows.
+    const keys = [...document.querySelectorAll('#mappings-modal tbody tr[data-k]')]
+        .map(tr => tr.getAttribute('data-k'))
+        .filter(k => (_svtDispRows.find(r => r.svt_key === k) || {}).flagged);
+    if (!keys.length) { alert('No new/changed rows in the current view.'); return; }
+    svtMarkReviewed(keys);
 }
 
 const _SVT_OUTCOME_BADGE = {
@@ -4934,6 +4955,7 @@ function renderSvtDispositions() {
         // non-program are resolved (even when set by hand), so they're excluded
         // here — review manual overrides via the "Manually set" filter instead.
         if (filter === 'attention') return ['added','pending','mismatch'].includes(r.outcome);
+        if (filter === 'flagged') return r.flagged;
         if (filter === 'overridden') return r.disposition !== 'auto';
         return r.outcome === filter;
     });
@@ -4943,11 +4965,16 @@ function renderSvtDispositions() {
     // drops below the auto rows still flagged for attention.
     const rank = o => ({mismatch: 0, pending: 1, added: 2, concentration: 3, non_program: 4, matched: 5}[o] ?? 6);
     rows.sort((a, b) => {
+        // New/changed-since-reviewed float above everything else.
+        if (!!a.flagged !== !!b.flagged) return a.flagged ? -1 : 1;
         const ra = rank(a.outcome), rb = rank(b.outcome);
         if (ra !== rb) return ra - rb;
         return (a.name || '').localeCompare(b.name || '');
     });
-    let html = `<p style="color:#64748b;font-size:11px;margin:0 0 6px">${rows.length} of ${_svtDispRows.length} rows — most in need of attention first</p>`;
+    const flaggedCount = rows.filter(r => r.flagged).length;
+    let html = `<p style="color:#64748b;font-size:11px;margin:0 0 6px">${rows.length} of ${_svtDispRows.length} rows`
+        + (flaggedCount ? ` · <span style="color:#92400e">${flaggedCount} new/changed</span>` : '')
+        + ` — new/changed first, then most in need of attention</p>`;
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     html += `<thead><tr style="background:#f8fafc;text-align:left">
         <th style="padding:4px 8px">SVT entry</th>
@@ -4983,8 +5010,26 @@ function _renderSvtDispRow(r) {
         <input class="svt-odeg" data-k="${k}" value="${escapeHtml(r.override_degree||'')}" placeholder="degree" style="width:60px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
         <input class="svt-ocampus" data-k="${k}" value="${escapeHtml(r.override_campus||'')}" placeholder="campus" style="width:80px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
     </span>`;
-    return `<tr style="border-top:1px solid #e2e8f0" data-k="${k}">
-        <td style="padding:5px 8px"><div>${escapeHtml(r.name)}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}${r.campus?' · '+escapeHtml(r.campus):''}</div></td>
+    // New/changed highlight: amber left border + a NEW or CHANGED chip. The
+    // chip's tooltip lists the field-level diff (old → new) for changed rows.
+    let chip = '';
+    if (r.flagged) {
+        if (r.is_new) {
+            chip = `<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px">NEW</span>`;
+        } else {
+            const diffTitle = (r.change_detail || [])
+                .map(d => `${d.field}: "${d.old}" → "${d.new}"`).join('\n');
+            chip = `<span title="${escapeHtml(diffTitle)}" style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px;cursor:help">CHANGED</span>`;
+        }
+    }
+    const rowStyle = r.flagged
+        ? 'border-top:1px solid #e2e8f0;border-left:3px solid #f59e0b;background:#fffdf5'
+        : 'border-top:1px solid #e2e8f0';
+    const reviewedBtn = r.flagged
+        ? `<button class="svt-reviewed" data-k="${k}" title="Mark this entry reviewed" style="padding:3px 8px;font-size:11px;border:1px solid #d1d5db;background:#fff;color:#6b7280;border-radius:5px;cursor:pointer;margin-top:4px">Reviewed</button>`
+        : '';
+    return `<tr style="${rowStyle}" data-k="${k}">
+        <td style="padding:5px 8px"><div>${escapeHtml(r.name)}${chip}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}${r.campus?' · '+escapeHtml(r.campus):''}</div></td>
         <td style="padding:5px 8px">${_svtBadge(r.outcome)}${detail}</td>
         <td style="padding:5px 8px">
             <select class="svt-disp-sel" data-k="${k}" style="padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
@@ -4994,7 +5039,7 @@ function _renderSvtDispRow(r) {
         <td style="padding:5px 8px">${parentPick}${progFields}
             <input class="svt-note" data-k="${k}" value="${escapeHtml(r.note||'')}" placeholder="note" style="width:100%;margin-top:4px;padding:3px 5px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
         </td>
-        <td style="padding:5px 8px"><button class="svt-save" data-k="${k}" style="padding:3px 10px;font-size:12px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:5px;cursor:pointer">Save</button></td>
+        <td style="padding:5px 8px"><button class="svt-save" data-k="${k}" style="padding:3px 10px;font-size:12px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:5px;cursor:pointer">Save</button>${reviewedBtn ? '<br>'+reviewedBtn : ''}</td>
     </tr>`;
 }
 
@@ -5009,6 +5054,8 @@ function _svtWireRow(k) {
     };
     const btn = document.querySelector(`.svt-save[data-k="${CSS.escape(k)}"]`);
     if (btn) btn.onclick = () => svtSaveRow(k, btn);
+    const rev = document.querySelector(`.svt-reviewed[data-k="${CSS.escape(k)}"]`);
+    if (rev) rev.onclick = () => svtMarkReviewed([k]);
 }
 
 async function svtSaveRow(k, btn) {

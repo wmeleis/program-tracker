@@ -3108,6 +3108,30 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # back to name parsing (Program Level + Degree Type + Program Name)
     # for rows with no Program Code.
     svt_rows_data = _safe_parse('SVT', parse_svt)
+
+    # Change tracking: fingerprint each entry's mapping-relevant fields (name,
+    # code, campus, courseleaf key, initiative type — NOT status/phase, which
+    # churn constantly) and reconcile against svt_seen so the editor can surface
+    # only entries that are new or whose mapping changed since last reviewed.
+    def _svt_fingerprint(p):
+        snap = {
+            'name':            re.sub(r'\s+', ' ', (p.get('program_name') or '')).strip(),
+            'code':            (p.get('program_code') or '').strip(),
+            'campus':          (p.get('campus') or '').strip(),
+            'courseleaf_key':  (p.get('courseleaf_key') or '').strip(),
+            'initiative_type': (p.get('initiative_type') or '').strip(),
+        }
+        fp = '␟'.join(snap[k] for k in ('name', 'code', 'campus', 'courseleaf_key', 'initiative_type'))
+        return fp, snap
+    try:
+        _db_module.reconcile_svt_seen([
+            dict(svt_key=p.get('svt_key', ''), fingerprint=_svt_fingerprint(p)[0],
+                 snapshot=_svt_fingerprint(p)[1])
+            for p in svt_rows_data if p.get('svt_key')
+        ])
+    except Exception as _e:
+        print(f"  svt_seen reconcile error (non-fatal): {_e}")
+
     n_svt_matched = 0
     n_svt_added   = 0
     n_svt_mismatch = 0
