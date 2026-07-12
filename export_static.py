@@ -538,6 +538,16 @@ def build_static_site():
         r'<!-- Console modal.*?</div>\s*</div>\s*</div>',
         '', html, count=1, flags=re.DOTALL
     )
+    # Remove the Mappings button + modal — local-only (edits the svt_overrides
+    # table via the Flask backend, which the static site doesn't have).
+    html = re.sub(
+        r'<button id="mappings-btn"[^>]*>.*?</button>',
+        '', html, count=1, flags=re.DOTALL
+    )
+    html = re.sub(
+        r'<!-- Mappings modal.*?</div>\s*</div>\s*</div>',
+        '', html, count=1, flags=re.DOTALL
+    )
 
     # Wrap the dashboard body content in a hidden container and prepend gate
     gate_html = _gate_html(cache_bust)

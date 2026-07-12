@@ -206,10 +206,8 @@ function switchView(view) {
     const btnPort = document.getElementById('btn-portfolio');
     if (btnPort) btnPort.classList.toggle('active', view === 'portfolio');
 
-    // The "References" button (manage custom reference curricula) is only
-    // relevant on the Programs view — hide on Courses / Catalog / Portfolio.
-    const refsBtn = document.getElementById('refs-btn');
-    if (refsBtn) refsBtn.style.display = view === 'programs' ? '' : 'none';
+    // Administrative buttons (Authenticate, Console, Mappings, References) stay
+    // visible on every view — the top bar is consistent across all tabs.
 
     // Reset filters when switching views
     pipelineFilter = null;
@@ -247,19 +245,16 @@ function switchView(view) {
 
     const portfolioToolbar  = document.getElementById('portfolio-table-toolbar');
     const portfolioHdrAct   = document.getElementById('portfolio-header-actions');
-    // CIM-specific header buttons: hidden on portfolio view (replaced by
-    // Export / Views / Columns) — EXCEPT the "● CIM connected" status button
-    // (auth-btn), which stays visible everywhere since the connection status
-    // is useful on every view. Non-portfolio views restore them all.
-    const cimHdrBtns = ['scan-btn','auth-btn','console-btn','refs-btn']
+    // Administrative header buttons stay visible on every view (consistent top
+    // bar). The portfolio-specific Export / Views / Columns live in the table
+    // toolbar, alongside — not instead of — the admin buttons.
+    const adminHdrBtns = ['auth-btn','console-btn','mappings-btn','refs-btn']
         .map(id => document.getElementById(id)).filter(Boolean);
-    const authBtn = document.getElementById('auth-btn');
+    adminHdrBtns.forEach(b => b.style.display = '');
     const lastUpdatedEl = document.getElementById('last-updated');
     const scanStatusEl  = document.getElementById('scan-status');
     const progressEl    = document.getElementById('progress-container');
     if (view === 'portfolio') {
-        cimHdrBtns.forEach(b => b.style.display = 'none');
-        if (authBtn) authBtn.style.display = '';   // keep CIM connection status visible
         // #last-updated stays visible on Portfolio — it's part of the always-on
         // freshness line under the title, not a CIM-only control.
         if (scanStatusEl)  scanStatusEl.style.display  = 'none';
@@ -274,7 +269,6 @@ function switchView(view) {
         if (filtersSection)      filtersSection.style.display = 'none';
         if (subjectGroup)        subjectGroup.style.display = 'none';
     } else {
-        cimHdrBtns.forEach(b => b.style.display = '');
         if (lastUpdatedEl) lastUpdatedEl.style.display = '';
         if (scanStatusEl)  scanStatusEl.style.display  = '';
         if (progressEl)    progressEl.style.display    = 'none';  // stays hidden until scan runs
@@ -4871,10 +4865,23 @@ async function loadConsoleData() {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const data = await resp.json();
         body.innerHTML = renderConsoleContent(data);
-        loadSvtDispositions();
     } catch (e) {
         body.innerHTML = `<p style="color:#b91c1c">Could not load console data: ${e.message}</p>`;
     }
+}
+
+// ---- Mappings modal (persistent SVT→CIM dispositions; local-only) ----
+function openMappingsModal() {
+    const m = document.getElementById('mappings-modal');
+    if (m) m.style.display = 'flex';
+    loadSvtDispositions();
+}
+function closeMappingsModal() {
+    const m = document.getElementById('mappings-modal');
+    if (m) m.style.display = 'none';
+}
+function closeMappingsModalIfBackdrop(event) {
+    if (event.target.id === 'mappings-modal') closeMappingsModal();
 }
 
 // ---- SVT dispositions editor (Flask-local tool) ----
@@ -5148,26 +5155,6 @@ function renderConsoleContent(data) {
         }
         html += '</tbody></table>';
     }
-
-    // ---- SVT dispositions (durable, editable overrides) ----
-    html += '<h3 style="margin:24px 0 4px">SVT dispositions</h3>';
-    html += '<p style="color:#64748b;font-size:12px;margin:0 0 8px">Correct how each SVT entry maps into the portfolio. Changes are saved durably and applied on the next ingest (or click Re-run ingest now).</p>';
-    html += `<div style="display:flex;gap:8px;align-items:center;margin:0 0 8px;flex-wrap:wrap">
-        <input id="svt-disp-search" type="text" placeholder="Search name / intake id…" style="flex:1;min-width:180px;padding:5px 8px;font-size:13px;border:1px solid #cbd5e1;border-radius:6px">
-        <select id="svt-disp-filter" style="padding:5px 8px;font-size:13px;border:1px solid #cbd5e1;border-radius:6px">
-            <option value="attention">Needs attention</option>
-            <option value="all">All rows</option>
-            <option value="added">Added</option>
-            <option value="matched">Matched</option>
-            <option value="pending">Pending</option>
-            <option value="concentration">Concentration</option>
-            <option value="non_program">Non-program</option>
-            <option value="mismatch">Mismatch</option>
-            <option value="overridden">Manually set</option>
-        </select>
-        <button id="svt-disp-reingest" style="padding:5px 12px;font-size:13px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:6px;cursor:pointer">Re-run ingest now</button>
-    </div>`;
-    html += '<div id="svt-disp-body" style="margin:0 0 18px">Loading…</div>';
 
     html += '<h3 style="margin:20px 0 6px">Portfolio Ingest Report</h3>';
     if (updatedAt) {
