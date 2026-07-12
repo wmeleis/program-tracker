@@ -3124,11 +3124,23 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         fp = '␟'.join(snap[k] for k in ('name', 'code', 'campus', 'courseleaf_key', 'initiative_type'))
         return fp, snap
     try:
-        _db_module.reconcile_svt_seen([
+        _recon = _db_module.reconcile_svt_seen([
             dict(svt_key=p.get('svt_key', ''), fingerprint=_svt_fingerprint(p)[0],
                  snapshot=_svt_fingerprint(p)[1])
             for p in svt_rows_data if p.get('svt_key')
-        ])
+        ]) or {}
+        # D: an entry whose mapping fields changed is re-evaluated FROM SCRATCH.
+        # Delete any manual disposition entirely so the heuristics below re-run on
+        # the new content and the row re-surfaces (flagged CHANGED) for a fresh
+        # decision — a prior override never silently rides along on changed data.
+        _changed = _recon.get('changed', [])
+        if _changed:
+            _ovs = _db_module.get_all_svt_overrides()
+            for _ck in _changed:
+                _o = _ovs.get(_ck)
+                if _o and (_o.get('disposition') or 'auto') != 'auto':
+                    _db_module.delete_svt_override(_ck)
+                    print(f"    reset override for changed SVT entry {_ck} (was {_o.get('disposition')})")
     except Exception as _e:
         print(f"  svt_seen reconcile error (non-fatal): {_e}")
 

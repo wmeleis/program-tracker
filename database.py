@@ -1683,18 +1683,21 @@ def reconcile_svt_seen(entries):
     entries: list of {svt_key, fingerprint, snapshot(dict)} where fingerprint is
     a hash of the mapping-relevant fields and snapshot is those fields' values.
 
-    On the very first population (empty table) every entry is seeded as an
-    accepted baseline (last_reviewed=now, not new) so nothing is flagged. After
-    that, a never-seen key is a genuine new entry (flagged), and a changed
-    fingerprint stamps last_changed + records the field-level diff (flagged
-    until reviewed). Keys that vanish from the feed are left untouched (inert).
+    Nothing is auto-accepted: a never-seen key (including every entry on the
+    first run) is inserted UNREVIEWED (is_new=1, last_reviewed='') so it must be
+    signed off by a human once. A changed fingerprint stamps last_changed +
+    records the field-level diff, re-flagging the entry for review. Keys that
+    vanish from the feed are left untouched (inert).
+
+    Returns {'new': [keys first seen this run], 'changed': [keys whose mapping
+    fields changed]} so the caller can re-evaluate changed entries from scratch.
     """
     from datetime import datetime
     import json as _json
     now = datetime.now().isoformat()
+    new_keys, changed_keys = [], []
     with get_db() as conn:
         existing = {r['svt_key']: dict(r) for r in conn.execute("SELECT * FROM svt_seen").fetchall()}
-        baseline = (len(existing) == 0)
         for e in entries:
             k = e.get('svt_key')
             if not k:
@@ -1704,13 +1707,12 @@ def reconcile_svt_seen(entries):
             snap_json = _json.dumps(snap, separators=(',', ':'))
             prev = existing.get(k)
             if prev is None:
-                is_new = 0 if baseline else 1
-                last_reviewed = now if baseline else ''
                 conn.execute(
                     "INSERT INTO svt_seen (svt_key,fingerprint,snapshot_json,"
                     "change_detail_json,is_new,first_seen,last_changed,last_reviewed) "
                     "VALUES (?,?,?,?,?,?,?,?)",
-                    (k, fp, snap_json, '', is_new, now, now, last_reviewed))
+                    (k, fp, snap_json, '', 1, now, now, ''))
+                new_keys.append(k)
             elif (prev.get('fingerprint') or '') != fp:
                 try:
                     old_snap = _json.loads(prev.get('snapshot_json') or '{}')
@@ -1723,7 +1725,9 @@ def reconcile_svt_seen(entries):
                     "UPDATE svt_seen SET fingerprint=?, snapshot_json=?, "
                     "change_detail_json=?, last_changed=? WHERE svt_key=?",
                     (fp, snap_json, _json.dumps(diff, separators=(',', ':')), now, k))
+                changed_keys.append(k)
             # unchanged → leave as-is
+    return {'new': new_keys, 'changed': changed_keys}
 
 
 def mark_svt_reviewed(svt_keys):
