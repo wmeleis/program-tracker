@@ -4930,7 +4930,10 @@ function renderSvtDispositions() {
     let rows = _svtDispRows.filter(r => {
         if (q && !(`${r.name} ${r.svt_key}`.toLowerCase().includes(q))) return false;
         if (filter === 'all') return true;
-        if (filter === 'attention') return r.disposition !== 'auto' || ['added','pending','mismatch'].includes(r.outcome);
+        // "Needs attention" = unresolved outcomes only. Matched / concentration /
+        // non-program are resolved (even when set by hand), so they're excluded
+        // here — review manual overrides via the "Manually set" filter instead.
+        if (filter === 'attention') return ['added','pending','mismatch'].includes(r.outcome);
         if (filter === 'overridden') return r.disposition !== 'auto';
         return r.outcome === filter;
     });
