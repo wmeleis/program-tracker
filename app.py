@@ -5,7 +5,7 @@ import time
 import json as _json
 import threading
 from datetime import datetime
-from flask import Flask, render_template, jsonify, request, make_response, send_from_directory
+from flask import Flask, render_template, jsonify, request, make_response, send_from_directory, send_file
 from flask_cors import CORS
 
 from database import (
@@ -1851,6 +1851,42 @@ def api_svt_overrides_reingest():
         return jsonify({'ok': True})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/discrepancies', methods=['GET'])
+def api_discrepancies():
+    """Read-only consolidated discrepancy view for the in-app Discrepancies modal.
+    Does NOT advance the report state, so 'new since last report' matches the last
+    generated xlsx. UIP is skipped here (needs Chrome/SharePoint) — use Generate."""
+    import discrepancy_report
+    return jsonify(discrepancy_report.view_data(skip_uip=True))
+
+
+@app.route('/api/discrepancies/generate', methods=['POST'])
+def api_discrepancies_generate():
+    """Generate the xlsx report (incl. UIP), write it to data/reports/, and
+    advance the 'new since last' snapshot."""
+    import discrepancy_report
+    try:
+        res = discrepancy_report.generate(skip_uip=False, advance_state=True)
+        return jsonify({'ok': True, 'total': res['total'], 'total_new': res['total_new'],
+                        'summary': res['summary']})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/discrepancies/download')
+def api_discrepancies_download():
+    """Serve the latest generated report; generate one on the fly if none exists."""
+    import discrepancy_report
+    path = os.path.join(_DATA_DIR, 'reports', 'discrepancy_report_latest.xlsx')
+    if not os.path.exists(path):
+        try:
+            discrepancy_report.generate(skip_uip=True, advance_state=True)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return send_file(path, as_attachment=True,
+                     download_name='portfolio_discrepancy_report.xlsx')
 
 
 @app.route('/api/colleges')

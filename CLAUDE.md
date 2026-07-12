@@ -661,6 +661,15 @@ A seventh admin view, **"Needs SVT coordination"** (`svt_coord` / `_svtNeedsCoor
 
 **Frontend badge logic:** `cim_program_id` set + `cim_change_type = 'Inactivation'` → red "Inactive" badge; `cim_program_id` set + other type → green "Active" badge; no `cim_program_id` → blank.
 
+### Discrepancy Reports (`discrepancy_report.py`)
+Consolidates every discrepancy type into ONE Excel workbook + an in-app view. Detection is not re-implemented — it reads what each ingest already computed (`portfolio_mismatches.json`, the `svt_seen` change table) and folds in UIP correlation.
+- **Sections (10):** SVT added / pending / mismatch / mapping-changed-since-review; Banner missing-in-portfolio / missing-in-banner / code-mismatch / campus-diff; concentration→college (CIM vs Banner); UIP correlation. (OTP + non-programs intentionally excluded per Waleed.) The "SVT mapping-changed" section is only entries whose mapping fields drifted since a prior review (`change_detail` present) — NOT the day-one unreviewed backlog.
+- **Workbook:** `Summary` sheet (each type's count + new/resolved since last report) + one sheet per type; NEW-since-last rows highlighted amber. Written to **`data/reports/`** (project dir, per Waleed — NOT ~/Downloads) as both a dated archive and a stable `discrepancy_report_latest.xlsx`. `data/` is gitignored so reports aren't committed.
+- **New-since-last:** `annotate_deltas` compares each row's identity to a stored snapshot (`data/reports/discrepancy_report_state.json`). Only **generating** a report advances the snapshot; the in-app view is read-only (its "new" set matches the last generated report). First run flags nothing new (no prior baseline).
+- **Key functions:** `gather_discrepancies(skip_uip)` → ordered sections; `annotate_deltas` → summary + new state; `write_xlsx`; `generate(skip_uip, advance_state)` (CLI + weekly job); `view_data(skip_uip=True)` (Flask, read-only, UIP skipped since it needs Chrome/SharePoint).
+- **Flask:** `GET /api/discrepancies` (read-only view), `POST /api/discrepancies/generate` (writes xlsx incl. UIP + advances snapshot), `GET /api/discrepancies/download` (serves latest xlsx). In-app **"Discrepancies"** header button (visible on every view; stripped from static export) → modal with the summary, collapsible per-type tables (NEW highlighted), Download + Generate buttons.
+- **Schedule:** `discrepancy_report.sh` + `com.programtracker.discrepancy.plist` — weekly Mondays 4:30am (after `com.programtracker.uipcheck` at 4:00 so UIP's workbook is fresh). Runs `discrepancy_report.py --notify` → macOS notification only when new discrepancies appeared. Logs: `data/discrepancy_report.log`, `data/discrepancy_launchd.log`.
+
 **Name normalization for display:** `normalizePortfolioName()` in `static/app.js` converts "Bachelor of Science in X" → "X, BS" etc.
 
 **View persistence:** The active view (CIM Programs / Courses / Catalog / Portfolio) is saved to `localStorage['cim-active-view']` and restored on page load, so navigating away and back keeps the user's context.

@@ -248,7 +248,7 @@ function switchView(view) {
     // Administrative header buttons stay visible on every view (consistent top
     // bar). The portfolio-specific Export / Views / Columns live in the table
     // toolbar, alongside — not instead of — the admin buttons.
-    const adminHdrBtns = ['auth-btn','console-btn','mappings-btn','refs-btn']
+    const adminHdrBtns = ['auth-btn','console-btn','mappings-btn','discrepancies-btn','refs-btn']
         .map(id => document.getElementById(id)).filter(Boolean);
     adminHdrBtns.forEach(b => b.style.display = '');
     const lastUpdatedEl = document.getElementById('last-updated');
@@ -4882,6 +4882,96 @@ function closeMappingsModal() {
 }
 function closeMappingsModalIfBackdrop(event) {
     if (event.target.id === 'mappings-modal') closeMappingsModal();
+}
+
+// ---- Discrepancies modal (consolidated report; local-only) ----
+function openDiscrepanciesModal() {
+    const m = document.getElementById('discrepancies-modal');
+    if (m) m.style.display = 'flex';
+    loadDiscrepancies();
+    const dl = document.getElementById('disc-download');
+    if (dl) dl.onclick = () => { window.location = '/api/discrepancies/download'; };
+    const gen = document.getElementById('disc-generate');
+    if (gen) gen.onclick = discGenerate;
+}
+function closeDiscrepanciesModal() {
+    const m = document.getElementById('discrepancies-modal');
+    if (m) m.style.display = 'none';
+}
+function closeDiscrepanciesModalIfBackdrop(event) {
+    if (event.target.id === 'discrepancies-modal') closeDiscrepanciesModal();
+}
+
+async function loadDiscrepancies() {
+    const body = document.getElementById('discrepancies-body');
+    if (!body) return;
+    body.innerHTML = 'Loading…';
+    try {
+        const data = await (await fetch('/api/discrepancies')).json();
+        renderDiscrepancies(data);
+    } catch (e) {
+        body.innerHTML = `<p style="color:#b91c1c">Could not load discrepancies: ${e.message}</p>`;
+    }
+}
+
+function renderDiscrepancies(data) {
+    const body = document.getElementById('discrepancies-body');
+    const asof = document.getElementById('disc-asof');
+    if (asof) asof.textContent = data.state_generated_at
+        ? `New-since baseline: last report ${new Date(data.state_generated_at).toLocaleString()}`
+        : 'No prior report yet — nothing marked new on this first view.';
+    const summary = data.summary || [];
+    const total = summary.reduce((a, s) => a + s.count, 0);
+    const totalNew = summary.reduce((a, s) => a + s.new, 0);
+    // Summary table
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">';
+    html += '<thead><tr style="background:#eff6ff;text-align:left"><th style="padding:4px 8px">Discrepancy type</th><th style="padding:4px 8px">Count</th><th style="padding:4px 8px">New</th></tr></thead><tbody>';
+    for (const s of summary) {
+        html += `<tr style="border-top:1px solid #e2e8f0;cursor:pointer" onclick="document.getElementById('disc-sec-${s.key}')?.scrollIntoView({behavior:'smooth'})">
+            <td style="padding:4px 8px">${escapeHtml(s.title)}</td>
+            <td style="padding:4px 8px">${s.count}</td>
+            <td style="padding:4px 8px">${s.new ? `<span style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:8px">${s.new} new</span>` : ''}</td>
+        </tr>`;
+    }
+    html += `<tr style="border-top:2px solid #cbd5e1;font-weight:500"><td style="padding:4px 8px">TOTAL</td><td style="padding:4px 8px">${total}</td><td style="padding:4px 8px">${totalNew || ''}</td></tr>`;
+    html += '</tbody></table>';
+    // One collapsible section per type
+    for (const sec of (data.sections || [])) {
+        const openAttr = sec.rows.some(r => r._new) ? ' open' : '';
+        html += `<details id="disc-sec-${sec.key}"${openAttr} style="margin:0 0 8px;border:1px solid #e2e8f0;border-radius:6px">
+            <summary style="cursor:pointer;padding:6px 10px;font-weight:500">${escapeHtml(sec.title)} <span style="color:#64748b;font-weight:400">(${sec.rows.length})</span></summary>`;
+        if (sec.rows.length) {
+            html += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:#f8fafc;text-align:left">';
+            html += '<th style="padding:3px 8px"></th>' + sec.columns.map(c => `<th style="padding:3px 8px">${escapeHtml(c)}</th>`).join('');
+            html += '</tr></thead><tbody>';
+            for (const r of sec.rows) {
+                const bg = r._new ? 'background:#fffdf5' : '';
+                html += `<tr style="border-top:1px solid #eef2f7;${bg}">`;
+                html += `<td style="padding:3px 8px">${r._new ? '<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:0 5px;border-radius:6px">NEW</span>' : ''}</td>`;
+                html += sec.fields.map(f => `<td style="padding:3px 8px">${escapeHtml(r[f] || '')}</td>`).join('');
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+        } else {
+            html += '<p style="padding:6px 10px;color:#64748b;margin:0">None.</p>';
+        }
+        html += '</details>';
+    }
+    body.innerHTML = html;
+}
+
+async function discGenerate() {
+    const btn = document.getElementById('disc-generate');
+    if (btn) { btn.textContent = 'Generating… (~1 min, incl. UIP)'; btn.disabled = true; }
+    try {
+        const data = await (await fetch('/api/discrepancies/generate', {method: 'POST'})).json();
+        if (!data.ok) throw new Error(data.error || 'failed');
+        await loadDiscrepancies();
+    } catch (e) {
+        alert('Generate failed: ' + e.message);
+    } finally {
+        if (btn) { btn.textContent = 'Generate new report'; btn.disabled = false; }
+    }
 }
 
 // ---- SVT dispositions editor (Flask-local tool) ----

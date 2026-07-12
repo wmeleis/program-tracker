@@ -40,6 +40,7 @@
             <button id="auth-btn" class="header-secondary-btn" onclick="cimAuthenticate()" title="CIM session — click to (re)open CIM login in Chrome">Authenticate</button>
             <button id="console-btn" class="header-secondary-btn" onclick="openConsoleModal()">Console</button>
             <button id="mappings-btn" class="header-secondary-btn" onclick="openMappingsModal()" title="Persistent SVT→CIM disposition mappings">Mappings</button>
+            <button id="discrepancies-btn" class="header-secondary-btn" onclick="openDiscrepanciesModal()" title="Consolidated discrepancy report (SVT, Banner, concentration, UIP)">Discrepancies</button>
             <button id="refs-btn" class="header-secondary-btn" onclick="openReferencesModal()" title="Manage custom reference curricula">References</button>
             <!-- Portfolio actions moved out of the header: Export + Columns are in
                  the table toolbar; Views opens via the clickable "VIEWS" label. -->
@@ -87,6 +88,24 @@
                     <button id="svt-disp-reingest" style="padding:5px 12px;font-size:13px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:6px;cursor:pointer">Re-run ingest now</button>
                 </div>
                 <div id="svt-disp-body">Loading…</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Discrepancies modal (local-only): consolidated discrepancy report -->
+    <div id="discrepancies-modal" class="modal-overlay" style="display: none;" onclick="closeDiscrepanciesModalIfBackdrop(event)">
+        <div class="modal-panel" style="max-width:900px;" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>Discrepancies</h2>
+                <button class="modal-close" onclick="closeDiscrepanciesModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="font-size:13px;">
+                <div style="display:flex;gap:8px;align-items:center;margin:0 0 10px;flex-wrap:wrap">
+                    <span id="disc-asof" style="color:#64748b;font-size:11px;flex:1"></span>
+                    <button id="disc-download" style="padding:5px 12px;font-size:13px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:6px;cursor:pointer">Download report (.xlsx)</button>
+                    <button id="disc-generate" title="Regenerate the report (includes UIP; needs Chrome/SharePoint) and update the new-since-last baseline" style="padding:5px 12px;font-size:13px;border:1px solid #92400e;background:#fffbeb;color:#92400e;border-radius:6px;cursor:pointer">Generate new report</button>
+                </div>
+                <div id="discrepancies-body">Loading…</div>
             </div>
         </div>
     </div>

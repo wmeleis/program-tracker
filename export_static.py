@@ -548,6 +548,16 @@ def build_static_site():
         r'<!-- Mappings modal.*?</div>\s*</div>\s*</div>',
         '', html, count=1, flags=re.DOTALL
     )
+    # Remove the Discrepancies button + modal — local-only (report generation +
+    # download require the Flask backend).
+    html = re.sub(
+        r'<button id="discrepancies-btn"[^>]*>.*?</button>',
+        '', html, count=1, flags=re.DOTALL
+    )
+    html = re.sub(
+        r'<!-- Discrepancies modal.*?</div>\s*</div>\s*</div>',
+        '', html, count=1, flags=re.DOTALL
+    )
 
     # Wrap the dashboard body content in a hidden container and prepend gate
     gate_html = _gate_html(cache_bust)
