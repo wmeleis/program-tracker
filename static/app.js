@@ -5025,9 +5025,6 @@ function _renderSvtDispRow(r) {
     const rowStyle = r.flagged
         ? 'border-top:1px solid #e2e8f0;border-left:3px solid #f59e0b;background:#fffdf5'
         : 'border-top:1px solid #e2e8f0';
-    const reviewedBtn = r.flagged
-        ? `<button class="svt-reviewed" data-k="${k}" title="Mark this entry reviewed" style="padding:3px 8px;font-size:11px;border:1px solid #d1d5db;background:#fff;color:#6b7280;border-radius:5px;cursor:pointer;margin-top:4px">Reviewed</button>`
-        : '';
     return `<tr style="${rowStyle}" data-k="${k}">
         <td style="padding:5px 8px"><div>${escapeHtml(r.name)}${chip}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}${r.campus?' · '+escapeHtml(r.campus):''}</div></td>
         <td style="padding:5px 8px">${_svtBadge(r.outcome)}${detail}</td>
@@ -5039,7 +5036,7 @@ function _renderSvtDispRow(r) {
         <td style="padding:5px 8px">${parentPick}${progFields}
             <input class="svt-note" data-k="${k}" value="${escapeHtml(r.note||'')}" placeholder="note" style="width:100%;margin-top:4px;padding:3px 5px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
         </td>
-        <td style="padding:5px 8px"><button class="svt-save" data-k="${k}" style="padding:3px 10px;font-size:12px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:5px;cursor:pointer">Save</button>${reviewedBtn ? '<br>'+reviewedBtn : ''}</td>
+        <td style="padding:5px 8px"><button class="svt-save" data-k="${k}" title="Save this mapping decision and mark the entry reviewed" style="padding:3px 12px;font-size:12px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:5px;cursor:pointer">Confirm</button></td>
     </tr>`;
 }
 
@@ -5054,8 +5051,6 @@ function _svtWireRow(k) {
     };
     const btn = document.querySelector(`.svt-save[data-k="${CSS.escape(k)}"]`);
     if (btn) btn.onclick = () => svtSaveRow(k, btn);
-    const rev = document.querySelector(`.svt-reviewed[data-k="${CSS.escape(k)}"]`);
-    if (rev) rev.onclick = () => svtMarkReviewed([k]);
 }
 
 async function svtSaveRow(k, btn) {
@@ -5069,18 +5064,21 @@ async function svtSaveRow(k, btn) {
         override_campus: val('.svt-ocampus'),
         note: val('.svt-note'),
     };
-    if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+    if (btn) { btn.textContent = 'Confirming…'; btn.disabled = true; }
     try {
         const resp = await fetch('/api/svt_overrides', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)});
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const row = _svtDispRows.find(r => r.svt_key === k);
-        if (row) Object.assign(row, payload, {parent_cim_id: payload.parent_cim_id});
-        if (btn) { btn.textContent = 'Saved ✓'; setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 1200); }
+        // Confirming saves the decision AND clears the new/changed flag (the
+        // server marks it reviewed). Re-render so the row drops its highlight /
+        // leaves the "New / changed" view.
+        if (row) Object.assign(row, payload, {parent_cim_id: payload.parent_cim_id, flagged: false, is_new: false});
+        renderSvtDispositions();
     } catch (e) {
         if (btn) { btn.textContent = 'Error'; btn.disabled = false; }
-        alert('Save failed: ' + e.message);
+        alert('Confirm failed: ' + e.message);
     }
 }
 

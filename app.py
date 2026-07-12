@@ -1802,7 +1802,7 @@ def api_svt_overrides_get():
 @app.route('/api/svt_overrides', methods=['POST'])
 def api_svt_overrides_post():
     """Upsert one SVT disposition override (disposition='auto' clears it)."""
-    from database import upsert_svt_override
+    from database import upsert_svt_override, mark_svt_reviewed
     data = request.get_json(force=True) or {}
     key = (data.get('svt_key') or '').strip()
     if not key:
@@ -1816,6 +1816,9 @@ def api_svt_overrides_post():
         override_campus=(data.get('override_campus') or ''),
         note=(data.get('note') or ''),
     )
+    # Confirming a mapping decision also counts as reviewing the entry — clear its
+    # new/changed flag so it drops off the to-do list.
+    mark_svt_reviewed([key])
     return jsonify({'ok': True})
 
 
