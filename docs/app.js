@@ -4934,7 +4934,17 @@ function renderSvtDispositions() {
         if (filter === 'overridden') return r.disposition !== 'auto';
         return r.outcome === filter;
     });
-    let html = `<p style="color:#64748b;font-size:11px;margin:0 0 6px">${rows.length} of ${_svtDispRows.length} rows</p>`;
+    // Sort most-in-need-of-attention first: mismatch → pending → added, then the
+    // resolved outcomes (concentration/non-program/matched). Within a rank, sort
+    // by name. A manual override that ISN'T pending counts as handled, so it
+    // drops below the auto rows still flagged for attention.
+    const rank = o => ({mismatch: 0, pending: 1, added: 2, concentration: 3, non_program: 4, matched: 5}[o] ?? 6);
+    rows.sort((a, b) => {
+        const ra = rank(a.outcome), rb = rank(b.outcome);
+        if (ra !== rb) return ra - rb;
+        return (a.name || '').localeCompare(b.name || '');
+    });
+    let html = `<p style="color:#64748b;font-size:11px;margin:0 0 6px">${rows.length} of ${_svtDispRows.length} rows — most in need of attention first</p>`;
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     html += `<thead><tr style="background:#f8fafc;text-align:left">
         <th style="padding:4px 8px">SVT entry</th>
