@@ -591,25 +591,11 @@ _SVT_HCWHY_TO_TYPE = {
     'Launch term change request':                 'Change',
     'Deploy Program to Network':                  'Network Deployment',
 }
-# SVT concentration proposals whose PARENT program is ambiguous or which bundle
-# multiple concentrations — they can't be auto-attached to a parent row and need
-# a human to identify the parent / split them. Routed to the "svt_pending_analysis"
-# bucket in portfolio_mismatches.json and kept OUT of the portfolio (they'd
-# otherwise show as garbled top-level program rows). Curated from Waleed's review
-# 2026-07-11; prune an entry once its parent is resolved (then it flows normally).
-# Matched on the SVT Program Name with whitespace collapsed + lowercased.
-def _norm_pending_name(s):
-    return re.sub(r'\s+', ' ', (s or '')).strip().lower()
-
-SVT_PENDING_ANALYSIS = {
-    _norm_pending_name(n) for n in (
-        'Cert and Concentration, Medical Science Liaison',
-        'Concentration Offerings in Network',
-        'MS in Bioengineering Biomedical Devices and Bioimaging Concentration Bridge Program',
-        'Master of Science in Bioengineering, concentration in Biomedical Devices and Bioimaging, Charlotte',
-        'Pharmaceutical Industry concentration and Research concentration in Doctor of Pharmacy program',
-    )
-}
+# NOTE: SVT concentration proposals whose parent is ambiguous (and any other
+# manual disposition) are no longer hardcoded here — they live in the durable,
+# user-editable `svt_overrides` table (disposition='pending'|'concentration'|
+# 'non_program'|'program'), edited in the local site's Console. The ingest reads
+# that table at the top of the SVT loop; see ingest() Step 1.
 
 # HCWHY values that indicate this is NOT a program proposal — skipped silently
 # (they go into the non_programs bucket of portfolio_mismatches.json).
@@ -652,6 +638,7 @@ def parse_svt(path=None):
         'Program Level', 'Degree Type', 'Status', 'Launch Sub-Status',
         'Speed to Market?', 'How Can We Help You', 'Actual Launch Date',
         'UIP Program', 'Courseleaf Key', 'Initiative Type', 'Phase',
+        'New Intake ID',
     }
 
     out = []
@@ -707,6 +694,10 @@ def parse_svt(path=None):
             # new program worth synthesizing into the portfolio.
             'initiative_type':    rec.get('Initiative Type', ''),
             'phase':              rec.get('Phase', ''),
+            # Stable per-row key for durable, user-editable disposition overrides
+            # (svt_overrides table). Prefer the human-readable New Intake ID
+            # ("p762"); fall back to the Smartsheet row id when absent.
+            'svt_key':            (rec.get('New Intake ID', '') or str(row.get('id') or '')),
         })
 
     return out
@@ -3122,6 +3113,36 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     n_svt_mismatch = 0
     n_svt_nonprog = 0
 
+    # Durable, user-editable disposition overrides (svt_overrides table, edited
+    # in the local site's Console). Keyed by svt_key. Takes precedence over every
+    # heuristic below. Replaces the old hardcoded SVT_PENDING_ANALYSIS constant.
+    try:
+        svt_overrides = _db_module.get_all_svt_overrides()
+    except Exception:
+        svt_overrides = {}
+    # Per-row outcome for the editor UI: svt_key → {outcome, detail}. Written to
+    # portfolio_mismatches.json so the Console can show what each row resolved to.
+    svt_resolution = {}
+
+    def _svt_resolve(key, outcome, detail=''):
+        if key:
+            svt_resolution[key] = {'outcome': outcome, 'detail': detail}
+
+    def _attach_conc_to_parent(conc_name, parent_cim_id, src_row):
+        """Override path: attach a concentration sub-row directly under an
+        explicit CIM parent id (chosen by the user in the editor)."""
+        parent = cim_id_index.get(int(parent_cim_id)) if str(parent_cim_id).isdigit() else None
+        if not parent:
+            return None
+        camp = parent.get('campus') or 'Boston'
+        sub_pid = _make_id(f"conc_{conc_name}_{parent.get('id', '')}", camp)
+        if sub_pid not in tracker:
+            tracker[sub_pid] = _make_row(sub_pid, conc_name.strip(),
+                                         parent.get('college', ''), camp)
+            tracker[sub_pid]['concentration_of'] = parent.get('id', '')
+        _apply_svt_fields(tracker[sub_pid], src_row)
+        return parent
+
     def _apply_svt_fields(row, p):
         """Overlay SVT fields onto a tracker row (only if currently empty)."""
         if not row.get('svt_status') and p.get('status'):
@@ -3147,75 +3168,108 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         cleaned_name  = _strip_svt_prefix(original_name)
 
         code = (p.get('program_code') or '').strip().upper()
+        svt_key = p.get('svt_key', '')
 
-        # Market-research inquiries are exploratory ("should we deploy X to the
-        # network?"), not proposals moving through a pipeline. They must NEVER
-        # be matched to a program — even when they carry a Program Code — because
-        # overlaying their early-stage status onto a completed CIM program
-        # manufactures false "SVT still early-stage" discrepancies (e.g.
-        # Psychology, PhD (Boston)). Drop them regardless of code, case-insensitive.
-        if 'market research' in (p.get('hcwhy') or '').lower():
-            n_svt_nonprog += 1
-            non_programs.append({
-                'source':      'SVT',
-                'source_name': original_name,
-                'campus':      p.get('campus', ''),
-                'reason':      f"Market research (HCWHY={p.get('hcwhy', '')})",
-            })
-            continue
+        # ── Manual disposition override (highest precedence) ──────────────────
+        # A user-set row in svt_overrides wins over every heuristic below.
+        ov = svt_overrides.get(svt_key)
+        force_program = False
+        if ov:
+            disp = ov.get('disposition', 'auto')
+            if disp == 'non_program':
+                n_svt_nonprog += 1
+                non_programs.append({'source': 'SVT', 'source_name': original_name,
+                                     'campus': p.get('campus', ''), 'svt_key': svt_key,
+                                     'reason': 'Manual: non-program'})
+                _svt_resolve(svt_key, 'non_program', 'manual')
+                continue
+            if disp == 'pending':
+                svt_pending.append({'source_name': original_name, 'campus': p.get('campus', ''),
+                                    'svt_key': svt_key,
+                                    'reason': (ov.get('note') or 'Held for analysis (manual)')})
+                _svt_resolve(svt_key, 'pending', 'manual')
+                continue
+            if disp == 'concentration' and ov.get('parent_cim_id'):
+                _par = _attach_conc_to_parent(original_name, ov['parent_cim_id'], p)
+                if _par is not None:
+                    n_svt_matched += 1
+                    _svt_resolve(svt_key, 'concentration', f"under {_par.get('program_name', '')}")
+                    continue
+                svt_pending.append({'source_name': original_name, 'campus': p.get('campus', ''),
+                                    'svt_key': svt_key,
+                                    'reason': 'Manual concentration, but parent CIM id not found'})
+                _svt_resolve(svt_key, 'pending', 'parent not found')
+                continue
+            if disp == 'program':
+                # Force a real program row, bypassing the drop heuristics below.
+                # Apply any corrected fields the user supplied.
+                force_program = True
+                if ov.get('override_name'):
+                    cleaned_name = ov['override_name']
 
-        # HCWHY non-program filter — but bypass it when a Program Code is
-        # present (Program Code in SVT == CIM banner_code, so the row IS a
-        # real program record even if the HCWHY value is something like
-        # "General Market Research"). Without this override, e.g. CERTG AI
-        # Applications (SV) was being dropped despite having code CERTG-AIAP.
-        if p.get('hcwhy') in _SVT_HCWHY_NON_PROGRAM and not code:
-            n_svt_nonprog += 1
-            non_programs.append({
-                'source':      'SVT',
-                'source_name': original_name,
-                'campus':      p.get('campus', ''),
-                'reason':      f"HCWHY={p.get('hcwhy', '')}",
-            })
-            continue
-        # Existing non-program filters (multi-program bundles, course-code-as-name, …)
-        if _is_non_program(cleaned_name):
-            n_svt_nonprog += 1
-            if not _is_silent_non_program(cleaned_name):
+        if not force_program:
+            # Market-research inquiries are exploratory ("should we deploy X to the
+            # network?"), not proposals moving through a pipeline. They must NEVER
+            # be matched to a program — even when they carry a Program Code — because
+            # overlaying their early-stage status onto a completed CIM program
+            # manufactures false "SVT still early-stage" discrepancies (e.g.
+            # Psychology, PhD (Boston)). Drop them regardless of code.
+            if 'market research' in (p.get('hcwhy') or '').lower():
+                n_svt_nonprog += 1
                 non_programs.append({
                     'source':      'SVT',
                     'source_name': original_name,
                     'campus':      p.get('campus', ''),
+                    'svt_key':     svt_key,
+                    'reason':      f"Market research (HCWHY={p.get('hcwhy', '')})",
                 })
-            continue
+                _svt_resolve(svt_key, 'non_program', 'market research')
+                continue
 
-        # Future-analysis list: concentration proposals whose parent is ambiguous
-        # or that bundle multiple concentrations. Park them on a tracked list and
-        # keep them out of the portfolio (they'd otherwise synthesize garbled
-        # top-level program rows). See SVT_PENDING_ANALYSIS.
-        if _norm_pending_name(original_name) in SVT_PENDING_ANALYSIS:
-            svt_pending.append({
-                'source_name': original_name,
-                'campus':      p.get('campus', ''),
-                'reason':      'concentration proposal — parent program not yet identified',
-            })
-            continue
+            # HCWHY non-program filter — but bypass it when a Program Code is
+            # present (Program Code in SVT == CIM banner_code, so the row IS a
+            # real program record even if the HCWHY value is something like
+            # "General Market Research"). Without this override, e.g. CERTG AI
+            # Applications (SV) was being dropped despite having code CERTG-AIAP.
+            if p.get('hcwhy') in _SVT_HCWHY_NON_PROGRAM and not code:
+                n_svt_nonprog += 1
+                non_programs.append({
+                    'source':      'SVT',
+                    'source_name': original_name,
+                    'campus':      p.get('campus', ''),
+                    'svt_key':     svt_key,
+                    'reason':      f"HCWHY={p.get('hcwhy', '')}",
+                })
+                _svt_resolve(svt_key, 'non_program', f"HCWHY={p.get('hcwhy', '')}")
+                continue
+            # Existing non-program filters (multi-program bundles, course-code-as-name, …)
+            if _is_non_program(cleaned_name):
+                n_svt_nonprog += 1
+                if not _is_silent_non_program(cleaned_name):
+                    non_programs.append({
+                        'source':      'SVT',
+                        'source_name': original_name,
+                        'campus':      p.get('campus', ''),
+                        'svt_key':     svt_key,
+                    })
+                _svt_resolve(svt_key, 'non_program', 'auto-detected non-program')
+                continue
 
-        # Concentration-proposal entries (e.g. "MS in AI (New COE Concentration
-        # in Human-AI Collaboration)") become a sub-row UNDER the parent program
-        # rather than overwriting the parent's status. This must run BEFORE the
-        # banner-code match, because a proposed concentration carries its
-        # parent's Program Code (so the banner match would otherwise absorb it
-        # into the parent and discard the concentration). Map SVT's raw status
-        # fields to the names _create_conc_subrow expects.
-        _conc_src = dict(p)
-        _conc_src['svt_status']           = p.get('status', '')
-        _conc_src['roster_sub_status']    = p.get('sub_status', '')
-        _conc_src['roster_proposal_type'] = (_SVT_HCWHY_TO_TYPE.get(p.get('hcwhy', ''), p.get('hcwhy', '')) if p.get('hcwhy') else '')
-        _conc_src['roster_launch_date']   = p.get('actual_launch_date', '')
-        if _try_concentration_preprocess(_conc_src):
-            n_svt_matched += 1
-            continue
+            # Concentration-proposal entries (e.g. "MS in AI (New COE Concentration
+            # in Human-AI Collaboration)") become a sub-row UNDER the parent program
+            # rather than overwriting the parent's status. This must run BEFORE the
+            # banner-code match, because a proposed concentration carries its
+            # parent's Program Code (so the banner match would otherwise absorb it
+            # into the parent and discard the concentration).
+            _conc_src = dict(p)
+            _conc_src['svt_status']           = p.get('status', '')
+            _conc_src['roster_sub_status']    = p.get('sub_status', '')
+            _conc_src['roster_proposal_type'] = (_SVT_HCWHY_TO_TYPE.get(p.get('hcwhy', ''), p.get('hcwhy', '')) if p.get('hcwhy') else '')
+            _conc_src['roster_launch_date']   = p.get('actual_launch_date', '')
+            if _try_concentration_preprocess(_conc_src):
+                n_svt_matched += 1
+                _svt_resolve(svt_key, 'concentration', 'auto')
+                continue
 
         camp_norm = _normalize_campus(p.get('campus', '')) if p.get('campus') else ''
 
@@ -3233,6 +3287,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             _new_col = _normalize_college(p.get('college') or '')
             if not _row0.get('college') and _new_col:
                 _row0['college'] = _new_col
+            _svt_resolve(svt_key, 'matched', f"{_row0.get('program_name', '')} (Courseleaf Key)")
             continue
 
         # Path A: match by Program Code → CIM banner_code.
@@ -3301,6 +3356,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             _new_col = _normalize_college(p.get('college') or '')
             if not matched.get('college') and _new_col:
                 matched['college'] = _new_col
+            _svt_resolve(svt_key, 'matched', f"{matched.get('program_name', '')} (Program Code)")
             continue
 
         # Path B: no Program Code or banner_code didn't match — fall back to
@@ -3316,6 +3372,12 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             _svt_strip_program_noise(cleaned_name))
         if not campus_from_name and camp_norm:
             campus_from_name = camp_norm
+        # Manual 'program' override: apply the user's corrected degree/campus.
+        if force_program and ov:
+            if ov.get('override_degree'):
+                degree = ov['override_degree']
+            if ov.get('override_campus'):
+                campus_from_name = ov['override_campus']
 
         # If _parse_external_name couldn't extract a degree, fall back to
         # SVT's Degree Type field.
@@ -3337,6 +3399,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             _new_col = _normalize_college(p.get('college') or '')
             if not row.get('college') and _new_col:
                 row['college'] = _new_col
+            _svt_resolve(svt_key, 'matched', f"{row.get('program_name', '')} (name)")
             continue
 
         if subject and _is_valid_degree(degree):
@@ -3354,6 +3417,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     'original_name': p.get('program_name', ''),
                     'cim_format':    cim_fmt,
                     'campus':        campus_store,
+                    'svt_key':       svt_key,
                 })
                 key3 = _cim_index_keys(subject, degree, campus_store)
                 if key3 not in cim_exact_index:
@@ -3369,6 +3433,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                     'campus': campus_store,
                     'row': tracker[pid],
                 })
+            _svt_resolve(svt_key, 'added', cim_display)
             _apply_svt_fields(tracker[pid], p)
         else:
             n_svt_mismatch += 1
@@ -3378,18 +3443,20 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                 'source_name':   p.get('program_name', ''),
                 'source_code':   code,
                 'source_campus': p.get('campus', ''),
+                'svt_key':       svt_key,
                 'reason':        'no banner_code match and no recognizable subject+degree',
                 'best_guess':    best,
             })
+            _svt_resolve(svt_key, 'mismatch', best or '')
             # Also surface unparseable SVT entries as orphan rows so they appear in
             # the "Needs SVT coordination" view (not just the Console log). These
             # have already passed the non_program gate above.
-            disp = (p.get('program_name') or '').strip()
-            if disp:
+            disp_name = (p.get('program_name') or '').strip()
+            if disp_name:
                 camp = _normalize_campus(p.get('campus') or '') or 'Boston'
-                pid = _make_id(disp, camp)
+                pid = _make_id(disp_name, camp)
                 if pid not in tracker:
-                    tracker[pid] = _make_row(pid, disp, p.get('college', ''), camp)
+                    tracker[pid] = _make_row(pid, disp_name, p.get('college', ''), camp)
                 _apply_svt_fields(tracker[pid], p)
 
     print(f"  SVT: {len(svt_rows_data)} entries, {n_svt_matched} matched, "
@@ -4179,6 +4246,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             'non_programs':   _np,
             'svt_added':      _sa,
             'svt_pending_analysis': _sp,
+            'svt_resolution': svt_resolution,
             'svt_mismatches': _sm,
             'ipd_mismatches': _im,
             'ipd_added':      _ia,

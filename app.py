@@ -1740,6 +1740,88 @@ def api_console():
                     'feed_health': feed_health})
 
 
+@app.route('/api/svt_overrides', methods=['GET'])
+def api_svt_overrides_get():
+    """Return every SVT row joined with its current disposition override + the
+    outcome the last ingest gave it, plus a CIM program list for the parent
+    picker. Powers the Console 'SVT dispositions' editor."""
+    from database import get_all_svt_overrides, get_db
+    from portfolio_ingest import parse_svt
+    overrides = get_all_svt_overrides()
+    # Per-row outcome from the last ingest.
+    resolution = {}
+    try:
+        with open(_MISMATCHES_PATH) as f:
+            resolution = _json.load(f).get('svt_resolution', {})
+    except Exception:
+        pass
+    rows = []
+    for p in parse_svt():
+        key = p.get('svt_key', '')
+        ov = overrides.get(key, {})
+        res = resolution.get(key, {})
+        rows.append({
+            'svt_key':         key,
+            'name':            p.get('program_name', ''),
+            'campus':          p.get('campus', ''),
+            'initiative_type': p.get('initiative_type', ''),
+            'phase':           p.get('phase', ''),
+            'outcome':         res.get('outcome', ''),
+            'outcome_detail':  res.get('detail', ''),
+            'disposition':     ov.get('disposition', 'auto'),
+            'parent_cim_id':   ov.get('parent_cim_id'),
+            'override_name':   ov.get('override_name', ''),
+            'override_degree': ov.get('override_degree', ''),
+            'override_campus': ov.get('override_campus', ''),
+            'note':            ov.get('note', ''),
+        })
+    # CIM program list for the concentration parent picker (active + history).
+    with get_db() as conn:
+        cim = conn.execute(
+            "SELECT id, name FROM programs "
+            "WHERE current_step IS NOT NULL OR completion_date IS NOT NULL "
+            "ORDER BY name").fetchall()
+    cim_programs = [{'id': r['id'], 'name': r['name']} for r in cim]
+    return jsonify({'rows': rows, 'cim_programs': cim_programs})
+
+
+@app.route('/api/svt_overrides', methods=['POST'])
+def api_svt_overrides_post():
+    """Upsert one SVT disposition override (disposition='auto' clears it)."""
+    from database import upsert_svt_override
+    data = request.get_json(force=True) or {}
+    key = (data.get('svt_key') or '').strip()
+    if not key:
+        return jsonify({'error': 'svt_key required'}), 400
+    upsert_svt_override(
+        key,
+        disposition=(data.get('disposition') or 'auto'),
+        parent_cim_id=data.get('parent_cim_id'),
+        override_name=(data.get('override_name') or ''),
+        override_degree=(data.get('override_degree') or ''),
+        override_campus=(data.get('override_campus') or ''),
+        note=(data.get('note') or ''),
+    )
+    return jsonify({'ok': True})
+
+
+@app.route('/api/svt_overrides/reingest', methods=['POST'])
+def api_svt_overrides_reingest():
+    """Re-run the portfolio ingest (applying overrides), re-export the static
+    site, and publish to gh-pages. Feeds are NOT re-downloaded — overrides only
+    affect matching, not the source data."""
+    cwd = os.path.dirname(os.path.abspath(__file__))
+    try:
+        from portfolio_ingest import ingest as portfolio_ingest
+        portfolio_ingest()
+        import subprocess, sys
+        subprocess.run([sys.executable, 'export_static.py'], cwd=cwd, timeout=300)
+        _publish_docs_pages(cwd)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 @app.route('/api/colleges')
 def api_colleges():
     """Get list of all colleges."""

@@ -1402,6 +1402,21 @@ def init_portfolio_tables(conn):
             updated_at TEXT DEFAULT ''
         );
 
+        /* Durable, user-editable SVT→CIM disposition overrides. Keyed by the
+           stable SVT New Intake ID (e.g. "p762"), fallback Smartsheet row id.
+           Survives every portfolio_programs rebuild. disposition ∈
+           auto|program|concentration|non_program|pending. */
+        CREATE TABLE IF NOT EXISTS svt_overrides (
+            svt_key TEXT PRIMARY KEY,
+            disposition TEXT DEFAULT 'auto',
+            parent_cim_id INTEGER,
+            override_name TEXT DEFAULT '',
+            override_degree TEXT DEFAULT '',
+            override_campus TEXT DEFAULT '',
+            note TEXT DEFAULT '',
+            updated_at TEXT DEFAULT ''
+        );
+
         CREATE INDEX IF NOT EXISTS idx_portfolio_college ON portfolio_programs(college);
         CREATE INDEX IF NOT EXISTS idx_portfolio_campus  ON portfolio_programs(campus);
         CREATE INDEX IF NOT EXISTS idx_portfolio_otp_status ON portfolio_programs(otp_status);
@@ -1578,6 +1593,62 @@ def upsert_portfolio_note(program_id, note):
             ON CONFLICT(program_id) DO UPDATE SET
                 note=excluded.note, updated_at=excluded.updated_at
         """, (program_id, note, datetime.now().isoformat()))
+
+
+# ---------------------------------------------------------------------------
+# SVT disposition overrides (durable, user-editable via the local site)
+# ---------------------------------------------------------------------------
+
+def get_all_svt_overrides():
+    """Return {svt_key: {disposition, parent_cim_id, override_name,
+    override_degree, override_campus, note, updated_at}} for every override
+    that isn't 'auto'."""
+    with get_db() as conn:
+        try:
+            rows = conn.execute("SELECT * FROM svt_overrides").fetchall()
+        except Exception:
+            return {}
+        out = {}
+        for r in rows:
+            d = dict(r)
+            if (d.get('disposition') or 'auto') == 'auto':
+                continue
+            out[d['svt_key']] = d
+        return out
+
+
+def upsert_svt_override(svt_key, disposition='auto', parent_cim_id=None,
+                        override_name='', override_degree='', override_campus='',
+                        note=''):
+    """Insert/update one SVT override. disposition='auto' clears the row so the
+    ingest falls back to its heuristic."""
+    from datetime import datetime
+    with get_db() as conn:
+        if (disposition or 'auto') == 'auto' and not (note or '').strip():
+            conn.execute("DELETE FROM svt_overrides WHERE svt_key = ?", (svt_key,))
+            return
+        conn.execute("""
+            INSERT INTO svt_overrides
+                (svt_key, disposition, parent_cim_id, override_name,
+                 override_degree, override_campus, note, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(svt_key) DO UPDATE SET
+                disposition=excluded.disposition,
+                parent_cim_id=excluded.parent_cim_id,
+                override_name=excluded.override_name,
+                override_degree=excluded.override_degree,
+                override_campus=excluded.override_campus,
+                note=excluded.note,
+                updated_at=excluded.updated_at
+        """, (svt_key, disposition or 'auto',
+              parent_cim_id if parent_cim_id not in ('', None) else None,
+              override_name or '', override_degree or '', override_campus or '',
+              note or '', datetime.now().isoformat()))
+
+
+def delete_svt_override(svt_key):
+    with get_db() as conn:
+        conn.execute("DELETE FROM svt_overrides WHERE svt_key = ?", (svt_key,))
 
 
 def migrate_db():

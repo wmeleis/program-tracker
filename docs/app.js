@@ -4871,8 +4871,165 @@ async function loadConsoleData() {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const data = await resp.json();
         body.innerHTML = renderConsoleContent(data);
+        loadSvtDispositions();
     } catch (e) {
         body.innerHTML = `<p style="color:#b91c1c">Could not load console data: ${e.message}</p>`;
+    }
+}
+
+// ---- SVT dispositions editor (Flask-local tool) ----
+let _svtDispRows = [];
+let _svtCimPrograms = [];
+
+async function loadSvtDispositions() {
+    const bodyEl = document.getElementById('svt-disp-body');
+    if (!bodyEl) return;
+    try {
+        const resp = await fetch('/api/svt_overrides');
+        const data = await resp.json();
+        _svtDispRows = data.rows || [];
+        _svtCimPrograms = data.cim_programs || [];
+        renderSvtDispositions();
+        const s = document.getElementById('svt-disp-search');
+        const f = document.getElementById('svt-disp-filter');
+        if (s) s.oninput = renderSvtDispositions;
+        if (f) f.onchange = renderSvtDispositions;
+        const rb = document.getElementById('svt-disp-reingest');
+        if (rb) rb.onclick = svtReingest;
+    } catch (e) {
+        bodyEl.innerHTML = `<p style="color:#b91c1c">Could not load SVT dispositions: ${e.message}</p>`;
+    }
+}
+
+const _SVT_OUTCOME_BADGE = {
+    matched:       ['#dcfce7', '#166534', 'matched'],
+    added:         ['#dbeafe', '#1e40af', 'added'],
+    concentration: ['#f3e8ff', '#6b21a8', 'concentration'],
+    pending:       ['#fef3c7', '#92400e', 'pending'],
+    non_program:   ['#f1f5f9', '#475569', 'non-program'],
+    mismatch:      ['#fee2e2', '#991b1b', 'mismatch'],
+};
+
+function _svtBadge(outcome) {
+    const b = _SVT_OUTCOME_BADGE[outcome] || ['#f1f5f9', '#475569', outcome || '—'];
+    return `<span style="background:${b[0]};color:${b[1]};font-size:11px;padding:2px 7px;border-radius:10px;white-space:nowrap">${b[2]}</span>`;
+}
+
+function renderSvtDispositions() {
+    const bodyEl = document.getElementById('svt-disp-body');
+    if (!bodyEl) return;
+    const q = (document.getElementById('svt-disp-search')?.value || '').trim().toLowerCase();
+    const filter = document.getElementById('svt-disp-filter')?.value || 'attention';
+    let rows = _svtDispRows.filter(r => {
+        if (q && !(`${r.name} ${r.svt_key}`.toLowerCase().includes(q))) return false;
+        if (filter === 'all') return true;
+        if (filter === 'attention') return r.disposition !== 'auto' || ['added','pending','mismatch'].includes(r.outcome);
+        if (filter === 'overridden') return r.disposition !== 'auto';
+        return r.outcome === filter;
+    });
+    let html = `<p style="color:#64748b;font-size:11px;margin:0 0 6px">${rows.length} of ${_svtDispRows.length} rows</p>`;
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    html += `<thead><tr style="background:#f8fafc;text-align:left">
+        <th style="padding:4px 8px">SVT entry</th>
+        <th style="padding:4px 8px">Now</th>
+        <th style="padding:4px 8px">Disposition</th>
+        <th style="padding:4px 8px">Details</th>
+        <th style="padding:4px 8px"></th></tr></thead><tbody>`;
+    for (const r of rows) {
+        html += _renderSvtDispRow(r);
+    }
+    html += '</tbody></table>';
+    // Datalist of CIM programs for the concentration parent picker (value = id,
+    // label shows the name). Built once.
+    html += '<datalist id="svt-cim-list">';
+    for (const p of _svtCimPrograms) {
+        html += `<option value="${p.id}">${escapeHtml(p.name)}</option>`;
+    }
+    html += '</datalist>';
+    bodyEl.innerHTML = html;
+    for (const r of rows) _svtWireRow(r.svt_key);
+}
+
+function _renderSvtDispRow(r) {
+    const k = r.svt_key;
+    const disp = r.disposition || 'auto';
+    const opt = (v, label) => `<option value="${v}"${disp===v?' selected':''}>${label}</option>`;
+    const detail = r.outcome_detail ? `<div style="color:#94a3b8;font-size:10px">${escapeHtml(r.outcome_detail)}</div>` : '';
+    // Parent picker (concentration) — a datalist of CIM programs.
+    const parentVal = r.parent_cim_id || '';
+    const parentPick = `<input list="svt-cim-list" class="svt-parent" data-k="${k}" value="${parentVal}" placeholder="parent CIM id" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;display:${disp==='concentration'?'inline-block':'none'}">`;
+    const progFields = `<span class="svt-progfields" data-k="${k}" style="display:${disp==='program'?'inline-flex':'none'};gap:4px">
+        <input class="svt-oname" data-k="${k}" value="${escapeHtml(r.override_name||'')}" placeholder="name" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
+        <input class="svt-odeg" data-k="${k}" value="${escapeHtml(r.override_degree||'')}" placeholder="degree" style="width:60px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
+        <input class="svt-ocampus" data-k="${k}" value="${escapeHtml(r.override_campus||'')}" placeholder="campus" style="width:80px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
+    </span>`;
+    return `<tr style="border-top:1px solid #e2e8f0" data-k="${k}">
+        <td style="padding:5px 8px"><div>${escapeHtml(r.name)}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}${r.campus?' · '+escapeHtml(r.campus):''}</div></td>
+        <td style="padding:5px 8px">${_svtBadge(r.outcome)}${detail}</td>
+        <td style="padding:5px 8px">
+            <select class="svt-disp-sel" data-k="${k}" style="padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
+                ${opt('auto','Auto')}${opt('program','Program')}${opt('concentration','Concentration')}${opt('non_program','Non-program')}${opt('pending','Pending')}
+            </select>
+        </td>
+        <td style="padding:5px 8px">${parentPick}${progFields}
+            <input class="svt-note" data-k="${k}" value="${escapeHtml(r.note||'')}" placeholder="note" style="width:100%;margin-top:4px;padding:3px 5px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px">
+        </td>
+        <td style="padding:5px 8px"><button class="svt-save" data-k="${k}" style="padding:3px 10px;font-size:12px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:5px;cursor:pointer">Save</button></td>
+    </tr>`;
+}
+
+function _svtWireRow(k) {
+    const sel = document.querySelector(`.svt-disp-sel[data-k="${CSS.escape(k)}"]`);
+    if (sel) sel.onchange = () => {
+        const v = sel.value;
+        const pp = document.querySelector(`.svt-parent[data-k="${CSS.escape(k)}"]`);
+        const pf = document.querySelector(`.svt-progfields[data-k="${CSS.escape(k)}"]`);
+        if (pp) pp.style.display = v === 'concentration' ? 'inline-block' : 'none';
+        if (pf) pf.style.display = v === 'program' ? 'inline-flex' : 'none';
+    };
+    const btn = document.querySelector(`.svt-save[data-k="${CSS.escape(k)}"]`);
+    if (btn) btn.onclick = () => svtSaveRow(k, btn);
+}
+
+async function svtSaveRow(k, btn) {
+    const val = sel => document.querySelector(`${sel}[data-k="${CSS.escape(k)}"]`)?.value || '';
+    const payload = {
+        svt_key: k,
+        disposition: val('.svt-disp-sel'),
+        parent_cim_id: val('.svt-parent'),
+        override_name: val('.svt-oname'),
+        override_degree: val('.svt-odeg'),
+        override_campus: val('.svt-ocampus'),
+        note: val('.svt-note'),
+    };
+    if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+    try {
+        const resp = await fetch('/api/svt_overrides', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)});
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const row = _svtDispRows.find(r => r.svt_key === k);
+        if (row) Object.assign(row, payload, {parent_cim_id: payload.parent_cim_id});
+        if (btn) { btn.textContent = 'Saved ✓'; setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 1200); }
+    } catch (e) {
+        if (btn) { btn.textContent = 'Error'; btn.disabled = false; }
+        alert('Save failed: ' + e.message);
+    }
+}
+
+async function svtReingest() {
+    const btn = document.getElementById('svt-disp-reingest');
+    if (btn) { btn.textContent = 'Re-ingesting… (~1 min)'; btn.disabled = true; }
+    try {
+        const resp = await fetch('/api/svt_overrides/reingest', {method: 'POST'});
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'failed');
+        if (btn) btn.textContent = 'Done — reloading…';
+        loadSvtDispositions();
+        if (btn) setTimeout(() => { btn.textContent = 'Re-run ingest now'; btn.disabled = false; }, 1500);
+    } catch (e) {
+        if (btn) { btn.textContent = 'Re-run ingest now'; btn.disabled = false; }
+        alert('Re-ingest failed: ' + e.message);
     }
 }
 
@@ -4991,6 +5148,26 @@ function renderConsoleContent(data) {
         }
         html += '</tbody></table>';
     }
+
+    // ---- SVT dispositions (durable, editable overrides) ----
+    html += '<h3 style="margin:24px 0 4px">SVT dispositions</h3>';
+    html += '<p style="color:#64748b;font-size:12px;margin:0 0 8px">Correct how each SVT entry maps into the portfolio. Changes are saved durably and applied on the next ingest (or click Re-run ingest now).</p>';
+    html += `<div style="display:flex;gap:8px;align-items:center;margin:0 0 8px;flex-wrap:wrap">
+        <input id="svt-disp-search" type="text" placeholder="Search name / intake id…" style="flex:1;min-width:180px;padding:5px 8px;font-size:13px;border:1px solid #cbd5e1;border-radius:6px">
+        <select id="svt-disp-filter" style="padding:5px 8px;font-size:13px;border:1px solid #cbd5e1;border-radius:6px">
+            <option value="attention">Needs attention</option>
+            <option value="all">All rows</option>
+            <option value="added">Added</option>
+            <option value="matched">Matched</option>
+            <option value="pending">Pending</option>
+            <option value="concentration">Concentration</option>
+            <option value="non_program">Non-program</option>
+            <option value="mismatch">Mismatch</option>
+            <option value="overridden">Manually set</option>
+        </select>
+        <button id="svt-disp-reingest" style="padding:5px 12px;font-size:13px;border:1px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:6px;cursor:pointer">Re-run ingest now</button>
+    </div>`;
+    html += '<div id="svt-disp-body" style="margin:0 0 18px">Loading…</div>';
 
     html += '<h3 style="margin:20px 0 6px">Portfolio Ingest Report</h3>';
     if (updatedAt) {
