@@ -82,13 +82,30 @@ def _uip_rows(skip_uip):
     except Exception as e:
         return [{'status': 'error', 'discrepancy': f'UIP module unavailable: {e}'}]
     xlsx = os.path.join(_DIR, 'data', 'portfolio_feeds', 'uip_program_information.xlsx')
+    # Refresh the workbook each run (the standalone uipcheck agent that used to do
+    # this weekly was retired). Best-effort: if the download fails, fall back to
+    # the last-saved copy so we still report (flagged as possibly stale).
+    stale = False
     try:
-        if not os.path.exists(xlsx):
-            xlsx = uip_correlate.download_uip_xlsx(xlsx)
-        if not xlsx or not os.path.exists(xlsx):
+        dl = uip_correlate.download_uip_xlsx(xlsx)
+        if dl and os.path.exists(dl):
+            xlsx = dl
+        elif os.path.exists(xlsx):
+            stale = True
+        else:
             return [{'status': 'unavailable',
                      'discrepancy': 'UIP workbook could not be downloaded (Chrome/SharePoint session?).'}]
-        return [{'discrepancy': s} for s in uip_correlate.correlate(xlsx, _DB_PATH)]
+    except Exception:
+        if not os.path.exists(xlsx):
+            return [{'status': 'unavailable',
+                     'discrepancy': 'UIP workbook could not be downloaded (Chrome/SharePoint session?).'}]
+        stale = True
+    try:
+        rows = [{'discrepancy': s} for s in uip_correlate.correlate(xlsx, _DB_PATH)]
+        if stale:
+            rows.insert(0, {'status': 'stale',
+                            'discrepancy': 'NOTE: UIP download failed — using the last-saved workbook (may be stale).'})
+        return rows
     except Exception as e:
         return [{'status': 'error', 'discrepancy': f'UIP correlation failed: {e}'}]
 
