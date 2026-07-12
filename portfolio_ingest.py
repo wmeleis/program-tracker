@@ -3403,7 +3403,10 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
             continue
 
         if subject and _is_valid_degree(degree):
-            campus_store = campus_from_name or 'Boston'
+            # Normalize the campus parsed from the name so casing/variants are
+            # canonical (e.g. a name ending "(online)" → campus "Online", not
+            # the lowercase "online" the parser preserves from the source text).
+            campus_store = _normalize_campus(campus_from_name) if campus_from_name else 'Boston'
             cim_fmt = f"{subject.strip()}, {_norm_degree(degree)}"
             cim_display = (cim_fmt if campus_store == 'Boston'
                            else f"{cim_fmt} ({campus_store})")
