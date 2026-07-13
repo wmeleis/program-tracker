@@ -2140,7 +2140,10 @@ function renderTable(items) {
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment Details</button>` +
                 (hasReg ? `
                 <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}" data-tab="regulatory"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory Details</button>` : '');
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory Details</button>` : '') +
+                (!window._staticMode ? `
+                <button class="detail-tab ${activeTab === 'precheck' ? 'active' : ''}" data-tab="precheck"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'precheck')">Registrar Check</button>` : '');
 
             html += `
                 <tr class="workflow-detail" id="detail-${id}">
@@ -2177,6 +2180,7 @@ function renderTable(items) {
             else if (tab === 'misaligned') loadMisalignedDetail(id);
             else if (tab === 'changes') loadChangesDetail(id);
             else if (tab === 'regulatory') loadRegulatoryDetail(id);
+            else if (tab === 'precheck') loadPrecheckDetail(id);
             else loadCurriculumDetail(id);
         }
     });
@@ -3161,7 +3165,59 @@ function switchDetailTab(programId, tab) {
     else if (tab === 'misaligned') loadMisalignedDetail(programId);
     else if (tab === 'changes') loadChangesDetail(programId);
     else if (tab === 'regulatory') loadRegulatoryDetail(programId);
+    else if (tab === 'precheck') loadPrecheckDetail(programId);
     else loadCurriculumDetail(programId);
+}
+
+async function loadPrecheckDetail(programId) {
+    const el = document.getElementById(`detail-content-${programId}`);
+    if (!el) return;
+    el.innerHTML = '<div class="workflow-loading">Running Registrar check…</div>';
+    let d;
+    try {
+        const resp = await fetch(`/api/program/${programId}/precheck`);
+        d = await resp.json();
+        if (d.error) throw new Error(d.error);
+    } catch (e) {
+        el.innerHTML = `<p style="color:#b91c1c;padding:8px">Could not run pre-check: ${e.message}</p>`;
+        return;
+    }
+    const SEV = {block: ['#fee2e2', '#991b1b'], fix: ['#fef3c7', '#92400e'], advisory: ['#e0e7ff', '#3730a3']};
+    let html = '<div style="padding:6px 4px;font-size:13px">';
+    html += `<p style="color:#64748b;font-size:12px;margin:0 0 8px">Automated checks against the Registrar rules `
+          + `(deterministic + CIM-data only; judgment rules are listed below for manual review). Source: ${d.source}.</p>`;
+    if (!d.findings.length) {
+        html += '<p style="color:#166534;background:#dcfce7;padding:6px 10px;border-radius:6px;display:inline-block">No automated flags.</p>';
+    } else {
+        html += `<h4 style="margin:4px 0 6px">Flags (${d.findings.length})</h4>`;
+        for (const f of d.findings) {
+            const s = SEV[f.severity] || ['#f1f5f9', '#475569'];
+            html += `<div style="border-left:3px solid ${s[1]};background:${s[0]}22;padding:6px 10px;margin:0 0 6px;border-radius:0 6px 6px 0">
+                <span style="background:${s[0]};color:${s[1]};font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${f.severity.toUpperCase()}</span>
+                <span style="color:#94a3b8;font-size:11px;margin-left:6px">${f.id} · ${escapeHtml(f.theme)}</span>
+                <div style="margin-top:3px">${escapeHtml(f.message)}</div>
+                ${f.evidence ? `<div style="color:#64748b;font-size:11px;font-family:monospace;margin-top:2px">${escapeHtml(f.evidence)}</div>` : ''}
+            </div>`;
+        }
+    }
+    // Extracts to support manual review
+    const ex = d.extracts || {};
+    html += `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Overview &amp; headings (for manual review)</summary>`;
+    html += `<div style="font-size:12px;color:#475569;margin:6px 0"><b>Overview:</b> ${escapeHtml(ex.overview || '(not found)')}</div>`;
+    if ((ex.headings || []).length) html += `<div style="font-size:12px;color:#475569"><b>Requirement headings:</b> ${ex.headings.map(escapeHtml).join(' · ')}</div>`;
+    html += `</details>`;
+    // Manual-review checklist
+    html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:500">Rules to review manually (${d.review.length})</summary>`;
+    html += '<p style="color:#64748b;font-size:11px;margin:4px 0">These need a language-model read or human/calendar context, so they are not auto-evaluated.</p>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
+    for (const r of d.review) {
+        html += `<tr style="border-top:1px solid #eef2f7">
+            <td style="padding:3px 6px;color:#94a3b8;white-space:nowrap">${r.id}</td>
+            <td style="padding:3px 6px;color:#64748b;white-space:nowrap">${escapeHtml(r.theme)}</td>
+            <td style="padding:3px 6px">${escapeHtml(r.rule)}</td></tr>`;
+    }
+    html += '</tbody></table></details></div>';
+    el.innerHTML = html;
 }
 
 // Normalize whitespace: collapse all types (including &nbsp;) to single spaces,

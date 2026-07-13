@@ -179,6 +179,17 @@ def api_program_curriculum(program_id):
     return jsonify({'curriculum_html': clean_curriculum_html(html)})
 
 
+@app.route('/api/program/<int:program_id>/precheck')
+def api_program_precheck(program_id):
+    """Registrar pre-check: deterministic + CIM-data rule findings for a program,
+    plus the manual-review checklist. Local-only (needs a live CIM fetch)."""
+    try:
+        import precheck
+        return jsonify(precheck.precheck_program(program_id))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/program/<int:program_id>/regulatory')
 def api_program_regulatory(program_id):
     """Return regulatory approved-curriculum data for a program.

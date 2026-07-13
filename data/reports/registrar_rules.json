@@ -1,405 +1,1139 @@
 {
-  "title": "Registrar's Office graduate curriculum review rules",
-  "description": "Machine-readable checks derived from 2 years of Registrar workflow comments (2024-07..2026-07). Each rule: what to check on a program proposal, why, and how the Registrar phrases the correction. Intended for Claude to pre-screen a proposal before it enters CIM workflow. severity: block = will be rolled back; fix = Registrar will edit; advisory = context.",
-  "source": {
-    "window": "2024-07-12..2026-07-12",
-    "scope": "graduate programs in CIM workflow (active + completed)",
-    "comments_analyzed": 2779,
-    "programs_with_comments": 516,
-    "registrar_authors": ["h.daly", "da.rogers", "m.depaula", "m.boudreault", "ben.joseph", "c.cornwall", "m.standig", "m.couch-hrinda", "m.daigle"]
-  },
-  "rules": [
-    {"id": "CAT-1", "theme": "Effective term & catalog edition", "severity": "block",
-     "rule": "Effective catalog edition must equal the catalog year of the effective term (Fall YYYY -> YYYY-(YYYY+1)).",
-     "check": "Compare effective term to effective catalog edition; flag mismatch.",
-     "why": "Catalog edition is defined by the effective (Fall) term.",
-     "example": {"program": "Civil Engineering with Concentration", "date": "2025-04-17", "author": "h.daly", "quote": "Effective catalog edition corrected from 2025-2026 to 2026-2027, per proposed effective term (Fall 2026)."}},
-    {"id": "CAT-2", "theme": "Effective term & catalog edition", "severity": "block",
-     "rule": "Program-requirement changes are effective on a catalog-year (Fall) basis only; the effective term cannot be a Spring/Summer term for requirement changes.",
-     "check": "If the proposal changes program requirements and the effective term is not a Fall term, flag it.",
-     "why": "Requirement changes apply per catalog year.",
-     "example": {"program": "Bioinformatics, MS (Boston)", "date": "2025-05-05", "author": "h.daly", "quote": "Eff term updated from Spring 2026 to Fall 2026, as program requirement changes can only be made on a catalog year basis."}},
-    {"id": "CAT-3", "theme": "Effective term & catalog edition", "severity": "advisory",
-     "rule": "There is an annual college-approval deadline per catalog year; proposals approved after it are moved to the next catalog edition.",
-     "check": "If submitting late in a cycle, expect the edition to roll forward.",
-     "why": "Publication deadlines.",
-     "example": {"program": "Bioinformatics, Graduate Certificate", "date": "2026-04-14", "author": "ben.joseph", "quote": "As the deadline for college approval of program proposals for 2026-2027 implementation has passed, the Registrar's Office has changed the effective catalog edition of this proposal to 2027-2028."}},
-    {"id": "CAT-4", "theme": "Effective term & catalog edition", "severity": "advisory",
-     "rule": "New degree programs requiring Faculty Senate/Board approval may be pushed to a later term/edition, but can appear in a catalog addendum if fully approved before publication.",
-     "check": "New-degree proposals: confirm Senate/Board timing vs effective term.",
-     "why": "Governance approvals gate publication.",
-     "example": {"program": "Applied Education Research, MEd (Online)", "date": "2026-05-29", "author": "h.daly", "quote": "Effective term moved from Fall 2026 to Spring 2027 ... given the need for Senate and Board approval ... included in that addendum."}},
-
-    {"id": "TITLE-1", "theme": "Program title & naming", "severity": "fix",
-     "rule": "Campus-specific program records must include the campus in parentheses in the full program title, e.g. '(Boston)'.",
-     "check": "Full title of a campus-specific record lacks a '(Campus)' suffix.",
-     "why": "Campus-specific records project.",
-     "example": {"program": "Agile Project Management, Graduate Certificate", "date": "2024-08-29", "author": "h.daly", "quote": "' (Boston)' added to full program title for campus-specific program record projects."}},
-    {"id": "TITLE-2", "theme": "Program title & naming", "severity": "block",
-     "rule": "Minors do NOT carry a campus parenthetical in the title.",
-     "check": "A Minor title contains a '(Campus)' suffix.",
-     "why": "Minors are not campus-specific in the catalog.",
-     "example": {"program": "Dance, Minor", "date": "2026-04-14", "author": "h.daly", "quote": "'(New York)' removed [from] full program title, as Northeastern minors will not have a [campus]."}},
-    {"id": "TITLE-3", "theme": "Program title & naming", "severity": "advisory",
-     "rule": "Online programs use the standard '(Online)' title; the '(Online - Vancouver Requirements)' form is a one-off regulatory case, not a model.",
-     "check": "New online program proposing a non-standard online parenthetical.",
-     "why": "Consistent online naming.",
-     "example": {"program": "Health Informatics, MS (Charlotte)", "date": "2025-11-14", "author": "h.daly", "quote": "...should not be a model for future online programs."}},
-
-    {"id": "OVW-1", "theme": "Overview language", "severity": "fix",
-     "rule": "Remove implied promises of student achievement/outcomes from the overview.",
-     "check": "Overview contains outcome guarantees ('prepares students to...', 'will be able to...', 'option to deepen learning').",
-     "why": "Catalog overviews describe the program, not guarantee results.",
-     "example": {"program": "Artificial Intelligence, MS-Align", "date": "2026-04-24", "author": "h.daly", "quote": "Overview has been modified ... to remove implied promises of student achievement."}},
-    {"id": "OVW-2", "theme": "Overview language", "severity": "fix",
-     "rule": "Overview must not imply the curriculum includes remedial or undergraduate coursework.",
-     "check": "Overview references prep/Align courses as part of the degree curriculum.",
-     "why": "Graduate curriculum should not read as remedial.",
-     "example": {"program": "Artificial Intelligence, MS-Align", "date": "2026-05-09", "author": "h.daly", "quote": "removed ... to avoid inadvertently implying that the curriculum includes remedial or undergraduate coursework: 'The Align courses prepare students for the MS AI degree.'"}},
-    {"id": "OVW-3", "theme": "Overview language", "severity": "fix",
-     "rule": "Overview must state whether a concentration is optional or required, consistent with the requirements section.",
-     "check": "Concentration optionality in overview disagrees with the requirements; or optionality is unstated.",
-     "why": "Reader clarity + degree-audit accuracy.",
-     "example": {"program": "Business Administration, MBA-Part-Time", "date": "2026-04-09", "author": "h.daly", "quote": "added the word 'optional' in the subheading of the overview regarding concentrations, to underscore that a concentration is not required."}},
-    {"id": "OVW-4", "theme": "Overview language", "severity": "fix",
-     "rule": "For multi-campus programs, overview links point to the network-wide listing, not a single campus.",
-     "check": "Overview link targets a single-campus program when the program is offered at multiple campuses.",
-     "why": "All network versions should be discoverable.",
-     "example": {"program": "Applied Education Research, MEd (Online)", "date": "2026-01-15", "author": "h.daly", "quote": "revised to a link to the college's professional doctorate programs, where all network versions of the EdD program appear."}},
-
-    {"id": "CONC-1", "theme": "Concentrations", "severity": "fix",
-     "rule": "If a concentration is not required to complete the program, the heading must not be 'Concentrations' (use 'Concentration or Electives Option') and 'Complete one of the following concentrations' must be removed.",
-     "check": "Concentration heading/instructions imply a required concentration when it is optional.",
-     "why": "Accurate completion requirements.",
-     "example": {"program": "Bioinformatics, MS (Oakland)", "date": "2025-05-12", "author": "h.daly", "quote": "'Concentrations' heading reverted to 'Concentration or Electives Option', as a concentration is not required for completion of this program."}},
-    {"id": "CONC-2", "theme": "Concentrations", "severity": "fix",
-     "rule": "Populate the internal 'Concentration(s)' field; add NOCC (No Concentration) when none is required; set 'Can students choose this concentration at time of admission?' consistently.",
-     "check": "Concentration internal field empty/inconsistent; missing NOCC on no-concentration programs.",
-     "why": "Admissions (Slate) + degree audit setup.",
-     "example": {"program": "Business Administration, MBA (Online)", "date": "2025-05-23", "author": "h.daly", "quote": "NOCC (No Concentration) added to 'Concentration(s)' field, as a concentration is not required to earn the degree nor required to be declared at time of admission."}},
-    {"id": "CONC-3", "theme": "Concentrations", "severity": "block",
-     "rule": "Inactive courses within a concentration must be resolved before approval.",
-     "check": "Any course in a concentration/curriculum is inactive.",
-     "why": "Students can't enroll in inactive courses.",
-     "example": {"program": "Analytics, MPS (Portland)", "date": "2025-10-23", "author": "h.daly", "quote": "Proposal moved to CPS dean's office for resolution of inactive courses in Applied Machine Intelligence Concentration."}},
-    {"id": "CONC-4", "theme": "Concentrations", "severity": "advisory",
-     "rule": "Concentration requirements should be consistent across a program's campus deployments (align to the Boston record).",
-     "check": "Non-Boston deployment's concentration requirements differ from the Boston record without cause.",
-     "why": "Consistency across the network.",
-     "example": {"program": "Analytics, MPS (Toronto)", "date": "2025-11-04", "author": "h.daly", "quote": "Update to the Insurance Analytics concentration requirements, per the same concentration's requirements on the Boston record for this program."}},
-
-    {"id": "SH-1", "theme": "Credit hours", "severity": "fix",
-     "rule": "Publish only the MINIMUM hours required to complete the program (no ranges), EXCEPT Align/Bridge/Connect programs.",
-     "check": "Total/required-hours field shows a range (e.g. '34-35 SH') for a non-Align/Bridge/Connect program.",
-     "why": "Catalog documents the minimum for completion.",
-     "example": {"program": "Analytics, MPS (Seattle)", "date": "2025-09-09", "author": "h.daly", "quote": "changed to just 34 SH, per current catalog practice to document only the min required hours (except for Align/Bridge/Connect programs)."}},
-    {"id": "SH-2", "theme": "Credit hours", "severity": "fix",
-     "rule": "Choice/restricted-elective language uses 'at least N SH' / 'a minimum of N SH', not a range.",
-     "check": "Requirement text says 'Complete X-Y SH from the following'.",
-     "why": "Consistent minimum-hours phrasing.",
-     "example": {"program": "Analytics, MPS (Seattle)", "date": "2026-01-06", "author": "h.daly", "quote": "'Complete 4-5 SH from the following...' to 'Complete at least 4 SH from the following...'"}},
-    {"id": "SH-3", "theme": "Credit hours", "severity": "fix",
-     "rule": "Remove 'maximum of N semester hours' statements.",
-     "check": "Curriculum states a maximum SH a student may complete.",
-     "why": "Catalog documents the minimum; students may exceed it.",
-     "example": {"program": "Accounting and Financial Decision Making, Graduate Certificate", "date": "2026-04-17", "author": "h.daly", "quote": "removed '...may complete a maximum of 15 semester hours', as the catalog publishes the minimum required for certificate completion."}},
-    {"id": "SH-4", "theme": "Credit hours", "severity": "block",
-     "rule": "Credit hours must be semester hours (SH), not quarter hours (QH).",
-     "check": "Any quarter-hour reference (QH) in requirements or credit/GPA section.",
-     "why": "Semester conversion (esp. CPS programs).",
-     "example": {"program": "Applied Machine Intelligence, Graduate Certificate", "date": "2025-10-21", "author": "h.daly", "quote": "Quarter hours reference in Program Credit / GPA Requirements section corrected to semester hours."}},
-    {"id": "SH-5", "theme": "Credit hours", "severity": "fix",
-     "rule": "For 'choose N SH from the following' requirements, place the hours in the dedicated hours field and indent the options (so credit attaches to the requirement, not each option); un-indent core-requirement courses so their hours display.",
-     "check": "Choice-list options each show credit hours; or core courses are indented and hide hours.",
-     "why": "Correct credit display + degree audit.",
-     "example": {"program": "Analytics, MPS (Boston)", "date": "2025-10-14", "author": "h.daly", "quote": "3 semester hours added in dedicated hours field ... Course options then indented thereafter, so that 3 SH is associated with the requirement and not with each option."}},
-
-    {"id": "ROUTE-1", "theme": "Committee routing", "severity": "block",
-     "rule": "Any change to core requirements must be routed to UGCC (graduate) / UUCC (undergraduate).",
-     "check": "Proposal changes core requirements but workflow omits UGCC/UUCC.",
-     "why": "Curriculum committee governs core changes.",
-     "example": {"program": "Accounting and Business Administration", "date": "2026-05-27", "author": "h.daly", "quote": "To UGCC for changes to core requirements."}},
-    {"id": "ROUTE-2", "theme": "Committee routing", "severity": "block",
-     "rule": "Adding courses from other colleges (or adding/removing a college's course in a UIP) requires UGCC review.",
-     "check": "Curriculum adds a course owned by another college; confirm UGCC routing.",
-     "why": "Cross-college course use needs committee sign-off.",
-     "example": {"program": "Bioinformatics, Graduate Certificate", "date": "2026-05-08", "author": "h.daly", "quote": "To UGCC for addition of course options from Khoury and Bouve."}},
-    {"id": "ROUTE-3", "theme": "Committee routing", "severity": "advisory",
-     "rule": "A 'Course Not Found' error clears once the referenced new course is approved by UGCC; it is not a program-proposal defect.",
-     "check": "Curriculum shows 'Course Not Found' for a course pending UGCC approval.",
-     "why": "Course record populates post-approval.",
-     "example": {"program": "Artificial Intelligence, MS (Miami)", "date": "2025-04-09", "author": "h.daly", "quote": "has now been fully approved by UGCC and the course details will populate in the curriculum by the end of this month."}},
-    {"id": "ROUTE-4", "theme": "Committee routing", "severity": "advisory",
-     "rule": "Online programs do not require GRA review; they route to the Registrar's degree-audit team instead.",
-     "check": "Online program workflow includes GRA review.",
-     "why": "GRA reviews on-ground regulated-campus offerings.",
-     "example": {"program": "Health Informatics, MS (Online)", "date": "2026-02-04", "author": "h.daly", "quote": "No GRA review required for Online programs."}},
-
-    {"id": "ADM-1", "theme": "Admission / inactivation", "severity": "fix",
-     "rule": "Set 'Is this program open for students applying through admissions?' correctly; a program admitting PlusOne students (via Slate) must remain 'Yes' even if closed to external applicants.",
-     "check": "Admissions-open flag set to 'No' on a program that still admits PlusOne students.",
-     "why": "PlusOne admissions flow through Slate.",
-     "example": {"program": "Computer Science, MSCS (Oakland)", "date": "2026-06-23", "author": "h.daly", "quote": "changed the field ... from 'No' to 'Yes', as ... PlusOne students are indeed presently admitted to graduate programs via Slate."}},
-    {"id": "ADM-2", "theme": "Admission / inactivation", "severity": "advisory",
-     "rule": "An inactivation proposal is held until its successor new-program proposal is ready; both advance to the same UGCC meeting.",
-     "check": "Inactivation with a known successor program: coordinate timing.",
-     "why": "Continuity of the program's replacement.",
-     "example": {"program": "Biomedical Science, MS (Boston)", "date": "2025-12-11", "author": "h.daly", "quote": "held until the college is ready to advance the successor new MS program proposal ... advanced to the same UGCC meeting."}},
-    {"id": "ADM-3", "theme": "Admission / inactivation", "severity": "fix",
-     "rule": "The 'Final Catalog' field on an inactivation must match the inactivation's effective term (inactivated Fall YYYY -> final catalog (YYYY-1)-YYYY).",
-     "check": "Final Catalog edition does not correspond to the inactivation effective term.",
-     "why": "Last catalog year the program is published.",
-     "example": {"program": "Cloud Software Development, Graduate Certificate", "date": "2025-06-30", "author": "h.daly", "quote": "authorized for inactivation as of Fall 2025, the final catalog was 2024-2025 rather than 2025-2026."}},
-
-    {"id": "DA-1", "theme": "Degree audit / CIP / modality", "severity": "advisory",
-     "rule": "CIP code and campus/modality fields are set by the Registrar's degree-audit team on new records (administrative, not a college action).",
-     "check": "Do not expect the college to supply CIP; Registrar adds it.",
-     "why": "Registrar owns CIP/campus coding.",
-     "example": {"program": "Analytics, MPS (Portland)", "date": "2025-08-19", "author": "c.cornwall", "quote": "Registrar's Office administrative action to add CIP Code and campus to new program record fields."}},
-    {"id": "DA-2", "theme": "Degree audit / CIP / modality", "severity": "advisory",
-     "rule": "An online program flipping campus BOS -> Online (VTL) for 2026-2027 is not genuinely new even though CourseLeaf tags it 'New Program Proposal'; it's the VTL-campus record creation.",
-     "check": "'New Program Proposal' that is actually an existing program changing to Online (VTL).",
-     "why": "Online students recoded from BOS to VTL as of 2026-2027.",
-     "example": {"program": "Engineering Management, Graduate Certificate", "date": "2025-10-17", "author": "h.daly", "quote": "Although CourseLeaf tags this as a 'New Program Proposal', this program is active and is not new."}},
-    {"id": "DA-3", "theme": "Degree audit / CIP / modality", "severity": "advisory",
-     "rule": "Dual-degree programs have no degree-audit impact and skip that step.",
-     "check": "Dual-degree proposal routed through degree audit unnecessarily.",
-     "why": "Dual-degree audits handled via component programs.",
-     "example": {"program": "Business Administration, MBA-Part-Time", "date": "2026-06-11", "author": "h.daly", "quote": "No degree audit impacts (dual degree program). Advance to Editor and Catalog Setup."}},
-    {"id": "DA-4", "theme": "Degree audit / CIP / modality", "severity": "fix",
-     "rule": "Credit-bearing experiential-learning courses that also satisfy an elective must be listed in the electives list for degree audits to function.",
-     "check": "Experiential-learning course fulfills an elective but is absent from the electives list.",
-     "why": "Degree audit must see the course as an elective option.",
-     "example": {"program": "Cell and Gene Therapies, MS (Boston)", "date": "2026-05-12", "author": "h.daly", "quote": "added the credit-bearing courses that fulfill the experiential learning requirement to the electives list ... necessary for proper functioning of future degree audits."}},
-
-    {"id": "GRADE-1", "theme": "Grade / GPA requirements", "severity": "fix",
-     "rule": "Minimum-grade statements at core requirements use the college's standard wording (e.g. COE: 'must earn a grade of C or higher in all required core courses').",
-     "check": "Core-requirements min-grade statement missing or non-standard for the college.",
-     "why": "Consistency across the college's catalog records.",
-     "example": {"program": "Information Systems, MSIS", "date": "2026-06-05", "author": "h.daly", "quote": "Min grade in core requirements statement further modified ... per COE approval on other 26-27 records."}},
-    {"id": "GRADE-2", "theme": "Grade / GPA requirements", "severity": "fix",
-     "rule": "Prerequisites outside the program must not be required for core courses; simplify to 'A grade of C or higher is required for each of the following courses.'",
-     "check": "Core-requirement grade statement imposes external prerequisites.",
-     "why": "Core requirements are internal to the program.",
-     "example": {"program": "Data Architecture and Management", "date": "2026-05-22", "author": "h.daly", "quote": "prerequisites outside of the program should not be required for core courses."}},
-    {"id": "GRADE-3", "theme": "Grade / GPA requirements", "severity": "advisory",
-     "rule": "Do not add 'prerequisite conditions may require a higher minimum grade' when the program has only one core course.",
-     "check": "Boilerplate multi-course grade sentence on a single-core-course program.",
-     "why": "Sentence is inapplicable.",
-     "example": {"program": "Information Systems, MSIS", "date": "2026-06-05", "author": "h.daly", "quote": "Second sentence re min grade in core requirements statement removed, as this program has only one core requirement."}},
-
-    {"id": "PREREQ-1", "theme": "Prerequisites", "severity": "fix",
-     "rule": "When elective options require prerequisites outside the program, add the standard alert language and ensure pathways exist that don't require external coursework.",
-     "check": "Electives require external prereqs with no student-facing alert.",
-     "why": "Students must be warned; completion must remain feasible.",
-     "example": {"program": "Data Analytics Engineering", "date": "2026-05-05", "author": "h.daly", "quote": "'Some elective options require completion of prerequisites outside of this program.'"}},
-
-    {"id": "EXP-1", "theme": "Experiential learning / co-op", "severity": "fix",
-     "rule": "If co-op/experiential participation adds hours or tuition, the Program Requirements must alert students.",
-     "check": "Co-op adds hours but no alert statement in Program Requirements.",
-     "why": "Cost/time transparency.",
-     "example": {"program": "Artificial Intelligence, MS", "date": "2026-03-26", "author": "h.daly", "quote": "A statement has been added ... to alert students that additional coursework may be needed for participation in co-op depending on concentration."}},
-    {"id": "EXP-2", "theme": "Experiential learning / co-op", "severity": "advisory",
-     "rule": "Optional experiential learning goes in a dedicated 'Optional Experiential Learning Opportunities' area (added with college authorization).",
-     "check": "Experiential options scattered rather than in a dedicated area.",
-     "why": "Consistent placement.",
-     "example": {"program": "Applied AI, MPS (Toronto)", "date": "2026-03-17", "author": "h.daly", "quote": "'Optional Experiential Learning Opportunities' curriculum area added to program requirements per authorization of C. Bolick."}},
-    {"id": "EXP-3", "theme": "Experiential learning / co-op", "severity": "block",
-     "rule": "Non-credit or non-existent co-op prep courses are removed; do not list a course that was never created or awards no credit.",
-     "check": "Curriculum references a co-op prep course that doesn't exist / is non-credit.",
-     "why": "Only real credit-bearing courses belong in requirements.",
-     "example": {"program": "Artificial Intelligence, MS", "date": "2026-04-22", "author": "da.rogers", "quote": "removed the line about a non-credit coop course as the course was not created."}},
-
-    {"id": "THESIS-1", "theme": "Thesis / capstone", "severity": "fix",
-     "rule": "Zero-credit special-purpose courses (Thesis Continuation, Research) are removed from elective lists.",
-     "check": "A 0-credit thesis/research course appears among electives.",
-     "why": "0-credit courses don't advance required elective hours.",
-     "example": {"program": "Information Systems, MSIS", "date": "2026-04-17", "author": "m.couch-hrinda", "quote": "INFO 7986 Research and INFO 7996 Thesis Continuation removed ... these 0 credit courses will not advance the student toward ... required elective hours."}},
-    {"id": "THESIS-2", "theme": "Thesis / capstone", "severity": "fix",
-     "rule": "A heading offering 'Thesis' must reflect what is actually offered (e.g. 'Capstone or Thesis' -> 'Capstone or Project' when thesis is dropped).",
-     "check": "Heading lists an option (thesis) the program no longer offers.",
-     "why": "Accuracy.",
-     "example": {"program": "Digital Media, MPS-Connect", "date": "2026-06-04", "author": "c.cornwall", "quote": "Changed the heading 'Capstone or Thesis' to 'Capstone or Project' as the[sis] is no longer an option."}},
-    {"id": "THESIS-3", "theme": "Thesis / capstone", "severity": "block",
-     "rule": "A thesis sequence relying on a repeatable course requires that course to be UGCC-approved as repeatable first.",
-     "check": "Thesis sequence assumes repeatability of a non-repeatable course.",
-     "why": "Course repeatability is a UGCC decision.",
-     "example": {"program": "Design, MFA (Boston)", "date": "2025-08-28", "author": "h.daly", "quote": "The Thesis Sequence cannot be completed as proposed ... until the department ... receives UGCC approval to change the ARTG 7910 course to a repeatable course."}},
-
-    {"id": "DUAL-1", "theme": "Dual / joint degrees", "severity": "block",
-     "rule": "Changes to shared credits in a dual-degree pathway must go to UGCC.",
-     "check": "Dual-degree shared-credit change without UGCC routing.",
-     "why": "Shared credit affects both degrees.",
-     "example": {"program": "Pharmacy, PharmD-Direct Entry", "date": "2025-09-09", "author": "h.daly", "quote": "To UGCC for change in shared credits in this dual degree pathway."}},
-    {"id": "DUAL-2", "theme": "Dual / joint degrees", "severity": "advisory",
-     "rule": "Dual-degree catalog URLs get a Registrar-established redirect when pages move.",
-     "check": "Renamed/moved dual-degree page needs a redirect (Registrar handles).",
-     "why": "Preserve external links.",
-     "example": {"program": "Law, LLM / Business Administration, MBA", "date": "2025-12-17", "author": "m.depaula", "quote": "Redirect established from .../dual-degrees/law-llm-business-administration-mba/ to .../dual-degrees/"}},
-
-    {"id": "HYG-1", "theme": "Curriculum-list hygiene", "severity": "fix",
-     "rule": "No duplicate courses in a list; electives kept in alphanumeric order.",
-     "check": "A course appears twice in the same list; electives out of order.",
-     "why": "Clean, readable curriculum.",
-     "example": {"program": "Computer Science, MSCS-Align", "date": "2026-06-11", "author": "c.cornwall", "quote": "Removed one instance of CS 7680 as the course was listed twice in the same course list."}},
-    {"id": "HYG-2", "theme": "Curriculum-list hygiene", "severity": "block",
-     "rule": "Inactive ('red-boxed') courses must be resolved by the college before approval.",
-     "check": "Any inactive/red-boxed course in requirements or concentrations.",
-     "why": "Students can't take inactive courses.",
-     "example": {"program": "Complex Network Analysis", "date": "2026-02-27", "author": "da.rogers", "quote": "please address the red-boxed inactive courses in your concentrations."}},
-    {"id": "HYG-3", "theme": "Curriculum-list hygiene", "severity": "block",
-     "rule": "Remove lines for courses that don't exist (never created).",
-     "check": "Curriculum references a course with no CIM course record.",
-     "why": "Only real courses belong in the curriculum.",
-     "example": {"program": "Artificial Intelligence, MS", "date": "2026-04-22", "author": "da.rogers", "quote": "removed the line about a non-credit coop prep course as it does not exist."}},
-
-    {"id": "BANNER-1", "theme": "Banner setup & coding (Registrar-performed)", "severity": "advisory",
-     "rule": "The Registrar assigns the CIP code (choosing a DHS STEM-list code where the program qualifies) and campus/modality fields.",
-     "check": "Do not supply CIP; note STEM eligibility for the Registrar.",
-     "why": "Registrar owns CIP + STEM designation.",
-     "example": {"program": "Applied Sustainability, MS (Boston)", "date": "2026-06-15", "author": "da.rogers", "quote": "I gave the 30.3301 Sustainability Studies CIP code which also appears on the DHS STEM list."}},
-    {"id": "BANNER-2", "theme": "Banner setup & coding (Registrar-performed)", "severity": "advisory",
-     "rule": "The Registrar creates the Banner record, incl. a separate Virtual (VTL) record for online; two virtual modalities are distinguished with a 'PO' code suffix.",
-     "check": "Online program: expect a distinct VTL/PO Banner record created by Registrar.",
-     "why": "Banner modality coding.",
-     "example": {"program": "Cell and Gene Therapies, MS", "date": "2026-04-27", "author": "da.rogers", "quote": "this program is getting the 'PO' at the end of the code to distinguish the two virtual modalities."}},
-    {"id": "BANNER-3", "theme": "Banner setup & coding (Registrar-performed)", "severity": "advisory",
-     "rule": "Concentrations are added/removed in Banner to match the approved curriculum; a concentration is unchecked in Banner to prevent admission into it.",
-     "check": "Banner concentrations must match the curriculum; admission-closed concentrations unchecked.",
-     "why": "Admissions integrity.",
-     "example": {"program": "Artificial Intelligence, MS", "date": "2026-05-22", "author": "da.rogers", "quote": "RABS ... was in Banner already with Machine Learning, so I unchecked it so that no one could be admitted."}},
-    {"id": "BANNER-4", "theme": "Banner setup & coding (Registrar-performed)", "severity": "advisory",
-     "rule": "For online-only programs the Boston Banner instance is ended as of the conversion term.",
-     "check": "Online-only program still has an active Boston Banner instance.",
-     "why": "Single accurate modality record.",
-     "example": {"program": "Cannabis Science, Graduate Certificate", "date": "2026-01-05", "author": "da.rogers", "quote": "Ended Boston instance in Banner for 202710. This program is Online Only."}},
-
-    {"id": "CAT-5", "theme": "Effective term & catalog edition", "severity": "advisory",
-     "rule": "The effective term is set to the earliest term still achievable given remaining approvals/deadlines.",
-     "check": "Effective term later than necessary, or earlier than feasible given approvals.",
-     "why": "Publish as soon as validly possible.",
-     "example": {"program": "Early Childhood Education, MA", "date": "2025-10-30", "author": "h.daly", "quote": "Effective term revised from Fall 2025 to Spring 2026, the earliest effective term possible at this time."}},
-    {"id": "CAT-6", "theme": "Effective term & catalog edition", "severity": "fix",
-     "rule": "A successor/exit program's effective term is set so it directly follows the predecessor's last active catalog (no gap/overlap).",
-     "check": "Successor program's first catalog doesn't abut the predecessor's final catalog.",
-     "why": "Continuous coverage between a program and its replacement.",
-     "example": {"program": "Biomedical Science, MS (Boston)", "date": "2025-09-29", "author": "h.daly", "quote": "Eff term revised from Fall 2026 to Fall 2027, so that ... the successor program directly follows the last active catalog for this program."}},
-    {"id": "RETRO-1", "theme": "Retroactivity of curriculum changes", "severity": "advisory",
-     "rule": "Added options may apply retroactively; removed options/requirement changes take effect only from the future catalog term. Retroactive application to admitted students is decided at Program Review 2.",
-     "check": "Proposal assumes a removed course/requirement applies to already-admitted students.",
-     "why": "Students keep credit for options available when they enrolled.",
-     "example": {"program": "Public Health, MPH (Online)", "date": "2026-04-17", "author": "h.daly", "quote": "Newly-added options ... can indeed be implemented retroactively. Removed options ... will only take effect with the future catalog term."}},
-
-    {"id": "SH-6", "theme": "Credit hours", "severity": "fix",
-     "rule": "A course's credit value in the program must match the course's own approved credits.",
-     "check": "Program lists a course at a credit value different from its approved credits.",
-     "why": "Consistency with the course record.",
-     "example": {"program": "Physical Therapy, DPT-Postbacc", "date": "2026-05-22", "author": "m.depaula", "quote": "PT 6300 and PT 6301 total credits changed from 5SH to 3SH to match what has been approved for each course."}},
-    {"id": "SH-7", "theme": "Credit hours", "severity": "fix",
-     "rule": "The 'Overall credits required for the degree' field holds the minimum required, not a range.",
-     "check": "That field shows a range.",
-     "why": "Field purpose is the minimum to earn the credential.",
-     "example": {"program": "Product Management, MS (Boston)", "date": "2025-03-12", "author": "h.daly", "quote": "revised from 30-34 to just 30, as that field is presently used across all programs for the minimum required hours."}},
-
-    {"id": "HYG-4", "theme": "Curriculum-list hygiene", "severity": "fix",
-     "rule": "A mistyped or wrong course reference is corrected to the intended course (with the owning unit's authorization).",
-     "check": "A course code/title doesn't match the intended course.",
-     "why": "Accuracy.",
-     "example": {"program": "Construction Management, Graduate Certificate", "date": "2024-01-04", "author": "h.daly", "quote": "CMN 6600 ... corrected to CMG 6600 (\"Foundations of Construction Management\")."}},
-    {"id": "HYG-5", "theme": "Curriculum-list hygiene", "severity": "fix",
-     "rule": "Courses deactivated in the annual NECHE course-deactivation review are removed from options as of the deactivation's effective term.",
-     "check": "A course deactivated in the annual review still appears in options.",
-     "why": "Options must be active courses.",
-     "example": {"program": "Computer Science, MSCS-Align", "date": "2025-10-07", "author": "h.daly", "quote": "CS 5360 and CS 7600, deactivated ... through the annual course deactivation review per NECHE standards, have been removed."}},
-
-    {"id": "STRUCT-1", "theme": "Requirements structure & headings", "severity": "fix",
-     "rule": "Remove headings that have no associated content.",
-     "check": "A heading with nothing under it.",
-     "why": "Clean structure.",
-     "example": {"program": "Biotechnology, MS (Oakland)", "date": "2026-05-27", "author": "h.daly", "quote": "\"Coursework Option\" heading removed, as it is not associated with any curriculum requirements."}},
-    {"id": "STRUCT-2", "theme": "Requirements structure & headings", "severity": "fix",
-     "rule": "Don't use headings/instructions implying a choice that doesn't exist ('Core A'/'Core B'; 'Complete one of the following' with one option).",
-     "check": "Choice-implying heading/instruction with no actual choice.",
-     "why": "Avoid misleading structure.",
-     "example": {"program": "Network Science, PhD (Boston)", "date": "2026-05-05", "author": "h.daly", "quote": "removed the \"Core A\" and \"Core B\" subheadings, as the subheadings implied that there was a \"choice of core requirements\"."}},
-    {"id": "STRUCT-3", "theme": "Requirements structure & headings", "severity": "fix",
-     "rule": "Group course options under the college that owns them.",
-     "check": "A course listed under the wrong college's group.",
-     "why": "Correct ownership display.",
-     "example": {"program": "Human-Computer Interaction, MS", "date": "2026-03-11", "author": "h.daly", "quote": "Electives re-sequenced to put specific courses under correct college, such as a MUST course under CAMD and an IE course under COE."}},
-    {"id": "STRUCT-4", "theme": "Requirements structure & headings", "severity": "fix",
-     "rule": "Footnotes belong at the bottom of the relevant requirements table with footnote formatting, not as trailing body text.",
-     "check": "Footnote text placed after electives as plain text.",
-     "why": "Consistent footnote presentation.",
-     "example": {"program": "Geospatial Analytics, Graduate Certificate", "date": "2025-09-08", "author": "h.daly", "quote": "Footnote ... moved to bottom of core requirements table with footnote formatting."}},
-    {"id": "STRUCT-5", "theme": "Requirements structure & headings", "severity": "fix",
-     "rule": "Remove core-requirement subtotals (current catalog practice).",
-     "check": "A subtotal line under core requirements.",
-     "why": "Catalog practice.",
-     "example": {"program": "Population Health, PhD (Boston)", "date": "2025-09-18", "author": "h.daly", "quote": "Subtotal of core requirements removed per current catalog practice."}},
-    {"id": "STRUCT-6", "theme": "Requirements structure & headings", "severity": "fix",
-     "rule": "Don't let formatting merge distinct requirements or indent core courses so credits hide / all-required is implied.",
-     "check": "Restricted Electives folded into Core; electives indented implying all required.",
-     "why": "Accurate requirement structure.",
-     "example": {"program": "Management, MS with Major in Finance", "date": "2026-04-09", "author": "h.daly", "quote": "re-indented the options in the Electives section, to avoid implying that students must complete every course in that course list."}},
-    {"id": "STRUCT-7", "theme": "Requirements structure & headings", "severity": "advisory",
-     "rule": "Heading renames that change meaning are done in consultation with the Provost's Office.",
-     "check": "Semantic heading change without Provost consultation.",
-     "why": "Consistency of catalog terminology.",
-     "example": {"program": "Biotechnology, MS (Toronto)", "date": "2026-05-27", "author": "h.daly", "quote": "\"Project Option\" heading changed to \"Project Pathway\" per consultation with Provost's Office."}},
-
-    {"id": "MOD-1", "theme": "Modality & campus designation", "severity": "fix",
-     "rule": "Use 'Online' only when fully online; use 'Primarily Online' when any component must be in person (internship/residency/on-ground).",
-     "check": "An 'Online' program with an in-person requirement.",
-     "why": "Accurate modality for students/regulators.",
-     "example": {"program": "Public Administration, MPA (Arlington)", "date": "2026-06-05", "author": "h.daly", "quote": "should that Online program instead be re-designated Primarily Online?"}},
-    {"id": "MOD-2", "theme": "Modality & campus designation", "severity": "advisory",
-     "rule": "Online programs use campus 'Online' and do not name a specific city/NU campus.",
-     "check": "Online program naming a specific campus city.",
-     "why": "Online campus is modality, not a city.",
-     "example": {"program": "Computer Science, MSCS-Align", "date": "2025-07-14", "author": "da.rogers", "quote": "Online programs are setup with Online as the campus and do not specify a specific city/NU campus."}},
-    {"id": "MOD-3", "theme": "Modality & campus designation", "severity": "fix",
-     "rule": "Set the Campus/Modality field to match actual delivery.",
-     "check": "Campus/Modality field disagrees with delivery.",
-     "why": "Field must reflect reality.",
-     "example": {"program": "Applied Professional Studies, MPS", "date": "2026-01-16", "author": "h.daly", "quote": "Campus and Modality field changed from Boston to Primarily Online, per the comment from the college."}},
-
-    {"id": "INSTR-1", "theme": "Instructional-method statement", "severity": "advisory",
-     "rule": "Programs whose sections span campuses/methods carry the standard instructional-method statement, consistent with the university instructional-methods policy.",
-     "check": "Multi-campus/method program missing the standard statement.",
-     "why": "Consistency with policy.",
-     "example": {"program": "Applied Quantitative Methods and Social Analysis", "date": "2026-04-27", "author": "h.daly", "quote": "Class sections of courses required for this program may be offered at multiple campuses and in multiple instructional methods ..."}},
-
-    {"id": "SHARED-1", "theme": "Shared content", "severity": "fix",
-     "rule": "Colleges add the shared-content area to a proposal where appropriate.",
-     "check": "Applicable shared-content area missing.",
-     "why": "College responsibility per Catalog/Registrar instructions.",
-     "example": {"program": "Digital Media, MPS (Boston)", "date": "2026-02-02", "author": "m.boudreault", "quote": "the college is responsible for adding the shared content area, where appropriate."}},
-
-    {"id": "SETUP-1", "theme": "Proposal setup & workflow", "severity": "advisory",
-     "rule": "A certificate should comprise multiple courses/modules; a single-course certificate is questioned.",
-     "check": "A certificate with only one course.",
-     "why": "Certificate composition norm.",
-     "example": {"program": "Social Determinants of Health", "date": "2022-08-24", "author": "da.rogers", "quote": "There is only one course. Why wouldn't this be just a module? Usually certificates are made up of multiple courses or modules."}},
-    {"id": "SETUP-2", "theme": "Proposal setup & workflow", "severity": "block",
-     "rule": "New degree programs must attach an executive summary for Provost/Senate/Board review before the dean's office approves.",
-     "check": "New degree proposal lacks an executive-summary attachment at dean's-office approval.",
-     "why": "Governance review needs it.",
-     "example": {"program": "Design, MS (Boston)", "date": "2025-12-05", "author": "h.daly", "quote": "Please prepare and attach an executive summary for Office of the Provost, Faculty Senate, and Board of Trustees review before the proposal is approved out of the CAMD dean's office."}},
-    {"id": "SETUP-3", "theme": "Proposal setup & workflow", "severity": "advisory",
-     "rule": "Set 'Is there a subject code associated with this program?' to the program's own subject so the program director is auto-included in workflow.",
-     "check": "Subject-code field generic/interdisciplinary when a specific subject exists.",
-     "why": "Ensures the right approver is in workflow.",
-     "example": {"program": "Network Science, MS (Boston)", "date": "2026-02-09", "author": "h.daly", "quote": "changed from \"Interdisciplinary - Soc Sci and Humanities\" to \"Network Science\" so that this program's approval workflow will automatically include the ... program director."}},
-    {"id": "SETUP-4", "theme": "Proposal setup & workflow", "severity": "advisory",
-     "rule": "New program proposals and substantial changes receive IPD (Innovation Planning & Development) review at the start of workflow.",
-     "check": "New/substantial proposal missing IPD review step.",
-     "why": "University-leadership review.",
-     "example": {"program": "International Affairs, MA (Boston)", "date": "2024-12-06", "author": "h.daly", "quote": "The Innovation Planning and Development team (\"IPD\") has been added to workflow to review all new program proposals and substantial program changes."}},
-    {"id": "SETUP-5", "theme": "Proposal setup & workflow", "severity": "advisory",
-     "rule": "A change-of-academic-unit proposal starts in the 'relinquishing' college; the Provost then coordinates subsequent college reviews.",
-     "check": "Change-of-unit proposal not starting in the relinquishing college.",
-     "why": "Longstanding workflow practice.",
-     "example": {"program": "Artificial Intelligence, MS (Portland)", "date": "2025-10-03", "author": "h.daly", "quote": "the \"relinquishing\" administrative college is the first college in workflow for this change-of-academic unit(s) ... proposal."}}
+ "title": "Registrar's Office graduate curriculum review rules",
+ "description": "Machine-readable checks derived from 2 years of Registrar workflow comments (2024-07..2026-07). Each rule: what to check on a program proposal, why, and how the Registrar phrases the correction. Intended for Claude to pre-screen a proposal before it enters CIM workflow. severity: block = will be rolled back; fix = Registrar will edit; advisory = context.",
+ "source": {
+  "window": "2024-07-12..2026-07-12",
+  "scope": "graduate programs in CIM workflow (active + completed)",
+  "comments_analyzed": 2779,
+  "programs_with_comments": 516,
+  "registrar_authors": [
+   "h.daly",
+   "da.rogers",
+   "m.depaula",
+   "m.boudreault",
+   "ben.joseph",
+   "c.cornwall",
+   "m.standig",
+   "m.couch-hrinda",
+   "m.daigle"
   ]
+ },
+ "rules": [
+  {
+   "id": "CAT-1",
+   "theme": "Effective term & catalog edition",
+   "severity": "block",
+   "rule": "Effective catalog edition must equal the catalog year of the effective term (Fall YYYY -> YYYY-(YYYY+1)).",
+   "check": "Compare effective term to effective catalog edition; flag mismatch.",
+   "why": "Catalog edition is defined by the effective (Fall) term.",
+   "example": {
+    "program": "Civil Engineering with Concentration",
+    "date": "2025-04-17",
+    "author": "h.daly",
+    "quote": "Effective catalog edition corrected from 2025-2026 to 2026-2027, per proposed effective term (Fall 2026)."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "CAT-2",
+   "theme": "Effective term & catalog edition",
+   "severity": "block",
+   "rule": "Program-requirement changes are effective on a catalog-year (Fall) basis only; the effective term cannot be a Spring/Summer term for requirement changes.",
+   "check": "If the proposal changes program requirements and the effective term is not a Fall term, flag it.",
+   "why": "Requirement changes apply per catalog year.",
+   "example": {
+    "program": "Bioinformatics, MS (Boston)",
+    "date": "2025-05-05",
+    "author": "h.daly",
+    "quote": "Eff term updated from Spring 2026 to Fall 2026, as program requirement changes can only be made on a catalog year basis."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "CAT-3",
+   "theme": "Effective term & catalog edition",
+   "severity": "advisory",
+   "rule": "There is an annual college-approval deadline per catalog year; proposals approved after it are moved to the next catalog edition.",
+   "check": "If submitting late in a cycle, expect the edition to roll forward.",
+   "why": "Publication deadlines.",
+   "example": {
+    "program": "Bioinformatics, Graduate Certificate",
+    "date": "2026-04-14",
+    "author": "ben.joseph",
+    "quote": "As the deadline for college approval of program proposals for 2026-2027 implementation has passed, the Registrar's Office has changed the effective catalog edition of this proposal to 2027-2028."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "CAT-4",
+   "theme": "Effective term & catalog edition",
+   "severity": "advisory",
+   "rule": "New degree programs requiring Faculty Senate/Board approval may be pushed to a later term/edition, but can appear in a catalog addendum if fully approved before publication.",
+   "check": "New-degree proposals: confirm Senate/Board timing vs effective term.",
+   "why": "Governance approvals gate publication.",
+   "example": {
+    "program": "Applied Education Research, MEd (Online)",
+    "date": "2026-05-29",
+    "author": "h.daly",
+    "quote": "Effective term moved from Fall 2026 to Spring 2027 ... given the need for Senate and Board approval ... included in that addendum."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "TITLE-1",
+   "theme": "Program title & naming",
+   "severity": "fix",
+   "rule": "Campus-specific program records must include the campus in parentheses in the full program title, e.g. '(Boston)'.",
+   "check": "Full title of a campus-specific record lacks a '(Campus)' suffix.",
+   "why": "Campus-specific records project.",
+   "example": {
+    "program": "Agile Project Management, Graduate Certificate",
+    "date": "2024-08-29",
+    "author": "h.daly",
+    "quote": "' (Boston)' added to full program title for campus-specific program record projects."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "TITLE-2",
+   "theme": "Program title & naming",
+   "severity": "block",
+   "rule": "Minors do NOT carry a campus parenthetical in the title.",
+   "check": "A Minor title contains a '(Campus)' suffix.",
+   "why": "Minors are not campus-specific in the catalog.",
+   "example": {
+    "program": "Dance, Minor",
+    "date": "2026-04-14",
+    "author": "h.daly",
+    "quote": "'(New York)' removed [from] full program title, as Northeastern minors will not have a [campus]."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "TITLE-3",
+   "theme": "Program title & naming",
+   "severity": "advisory",
+   "rule": "Online programs use the standard '(Online)' title; the '(Online - Vancouver Requirements)' form is a one-off regulatory case, not a model.",
+   "check": "New online program proposing a non-standard online parenthetical.",
+   "why": "Consistent online naming.",
+   "example": {
+    "program": "Health Informatics, MS (Charlotte)",
+    "date": "2025-11-14",
+    "author": "h.daly",
+    "quote": "...should not be a model for future online programs."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "OVW-1",
+   "theme": "Overview language",
+   "severity": "fix",
+   "rule": "Remove implied promises of student achievement/outcomes from the overview.",
+   "check": "Overview contains outcome guarantees ('prepares students to...', 'will be able to...', 'option to deepen learning').",
+   "why": "Catalog overviews describe the program, not guarantee results.",
+   "example": {
+    "program": "Artificial Intelligence, MS-Align",
+    "date": "2026-04-24",
+    "author": "h.daly",
+    "quote": "Overview has been modified ... to remove implied promises of student achievement."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "OVW-2",
+   "theme": "Overview language",
+   "severity": "fix",
+   "rule": "Overview must not imply the curriculum includes remedial or undergraduate coursework.",
+   "check": "Overview references prep/Align courses as part of the degree curriculum.",
+   "why": "Graduate curriculum should not read as remedial.",
+   "example": {
+    "program": "Artificial Intelligence, MS-Align",
+    "date": "2026-05-09",
+    "author": "h.daly",
+    "quote": "removed ... to avoid inadvertently implying that the curriculum includes remedial or undergraduate coursework: 'The Align courses prepare students for the MS AI degree.'"
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "OVW-3",
+   "theme": "Overview language",
+   "severity": "fix",
+   "rule": "Overview must state whether a concentration is optional or required, consistent with the requirements section.",
+   "check": "Concentration optionality in overview disagrees with the requirements; or optionality is unstated.",
+   "why": "Reader clarity + degree-audit accuracy.",
+   "example": {
+    "program": "Business Administration, MBA-Part-Time",
+    "date": "2026-04-09",
+    "author": "h.daly",
+    "quote": "added the word 'optional' in the subheading of the overview regarding concentrations, to underscore that a concentration is not required."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "OVW-4",
+   "theme": "Overview language",
+   "severity": "fix",
+   "rule": "For multi-campus programs, overview links point to the network-wide listing, not a single campus.",
+   "check": "Overview link targets a single-campus program when the program is offered at multiple campuses.",
+   "why": "All network versions should be discoverable.",
+   "example": {
+    "program": "Applied Education Research, MEd (Online)",
+    "date": "2026-01-15",
+    "author": "h.daly",
+    "quote": "revised to a link to the college's professional doctorate programs, where all network versions of the EdD program appear."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "CONC-1",
+   "theme": "Concentrations",
+   "severity": "fix",
+   "rule": "If a concentration is not required to complete the program, the heading must not be 'Concentrations' (use 'Concentration or Electives Option') and 'Complete one of the following concentrations' must be removed.",
+   "check": "Concentration heading/instructions imply a required concentration when it is optional.",
+   "why": "Accurate completion requirements.",
+   "example": {
+    "program": "Bioinformatics, MS (Oakland)",
+    "date": "2025-05-12",
+    "author": "h.daly",
+    "quote": "'Concentrations' heading reverted to 'Concentration or Electives Option', as a concentration is not required for completion of this program."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "CONC-2",
+   "theme": "Concentrations",
+   "severity": "fix",
+   "rule": "Populate the internal 'Concentration(s)' field; add NOCC (No Concentration) when none is required; set 'Can students choose this concentration at time of admission?' consistently.",
+   "check": "Concentration internal field empty/inconsistent; missing NOCC on no-concentration programs.",
+   "why": "Admissions (Slate) + degree audit setup.",
+   "example": {
+    "program": "Business Administration, MBA (Online)",
+    "date": "2025-05-23",
+    "author": "h.daly",
+    "quote": "NOCC (No Concentration) added to 'Concentration(s)' field, as a concentration is not required to earn the degree nor required to be declared at time of admission."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "CONC-3",
+   "theme": "Concentrations",
+   "severity": "block",
+   "rule": "Inactive courses within a concentration must be resolved before approval.",
+   "check": "Any course in a concentration/curriculum is inactive.",
+   "why": "Students can't enroll in inactive courses.",
+   "example": {
+    "program": "Analytics, MPS (Portland)",
+    "date": "2025-10-23",
+    "author": "h.daly",
+    "quote": "Proposal moved to CPS dean's office for resolution of inactive courses in Applied Machine Intelligence Concentration."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "CONC-4",
+   "theme": "Concentrations",
+   "severity": "advisory",
+   "rule": "Concentration requirements should be consistent across a program's campus deployments (align to the Boston record).",
+   "check": "Non-Boston deployment's concentration requirements differ from the Boston record without cause.",
+   "why": "Consistency across the network.",
+   "example": {
+    "program": "Analytics, MPS (Toronto)",
+    "date": "2025-11-04",
+    "author": "h.daly",
+    "quote": "Update to the Insurance Analytics concentration requirements, per the same concentration's requirements on the Boston record for this program."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "SH-1",
+   "theme": "Credit hours",
+   "severity": "fix",
+   "rule": "Publish only the MINIMUM hours required to complete the program (no ranges), EXCEPT Align/Bridge/Connect programs.",
+   "check": "Total/required-hours field shows a range (e.g. '34-35 SH') for a non-Align/Bridge/Connect program.",
+   "why": "Catalog documents the minimum for completion.",
+   "example": {
+    "program": "Analytics, MPS (Seattle)",
+    "date": "2025-09-09",
+    "author": "h.daly",
+    "quote": "changed to just 34 SH, per current catalog practice to document only the min required hours (except for Align/Bridge/Connect programs)."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SH-2",
+   "theme": "Credit hours",
+   "severity": "fix",
+   "rule": "Choice/restricted-elective language uses 'at least N SH' / 'a minimum of N SH', not a range.",
+   "check": "Requirement text says 'Complete X-Y SH from the following'.",
+   "why": "Consistent minimum-hours phrasing.",
+   "example": {
+    "program": "Analytics, MPS (Seattle)",
+    "date": "2026-01-06",
+    "author": "h.daly",
+    "quote": "'Complete 4-5 SH from the following...' to 'Complete at least 4 SH from the following...'"
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SH-3",
+   "theme": "Credit hours",
+   "severity": "fix",
+   "rule": "Remove 'maximum of N semester hours' statements.",
+   "check": "Curriculum states a maximum SH a student may complete.",
+   "why": "Catalog documents the minimum; students may exceed it.",
+   "example": {
+    "program": "Accounting and Financial Decision Making, Graduate Certificate",
+    "date": "2026-04-17",
+    "author": "h.daly",
+    "quote": "removed '...may complete a maximum of 15 semester hours', as the catalog publishes the minimum required for certificate completion."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SH-4",
+   "theme": "Credit hours",
+   "severity": "block",
+   "rule": "Credit hours must be semester hours (SH), not quarter hours (QH).",
+   "check": "Any quarter-hour reference (QH) in requirements or credit/GPA section.",
+   "why": "Semester conversion (esp. CPS programs).",
+   "example": {
+    "program": "Applied Machine Intelligence, Graduate Certificate",
+    "date": "2025-10-21",
+    "author": "h.daly",
+    "quote": "Quarter hours reference in Program Credit / GPA Requirements section corrected to semester hours."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SH-5",
+   "theme": "Credit hours",
+   "severity": "fix",
+   "rule": "For 'choose N SH from the following' requirements, place the hours in the dedicated hours field and indent the options (so credit attaches to the requirement, not each option); un-indent core-requirement courses so their hours display.",
+   "check": "Choice-list options each show credit hours; or core courses are indented and hide hours.",
+   "why": "Correct credit display + degree audit.",
+   "example": {
+    "program": "Analytics, MPS (Boston)",
+    "date": "2025-10-14",
+    "author": "h.daly",
+    "quote": "3 semester hours added in dedicated hours field ... Course options then indented thereafter, so that 3 SH is associated with the requirement and not with each option."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "ROUTE-1",
+   "theme": "Committee routing",
+   "severity": "block",
+   "rule": "Any change to core requirements must be routed to UGCC (graduate) / UUCC (undergraduate).",
+   "check": "Proposal changes core requirements but workflow omits UGCC/UUCC.",
+   "why": "Curriculum committee governs core changes.",
+   "example": {
+    "program": "Accounting and Business Administration",
+    "date": "2026-05-27",
+    "author": "h.daly",
+    "quote": "To UGCC for changes to core requirements."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "ROUTE-2",
+   "theme": "Committee routing",
+   "severity": "block",
+   "rule": "Adding courses from other colleges (or adding/removing a college's course in a UIP) requires UGCC review.",
+   "check": "Curriculum adds a course owned by another college; confirm UGCC routing.",
+   "why": "Cross-college course use needs committee sign-off.",
+   "example": {
+    "program": "Bioinformatics, Graduate Certificate",
+    "date": "2026-05-08",
+    "author": "h.daly",
+    "quote": "To UGCC for addition of course options from Khoury and Bouve."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "ROUTE-3",
+   "theme": "Committee routing",
+   "severity": "advisory",
+   "rule": "A 'Course Not Found' error clears once the referenced new course is approved by UGCC; it is not a program-proposal defect.",
+   "check": "Curriculum shows 'Course Not Found' for a course pending UGCC approval.",
+   "why": "Course record populates post-approval.",
+   "example": {
+    "program": "Artificial Intelligence, MS (Miami)",
+    "date": "2025-04-09",
+    "author": "h.daly",
+    "quote": "has now been fully approved by UGCC and the course details will populate in the curriculum by the end of this month."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "ROUTE-4",
+   "theme": "Committee routing",
+   "severity": "advisory",
+   "rule": "Online programs do not require GRA review; they route to the Registrar's degree-audit team instead.",
+   "check": "Online program workflow includes GRA review.",
+   "why": "GRA reviews on-ground regulated-campus offerings.",
+   "example": {
+    "program": "Health Informatics, MS (Online)",
+    "date": "2026-02-04",
+    "author": "h.daly",
+    "quote": "No GRA review required for Online programs."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "ADM-1",
+   "theme": "Admission / inactivation",
+   "severity": "fix",
+   "rule": "Set 'Is this program open for students applying through admissions?' correctly; a program admitting PlusOne students (via Slate) must remain 'Yes' even if closed to external applicants.",
+   "check": "Admissions-open flag set to 'No' on a program that still admits PlusOne students.",
+   "why": "PlusOne admissions flow through Slate.",
+   "example": {
+    "program": "Computer Science, MSCS (Oakland)",
+    "date": "2026-06-23",
+    "author": "h.daly",
+    "quote": "changed the field ... from 'No' to 'Yes', as ... PlusOne students are indeed presently admitted to graduate programs via Slate."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "ADM-2",
+   "theme": "Admission / inactivation",
+   "severity": "advisory",
+   "rule": "An inactivation proposal is held until its successor new-program proposal is ready; both advance to the same UGCC meeting.",
+   "check": "Inactivation with a known successor program: coordinate timing.",
+   "why": "Continuity of the program's replacement.",
+   "example": {
+    "program": "Biomedical Science, MS (Boston)",
+    "date": "2025-12-11",
+    "author": "h.daly",
+    "quote": "held until the college is ready to advance the successor new MS program proposal ... advanced to the same UGCC meeting."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "ADM-3",
+   "theme": "Admission / inactivation",
+   "severity": "fix",
+   "rule": "The 'Final Catalog' field on an inactivation must match the inactivation's effective term (inactivated Fall YYYY -> final catalog (YYYY-1)-YYYY).",
+   "check": "Final Catalog edition does not correspond to the inactivation effective term.",
+   "why": "Last catalog year the program is published.",
+   "example": {
+    "program": "Cloud Software Development, Graduate Certificate",
+    "date": "2025-06-30",
+    "author": "h.daly",
+    "quote": "authorized for inactivation as of Fall 2025, the final catalog was 2024-2025 rather than 2025-2026."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "DA-1",
+   "theme": "Degree audit / CIP / modality",
+   "severity": "advisory",
+   "rule": "CIP code and campus/modality fields are set by the Registrar's degree-audit team on new records (administrative, not a college action).",
+   "check": "Do not expect the college to supply CIP; Registrar adds it.",
+   "why": "Registrar owns CIP/campus coding.",
+   "example": {
+    "program": "Analytics, MPS (Portland)",
+    "date": "2025-08-19",
+    "author": "c.cornwall",
+    "quote": "Registrar's Office administrative action to add CIP Code and campus to new program record fields."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "DA-2",
+   "theme": "Degree audit / CIP / modality",
+   "severity": "advisory",
+   "rule": "An online program flipping campus BOS -> Online (VTL) for 2026-2027 is not genuinely new even though CourseLeaf tags it 'New Program Proposal'; it's the VTL-campus record creation.",
+   "check": "'New Program Proposal' that is actually an existing program changing to Online (VTL).",
+   "why": "Online students recoded from BOS to VTL as of 2026-2027.",
+   "example": {
+    "program": "Engineering Management, Graduate Certificate",
+    "date": "2025-10-17",
+    "author": "h.daly",
+    "quote": "Although CourseLeaf tags this as a 'New Program Proposal', this program is active and is not new."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "DA-3",
+   "theme": "Degree audit / CIP / modality",
+   "severity": "advisory",
+   "rule": "Dual-degree programs have no degree-audit impact and skip that step.",
+   "check": "Dual-degree proposal routed through degree audit unnecessarily.",
+   "why": "Dual-degree audits handled via component programs.",
+   "example": {
+    "program": "Business Administration, MBA-Part-Time",
+    "date": "2026-06-11",
+    "author": "h.daly",
+    "quote": "No degree audit impacts (dual degree program). Advance to Editor and Catalog Setup."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "DA-4",
+   "theme": "Degree audit / CIP / modality",
+   "severity": "fix",
+   "rule": "Credit-bearing experiential-learning courses that also satisfy an elective must be listed in the electives list for degree audits to function.",
+   "check": "Experiential-learning course fulfills an elective but is absent from the electives list.",
+   "why": "Degree audit must see the course as an elective option.",
+   "example": {
+    "program": "Cell and Gene Therapies, MS (Boston)",
+    "date": "2026-05-12",
+    "author": "h.daly",
+    "quote": "added the credit-bearing courses that fulfill the experiential learning requirement to the electives list ... necessary for proper functioning of future degree audits."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "GRADE-1",
+   "theme": "Grade / GPA requirements",
+   "severity": "fix",
+   "rule": "Minimum-grade statements at core requirements use the college's standard wording (e.g. COE: 'must earn a grade of C or higher in all required core courses').",
+   "check": "Core-requirements min-grade statement missing or non-standard for the college.",
+   "why": "Consistency across the college's catalog records.",
+   "example": {
+    "program": "Information Systems, MSIS",
+    "date": "2026-06-05",
+    "author": "h.daly",
+    "quote": "Min grade in core requirements statement further modified ... per COE approval on other 26-27 records."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "GRADE-2",
+   "theme": "Grade / GPA requirements",
+   "severity": "fix",
+   "rule": "Prerequisites outside the program must not be required for core courses; simplify to 'A grade of C or higher is required for each of the following courses.'",
+   "check": "Core-requirement grade statement imposes external prerequisites.",
+   "why": "Core requirements are internal to the program.",
+   "example": {
+    "program": "Data Architecture and Management",
+    "date": "2026-05-22",
+    "author": "h.daly",
+    "quote": "prerequisites outside of the program should not be required for core courses."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "GRADE-3",
+   "theme": "Grade / GPA requirements",
+   "severity": "advisory",
+   "rule": "Do not add 'prerequisite conditions may require a higher minimum grade' when the program has only one core course.",
+   "check": "Boilerplate multi-course grade sentence on a single-core-course program.",
+   "why": "Sentence is inapplicable.",
+   "example": {
+    "program": "Information Systems, MSIS",
+    "date": "2026-06-05",
+    "author": "h.daly",
+    "quote": "Second sentence re min grade in core requirements statement removed, as this program has only one core requirement."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "PREREQ-1",
+   "theme": "Prerequisites",
+   "severity": "fix",
+   "rule": "When elective options require prerequisites outside the program, add the standard alert language and ensure pathways exist that don't require external coursework.",
+   "check": "Electives require external prereqs with no student-facing alert.",
+   "why": "Students must be warned; completion must remain feasible.",
+   "example": {
+    "program": "Data Analytics Engineering",
+    "date": "2026-05-05",
+    "author": "h.daly",
+    "quote": "'Some elective options require completion of prerequisites outside of this program.'"
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "EXP-1",
+   "theme": "Experiential learning / co-op",
+   "severity": "fix",
+   "rule": "If co-op/experiential participation adds hours or tuition, the Program Requirements must alert students.",
+   "check": "Co-op adds hours but no alert statement in Program Requirements.",
+   "why": "Cost/time transparency.",
+   "example": {
+    "program": "Artificial Intelligence, MS",
+    "date": "2026-03-26",
+    "author": "h.daly",
+    "quote": "A statement has been added ... to alert students that additional coursework may be needed for participation in co-op depending on concentration."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "EXP-2",
+   "theme": "Experiential learning / co-op",
+   "severity": "advisory",
+   "rule": "Optional experiential learning goes in a dedicated 'Optional Experiential Learning Opportunities' area (added with college authorization).",
+   "check": "Experiential options scattered rather than in a dedicated area.",
+   "why": "Consistent placement.",
+   "example": {
+    "program": "Applied AI, MPS (Toronto)",
+    "date": "2026-03-17",
+    "author": "h.daly",
+    "quote": "'Optional Experiential Learning Opportunities' curriculum area added to program requirements per authorization of C. Bolick."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "EXP-3",
+   "theme": "Experiential learning / co-op",
+   "severity": "block",
+   "rule": "Non-credit or non-existent co-op prep courses are removed; do not list a course that was never created or awards no credit.",
+   "check": "Curriculum references a co-op prep course that doesn't exist / is non-credit.",
+   "why": "Only real credit-bearing courses belong in requirements.",
+   "example": {
+    "program": "Artificial Intelligence, MS",
+    "date": "2026-04-22",
+    "author": "da.rogers",
+    "quote": "removed the line about a non-credit coop course as the course was not created."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "THESIS-1",
+   "theme": "Thesis / capstone",
+   "severity": "fix",
+   "rule": "Zero-credit special-purpose courses (Thesis Continuation, Research) are removed from elective lists.",
+   "check": "A 0-credit thesis/research course appears among electives.",
+   "why": "0-credit courses don't advance required elective hours.",
+   "example": {
+    "program": "Information Systems, MSIS",
+    "date": "2026-04-17",
+    "author": "m.couch-hrinda",
+    "quote": "INFO 7986 Research and INFO 7996 Thesis Continuation removed ... these 0 credit courses will not advance the student toward ... required elective hours."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "THESIS-2",
+   "theme": "Thesis / capstone",
+   "severity": "fix",
+   "rule": "A heading offering 'Thesis' must reflect what is actually offered (e.g. 'Capstone or Thesis' -> 'Capstone or Project' when thesis is dropped).",
+   "check": "Heading lists an option (thesis) the program no longer offers.",
+   "why": "Accuracy.",
+   "example": {
+    "program": "Digital Media, MPS-Connect",
+    "date": "2026-06-04",
+    "author": "c.cornwall",
+    "quote": "Changed the heading 'Capstone or Thesis' to 'Capstone or Project' as the[sis] is no longer an option."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "THESIS-3",
+   "theme": "Thesis / capstone",
+   "severity": "block",
+   "rule": "A thesis sequence relying on a repeatable course requires that course to be UGCC-approved as repeatable first.",
+   "check": "Thesis sequence assumes repeatability of a non-repeatable course.",
+   "why": "Course repeatability is a UGCC decision.",
+   "example": {
+    "program": "Design, MFA (Boston)",
+    "date": "2025-08-28",
+    "author": "h.daly",
+    "quote": "The Thesis Sequence cannot be completed as proposed ... until the department ... receives UGCC approval to change the ARTG 7910 course to a repeatable course."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "DUAL-1",
+   "theme": "Dual / joint degrees",
+   "severity": "block",
+   "rule": "Changes to shared credits in a dual-degree pathway must go to UGCC.",
+   "check": "Dual-degree shared-credit change without UGCC routing.",
+   "why": "Shared credit affects both degrees.",
+   "example": {
+    "program": "Pharmacy, PharmD-Direct Entry",
+    "date": "2025-09-09",
+    "author": "h.daly",
+    "quote": "To UGCC for change in shared credits in this dual degree pathway."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "DUAL-2",
+   "theme": "Dual / joint degrees",
+   "severity": "advisory",
+   "rule": "Dual-degree catalog URLs get a Registrar-established redirect when pages move.",
+   "check": "Renamed/moved dual-degree page needs a redirect (Registrar handles).",
+   "why": "Preserve external links.",
+   "example": {
+    "program": "Law, LLM / Business Administration, MBA",
+    "date": "2025-12-17",
+    "author": "m.depaula",
+    "quote": "Redirect established from .../dual-degrees/law-llm-business-administration-mba/ to .../dual-degrees/"
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "HYG-1",
+   "theme": "Curriculum-list hygiene",
+   "severity": "fix",
+   "rule": "No duplicate courses in a list; electives kept in alphanumeric order.",
+   "check": "A course appears twice in the same list; electives out of order.",
+   "why": "Clean, readable curriculum.",
+   "example": {
+    "program": "Computer Science, MSCS-Align",
+    "date": "2026-06-11",
+    "author": "c.cornwall",
+    "quote": "Removed one instance of CS 7680 as the course was listed twice in the same course list."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "HYG-2",
+   "theme": "Curriculum-list hygiene",
+   "severity": "block",
+   "rule": "Inactive ('red-boxed') courses must be resolved by the college before approval.",
+   "check": "Any inactive/red-boxed course in requirements or concentrations.",
+   "why": "Students can't take inactive courses.",
+   "example": {
+    "program": "Complex Network Analysis",
+    "date": "2026-02-27",
+    "author": "da.rogers",
+    "quote": "please address the red-boxed inactive courses in your concentrations."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "HYG-3",
+   "theme": "Curriculum-list hygiene",
+   "severity": "block",
+   "rule": "Remove lines for courses that don't exist (never created).",
+   "check": "Curriculum references a course with no CIM course record.",
+   "why": "Only real courses belong in the curriculum.",
+   "example": {
+    "program": "Artificial Intelligence, MS",
+    "date": "2026-04-22",
+    "author": "da.rogers",
+    "quote": "removed the line about a non-credit coop prep course as it does not exist."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "BANNER-1",
+   "theme": "Banner setup & coding (Registrar-performed)",
+   "severity": "advisory",
+   "rule": "The Registrar assigns the CIP code (choosing a DHS STEM-list code where the program qualifies) and campus/modality fields.",
+   "check": "Do not supply CIP; note STEM eligibility for the Registrar.",
+   "why": "Registrar owns CIP + STEM designation.",
+   "example": {
+    "program": "Applied Sustainability, MS (Boston)",
+    "date": "2026-06-15",
+    "author": "da.rogers",
+    "quote": "I gave the 30.3301 Sustainability Studies CIP code which also appears on the DHS STEM list."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "BANNER-2",
+   "theme": "Banner setup & coding (Registrar-performed)",
+   "severity": "advisory",
+   "rule": "The Registrar creates the Banner record, incl. a separate Virtual (VTL) record for online; two virtual modalities are distinguished with a 'PO' code suffix.",
+   "check": "Online program: expect a distinct VTL/PO Banner record created by Registrar.",
+   "why": "Banner modality coding.",
+   "example": {
+    "program": "Cell and Gene Therapies, MS",
+    "date": "2026-04-27",
+    "author": "da.rogers",
+    "quote": "this program is getting the 'PO' at the end of the code to distinguish the two virtual modalities."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "BANNER-3",
+   "theme": "Banner setup & coding (Registrar-performed)",
+   "severity": "advisory",
+   "rule": "Concentrations are added/removed in Banner to match the approved curriculum; a concentration is unchecked in Banner to prevent admission into it.",
+   "check": "Banner concentrations must match the curriculum; admission-closed concentrations unchecked.",
+   "why": "Admissions integrity.",
+   "example": {
+    "program": "Artificial Intelligence, MS",
+    "date": "2026-05-22",
+    "author": "da.rogers",
+    "quote": "RABS ... was in Banner already with Machine Learning, so I unchecked it so that no one could be admitted."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "BANNER-4",
+   "theme": "Banner setup & coding (Registrar-performed)",
+   "severity": "advisory",
+   "rule": "For online-only programs the Boston Banner instance is ended as of the conversion term.",
+   "check": "Online-only program still has an active Boston Banner instance.",
+   "why": "Single accurate modality record.",
+   "example": {
+    "program": "Cannabis Science, Graduate Certificate",
+    "date": "2026-01-05",
+    "author": "da.rogers",
+    "quote": "Ended Boston instance in Banner for 202710. This program is Online Only."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "CAT-5",
+   "theme": "Effective term & catalog edition",
+   "severity": "advisory",
+   "rule": "The effective term is set to the earliest term still achievable given remaining approvals/deadlines.",
+   "check": "Effective term later than necessary, or earlier than feasible given approvals.",
+   "why": "Publish as soon as validly possible.",
+   "example": {
+    "program": "Early Childhood Education, MA",
+    "date": "2025-10-30",
+    "author": "h.daly",
+    "quote": "Effective term revised from Fall 2025 to Spring 2026, the earliest effective term possible at this time."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "CAT-6",
+   "theme": "Effective term & catalog edition",
+   "severity": "fix",
+   "rule": "A successor/exit program's effective term is set so it directly follows the predecessor's last active catalog (no gap/overlap).",
+   "check": "Successor program's first catalog doesn't abut the predecessor's final catalog.",
+   "why": "Continuous coverage between a program and its replacement.",
+   "example": {
+    "program": "Biomedical Science, MS (Boston)",
+    "date": "2025-09-29",
+    "author": "h.daly",
+    "quote": "Eff term revised from Fall 2026 to Fall 2027, so that ... the successor program directly follows the last active catalog for this program."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "RETRO-1",
+   "theme": "Retroactivity of curriculum changes",
+   "severity": "advisory",
+   "rule": "Added options may apply retroactively; removed options/requirement changes take effect only from the future catalog term. Retroactive application to admitted students is decided at Program Review 2.",
+   "check": "Proposal assumes a removed course/requirement applies to already-admitted students.",
+   "why": "Students keep credit for options available when they enrolled.",
+   "example": {
+    "program": "Public Health, MPH (Online)",
+    "date": "2026-04-17",
+    "author": "h.daly",
+    "quote": "Newly-added options ... can indeed be implemented retroactively. Removed options ... will only take effect with the future catalog term."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "SH-6",
+   "theme": "Credit hours",
+   "severity": "fix",
+   "rule": "A course's credit value in the program must match the course's own approved credits.",
+   "check": "Program lists a course at a credit value different from its approved credits.",
+   "why": "Consistency with the course record.",
+   "example": {
+    "program": "Physical Therapy, DPT-Postbacc",
+    "date": "2026-05-22",
+    "author": "m.depaula",
+    "quote": "PT 6300 and PT 6301 total credits changed from 5SH to 3SH to match what has been approved for each course."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "SH-7",
+   "theme": "Credit hours",
+   "severity": "fix",
+   "rule": "The 'Overall credits required for the degree' field holds the minimum required, not a range.",
+   "check": "That field shows a range.",
+   "why": "Field purpose is the minimum to earn the credential.",
+   "example": {
+    "program": "Product Management, MS (Boston)",
+    "date": "2025-03-12",
+    "author": "h.daly",
+    "quote": "revised from 30-34 to just 30, as that field is presently used across all programs for the minimum required hours."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "HYG-4",
+   "theme": "Curriculum-list hygiene",
+   "severity": "fix",
+   "rule": "A mistyped or wrong course reference is corrected to the intended course (with the owning unit's authorization).",
+   "check": "A course code/title doesn't match the intended course.",
+   "why": "Accuracy.",
+   "example": {
+    "program": "Construction Management, Graduate Certificate",
+    "date": "2024-01-04",
+    "author": "h.daly",
+    "quote": "CMN 6600 ... corrected to CMG 6600 (\"Foundations of Construction Management\")."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "HYG-5",
+   "theme": "Curriculum-list hygiene",
+   "severity": "fix",
+   "rule": "Courses deactivated in the annual NECHE course-deactivation review are removed from options as of the deactivation's effective term.",
+   "check": "A course deactivated in the annual review still appears in options.",
+   "why": "Options must be active courses.",
+   "example": {
+    "program": "Computer Science, MSCS-Align",
+    "date": "2025-10-07",
+    "author": "h.daly",
+    "quote": "CS 5360 and CS 7600, deactivated ... through the annual course deactivation review per NECHE standards, have been removed."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "STRUCT-1",
+   "theme": "Requirements structure & headings",
+   "severity": "fix",
+   "rule": "Remove headings that have no associated content.",
+   "check": "A heading with nothing under it.",
+   "why": "Clean structure.",
+   "example": {
+    "program": "Biotechnology, MS (Oakland)",
+    "date": "2026-05-27",
+    "author": "h.daly",
+    "quote": "\"Coursework Option\" heading removed, as it is not associated with any curriculum requirements."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "STRUCT-2",
+   "theme": "Requirements structure & headings",
+   "severity": "fix",
+   "rule": "Don't use headings/instructions implying a choice that doesn't exist ('Core A'/'Core B'; 'Complete one of the following' with one option).",
+   "check": "Choice-implying heading/instruction with no actual choice.",
+   "why": "Avoid misleading structure.",
+   "example": {
+    "program": "Network Science, PhD (Boston)",
+    "date": "2026-05-05",
+    "author": "h.daly",
+    "quote": "removed the \"Core A\" and \"Core B\" subheadings, as the subheadings implied that there was a \"choice of core requirements\"."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "STRUCT-3",
+   "theme": "Requirements structure & headings",
+   "severity": "fix",
+   "rule": "Group course options under the college that owns them.",
+   "check": "A course listed under the wrong college's group.",
+   "why": "Correct ownership display.",
+   "example": {
+    "program": "Human-Computer Interaction, MS",
+    "date": "2026-03-11",
+    "author": "h.daly",
+    "quote": "Electives re-sequenced to put specific courses under correct college, such as a MUST course under CAMD and an IE course under COE."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "STRUCT-4",
+   "theme": "Requirements structure & headings",
+   "severity": "fix",
+   "rule": "Footnotes belong at the bottom of the relevant requirements table with footnote formatting, not as trailing body text.",
+   "check": "Footnote text placed after electives as plain text.",
+   "why": "Consistent footnote presentation.",
+   "example": {
+    "program": "Geospatial Analytics, Graduate Certificate",
+    "date": "2025-09-08",
+    "author": "h.daly",
+    "quote": "Footnote ... moved to bottom of core requirements table with footnote formatting."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "STRUCT-5",
+   "theme": "Requirements structure & headings",
+   "severity": "fix",
+   "rule": "Remove core-requirement subtotals (current catalog practice).",
+   "check": "A subtotal line under core requirements.",
+   "why": "Catalog practice.",
+   "example": {
+    "program": "Population Health, PhD (Boston)",
+    "date": "2025-09-18",
+    "author": "h.daly",
+    "quote": "Subtotal of core requirements removed per current catalog practice."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "STRUCT-6",
+   "theme": "Requirements structure & headings",
+   "severity": "fix",
+   "rule": "Don't let formatting merge distinct requirements or indent core courses so credits hide / all-required is implied.",
+   "check": "Restricted Electives folded into Core; electives indented implying all required.",
+   "why": "Accurate requirement structure.",
+   "example": {
+    "program": "Management, MS with Major in Finance",
+    "date": "2026-04-09",
+    "author": "h.daly",
+    "quote": "re-indented the options in the Electives section, to avoid implying that students must complete every course in that course list."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "STRUCT-7",
+   "theme": "Requirements structure & headings",
+   "severity": "advisory",
+   "rule": "Heading renames that change meaning are done in consultation with the Provost's Office.",
+   "check": "Semantic heading change without Provost consultation.",
+   "why": "Consistency of catalog terminology.",
+   "example": {
+    "program": "Biotechnology, MS (Toronto)",
+    "date": "2026-05-27",
+    "author": "h.daly",
+    "quote": "\"Project Option\" heading changed to \"Project Pathway\" per consultation with Provost's Office."
+   },
+   "check_method": "human"
+  },
+  {
+   "id": "MOD-1",
+   "theme": "Modality & campus designation",
+   "severity": "fix",
+   "rule": "Use 'Online' only when fully online; use 'Primarily Online' when any component must be in person (internship/residency/on-ground).",
+   "check": "An 'Online' program with an in-person requirement.",
+   "why": "Accurate modality for students/regulators.",
+   "example": {
+    "program": "Public Administration, MPA (Arlington)",
+    "date": "2026-06-05",
+    "author": "h.daly",
+    "quote": "should that Online program instead be re-designated Primarily Online?"
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "MOD-2",
+   "theme": "Modality & campus designation",
+   "severity": "advisory",
+   "rule": "Online programs use campus 'Online' and do not name a specific city/NU campus.",
+   "check": "Online program naming a specific campus city.",
+   "why": "Online campus is modality, not a city.",
+   "example": {
+    "program": "Computer Science, MSCS-Align",
+    "date": "2025-07-14",
+    "author": "da.rogers",
+    "quote": "Online programs are setup with Online as the campus and do not specify a specific city/NU campus."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "MOD-3",
+   "theme": "Modality & campus designation",
+   "severity": "fix",
+   "rule": "Set the Campus/Modality field to match actual delivery.",
+   "check": "Campus/Modality field disagrees with delivery.",
+   "why": "Field must reflect reality.",
+   "example": {
+    "program": "Applied Professional Studies, MPS",
+    "date": "2026-01-16",
+    "author": "h.daly",
+    "quote": "Campus and Modality field changed from Boston to Primarily Online, per the comment from the college."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "INSTR-1",
+   "theme": "Instructional-method statement",
+   "severity": "advisory",
+   "rule": "Programs whose sections span campuses/methods carry the standard instructional-method statement, consistent with the university instructional-methods policy.",
+   "check": "Multi-campus/method program missing the standard statement.",
+   "why": "Consistency with policy.",
+   "example": {
+    "program": "Applied Quantitative Methods and Social Analysis",
+    "date": "2026-04-27",
+    "author": "h.daly",
+    "quote": "Class sections of courses required for this program may be offered at multiple campuses and in multiple instructional methods ..."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SHARED-1",
+   "theme": "Shared content",
+   "severity": "fix",
+   "rule": "Colleges add the shared-content area to a proposal where appropriate.",
+   "check": "Applicable shared-content area missing.",
+   "why": "College responsibility per Catalog/Registrar instructions.",
+   "example": {
+    "program": "Digital Media, MPS (Boston)",
+    "date": "2026-02-02",
+    "author": "m.boudreault",
+    "quote": "the college is responsible for adding the shared content area, where appropriate."
+   },
+   "check_method": "llm"
+  },
+  {
+   "id": "SETUP-1",
+   "theme": "Proposal setup & workflow",
+   "severity": "advisory",
+   "rule": "A certificate should comprise multiple courses/modules; a single-course certificate is questioned.",
+   "check": "A certificate with only one course.",
+   "why": "Certificate composition norm.",
+   "example": {
+    "program": "Social Determinants of Health",
+    "date": "2022-08-24",
+    "author": "da.rogers",
+    "quote": "There is only one course. Why wouldn't this be just a module? Usually certificates are made up of multiple courses or modules."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SETUP-2",
+   "theme": "Proposal setup & workflow",
+   "severity": "block",
+   "rule": "New degree programs must attach an executive summary for Provost/Senate/Board review before the dean's office approves.",
+   "check": "New degree proposal lacks an executive-summary attachment at dean's-office approval.",
+   "why": "Governance review needs it.",
+   "example": {
+    "program": "Design, MS (Boston)",
+    "date": "2025-12-05",
+    "author": "h.daly",
+    "quote": "Please prepare and attach an executive summary for Office of the Provost, Faculty Senate, and Board of Trustees review before the proposal is approved out of the CAMD dean's office."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SETUP-3",
+   "theme": "Proposal setup & workflow",
+   "severity": "advisory",
+   "rule": "Set 'Is there a subject code associated with this program?' to the program's own subject so the program director is auto-included in workflow.",
+   "check": "Subject-code field generic/interdisciplinary when a specific subject exists.",
+   "why": "Ensures the right approver is in workflow.",
+   "example": {
+    "program": "Network Science, MS (Boston)",
+    "date": "2026-02-09",
+    "author": "h.daly",
+    "quote": "changed from \"Interdisciplinary - Soc Sci and Humanities\" to \"Network Science\" so that this program's approval workflow will automatically include the ... program director."
+   },
+   "check_method": "auto"
+  },
+  {
+   "id": "SETUP-4",
+   "theme": "Proposal setup & workflow",
+   "severity": "advisory",
+   "rule": "New program proposals and substantial changes receive IPD (Innovation Planning & Development) review at the start of workflow.",
+   "check": "New/substantial proposal missing IPD review step.",
+   "why": "University-leadership review.",
+   "example": {
+    "program": "International Affairs, MA (Boston)",
+    "date": "2024-12-06",
+    "author": "h.daly",
+    "quote": "The Innovation Planning and Development team (\"IPD\") has been added to workflow to review all new program proposals and substantial program changes."
+   },
+   "check_method": "data"
+  },
+  {
+   "id": "SETUP-5",
+   "theme": "Proposal setup & workflow",
+   "severity": "advisory",
+   "rule": "A change-of-academic-unit proposal starts in the 'relinquishing' college; the Provost then coordinates subsequent college reviews.",
+   "check": "Change-of-unit proposal not starting in the relinquishing college.",
+   "why": "Longstanding workflow practice.",
+   "example": {
+    "program": "Artificial Intelligence, MS (Portland)",
+    "date": "2025-10-03",
+    "author": "h.daly",
+    "quote": "the \"relinquishing\" administrative college is the first college in workflow for this change-of-academic unit(s) ... proposal."
+   },
+   "check_method": "data"
+  }
+ ],
+ "check_method_legend": {
+  "auto": "deterministic (regex/field/HTML)",
+  "llm": "LLM reads the proposal prose",
+  "data": "needs a CIM lookup/join (course status, credits, requirement diff, workflow, sibling records \u2014 all reachable)",
+  "human": "external calendar or human decision / Registrar-performed action"
+ }
 }
