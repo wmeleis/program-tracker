@@ -3235,15 +3235,13 @@ async function loadPrecheckLLM(programId, force) {
           <span style="color:#94a3b8;font-size:11px">${d.model}${d.cached ? ' · cached' : ''}</span></div>`;
         const VER = {
             flag: ['#fee2e2', '#991b1b', 'FLAG'],
-            unclear: ['#fef9c3', '#854d0e', 'UNCLEAR'],
         };
-        // Only show FLAG and UNCLEAR — hide OK / N/A (rules that pass or don't apply).
-        const shown = d.findings.filter(f => f.verdict === 'flag' || f.verdict === 'unclear');
+        // Only show FLAG — hide OK / N/A / UNCLEAR (nothing the reviewer must act on).
+        const shown = d.findings.filter(f => f.verdict === 'flag');
         const nflag = d.n_flag || 0;
-        const nhidden = d.findings.length - shown.length;
         h += `<p style="font-size:12px;margin:6px 0;color:${nflag ? '#991b1b' : '#166534'}">`
            + `${nflag ? nflag + ' rule(s) flagged' : 'No judgment rules flagged'} `
-           + `<span style="color:#94a3b8">(${d.findings.length} evaluated; ${nhidden} OK/N-A hidden)</span></p>`;
+           + `<span style="color:#94a3b8">(${d.findings.length} evaluated)</span></p>`;
         for (const f of shown) {
             const v = VER[f.verdict] || VER.unclear;
             h += `<div style="border-left:3px solid ${v[1]};background:${v[0]}55;padding:5px 10px;margin:0 0 5px;border-radius:0 6px 6px 0">
