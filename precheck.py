@@ -35,9 +35,9 @@ _DB = os.path.join(_DIR, 'data', 'tracker.db')
 _RULES_PATH = os.path.join(_DIR, 'data', 'reports', 'registrar_rules.json')
 _KEY_FILE = os.path.join(_DIR, 'data', 'anthropic_api_key')
 
-# Fast/cheap model is sufficient for these per-program judgment checks (agreed
-# with Waleed). Bump to claude-opus-4-8 here if you want higher-fidelity reads.
-_LLM_MODEL = 'claude-haiku-4-5'
+# Opus 4.8 for higher-fidelity judgment reads (Waleed's choice). Swap to
+# claude-haiku-4-5 here if cost/latency ever matters more than nuance.
+_LLM_MODEL = 'claude-opus-4-8'
 
 _VARIANT = re.compile(r'\b(align|bridge|connect)\b', re.I)  # allowed to exceed min hours
 
