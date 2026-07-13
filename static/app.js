@@ -3247,17 +3247,17 @@ async function loadPrecheckLLM(programId, force) {
         const VER = {
             flag: ['#fee2e2', '#991b1b', 'FLAG'],
             unclear: ['#fef9c3', '#854d0e', 'UNCLEAR'],
-            ok: ['#dcfce7', '#166534', 'OK'],
-            na: ['#f1f5f9', '#64748b', 'N/A'],
         };
+        // Only show FLAG and UNCLEAR — hide OK / N/A (rules that pass or don't apply).
+        const shown = d.findings.filter(f => f.verdict === 'flag' || f.verdict === 'unclear');
         const nflag = d.n_flag || 0;
+        const nhidden = d.findings.length - shown.length;
         h += `<p style="font-size:12px;margin:6px 0;color:${nflag ? '#991b1b' : '#166534'}">`
            + `${nflag ? nflag + ' rule(s) flagged' : 'No judgment rules flagged'} `
-           + `<span style="color:#94a3b8">(${d.findings.length} evaluated)</span></p>`;
-        for (const f of d.findings) {
+           + `<span style="color:#94a3b8">(${d.findings.length} evaluated; ${nhidden} OK/N-A hidden)</span></p>`;
+        for (const f of shown) {
             const v = VER[f.verdict] || VER.unclear;
-            const dim = (f.verdict === 'ok' || f.verdict === 'na') ? 'opacity:0.6;' : '';
-            h += `<div style="border-left:3px solid ${v[1]};background:${v[0]}55;padding:5px 10px;margin:0 0 5px;border-radius:0 6px 6px 0;${dim}">
+            h += `<div style="border-left:3px solid ${v[1]};background:${v[0]}55;padding:5px 10px;margin:0 0 5px;border-radius:0 6px 6px 0">
                 <span style="background:${v[0]};color:${v[1]};font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${v[2]}</span>
                 <span style="color:#94a3b8;font-size:11px;margin-left:6px">${f.id} · ${escapeHtml(f.theme)}</span>
                 <div style="font-size:12px;color:#334155;margin-top:2px">${escapeHtml(f.rule)}</div>
