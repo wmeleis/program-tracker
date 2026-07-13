@@ -3209,15 +3209,10 @@ async function loadPrecheckDetail(programId) {
         </div>
         <p style="color:#64748b;font-size:11px;margin:4px 0 0">Uses Claude to evaluate the ~18 judgment rules against this program's overview &amp; structure. Cached per proposal version.</p>
       </div>`;
-    // Extracts to support manual review
-    const ex = d.extracts || {};
-    html += `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Overview &amp; headings (for manual review)</summary>`;
-    html += `<div style="font-size:12px;color:#475569;margin:6px 0"><b>Overview:</b> ${escapeHtml(ex.overview || '(not found)')}</div>`;
-    if ((ex.headings || []).length) html += `<div style="font-size:12px;color:#475569"><b>Requirement headings:</b> ${ex.headings.map(escapeHtml).join(' · ')}</div>`;
-    html += `</details>`;
-    // Manual-review checklist
-    html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:500">Rules to review manually (${d.review.length})</summary>`;
-    html += '<p style="color:#64748b;font-size:11px;margin:4px 0">These need a language-model read or human/calendar context, so they are not auto-evaluated.</p>';
+    // Manual-review checklist — rules that neither the deterministic pass nor the
+    // AI review covers (need human/calendar context, or CIM-data lookups not yet built).
+    html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:500">Rules not auto-checked (${d.review.length})</summary>`;
+    html += '<p style="color:#64748b;font-size:11px;margin:4px 0">These need human or calendar context, or a CIM-data lookup not yet automated, so they are neither deterministically checked nor covered by the AI review above.</p>';
     html += '<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
     for (const r of d.review) {
         html += `<tr style="border-top:1px solid #eef2f7">

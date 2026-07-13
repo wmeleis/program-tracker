@@ -192,10 +192,13 @@ def precheck_program(pid, sess=None):
     # ---- review checklist: llm / human / not-auto-implemented rules ----
     AUTO_DONE = {'CAT-1', 'SH-4', 'SH-3', 'SH-1', 'SH-7', 'STRUCT-5', 'HYG-2', 'ROUTE-3',
                  'HYG-1', 'SETUP-1', 'TITLE-2', 'TITLE-1'}
+    # 'llm' rules are now evaluated by the AI review pass (precheck_llm), so they
+    # are NOT listed here — only rules neither tier covers: 'data' (CIM-data
+    # lookups not yet automated) and 'human' (need human/calendar context).
     review = [{'id': r['id'], 'theme': r['theme'], 'severity': r['severity'],
                'method': r.get('check_method', ''), 'rule': r['rule']}
               for r in rules.values()
-              if r['id'] not in AUTO_DONE and r.get('check_method') in ('llm', 'data', 'human')]
+              if r['id'] not in AUTO_DONE and r.get('check_method') in ('data', 'human')]
     review.sort(key=lambda r: (r['method'], r['id']))
 
     return {
