@@ -217,9 +217,3 @@ A requirement change cannot be effective mid-year (e.g. Spring); the effective t
 **19.4 — New program proposals and substantial program changes receive IPD (Innovation Planning & Development) review at the start of workflow** on behalf of university leadership.
 
 **19.5 — A change-of-academic-unit proposal starts in the "relinquishing" college**, after which the Office of the Provost coordinates subsequent college reviews.
-
----
-
-*Companion files: `registrar_rules.json` (machine-readable checks) and
-`registrar_comments.xlsx` (all comments by commenter and program; a Registrar
-flag column marks the Registrar's Office authors).*
