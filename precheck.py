@@ -66,6 +66,35 @@ def _course_lists(html_body):
     return out
 
 
+def _course_rows(html_body):
+    """Return [{code, hours, section}] across all sc_courselist tables — one entry
+    per course row, tagged with the areaheader section it sits under."""
+    rows = []
+    for block in re.split(r'<table[^>]*class="[^"]*sc_courselist', html_body)[1:]:
+        block = block.split('</table>')[0]
+        section = ''
+        for tr in re.findall(r'<tr\b[^>]*>.*?</tr>', block, re.S):
+            ah = re.search(r'areaheader[^>]*>(?:\s*<[^>]+>)*\s*([^<]{2,80})', tr)
+            if ah:
+                section = re.sub(r'\s+', ' ', html.unescape(ah.group(1))).strip()
+                continue
+            codes = re.findall(r"showCourse\(this,\s*'([A-Z]{2,6}\s?\d{4}[A-Z]?)'", tr)
+            if not codes:
+                code = re.search(r'class="codecol[^"]*">(?:\s*<[^>]+>)*\s*([A-Z]{2,6}\s?\d{4}[A-Z]?)', tr)
+                codes = [code.group(1)] if code else []
+            if not codes:
+                continue
+            hrs = re.search(r'class="hourscol[^"]*">\s*([^<]*)', tr)
+            # A row with 2+ course codes is an "X and/or Y" group whose hours cell is
+            # the GROUP total, not the first course's credits — mark it so SH-6 skips it.
+            rows.append({'code': re.sub(r'\s+', ' ', codes[0].strip()).upper(),
+                         'codes': [re.sub(r'\s+', ' ', c.strip()).upper() for c in codes],
+                         'hours': (hrs.group(1).strip() if hrs else ''),
+                         'multi': len(codes) > 1,
+                         'section': section})
+    return rows
+
+
 def _overview(html_body):
     m = re.search(r'id="overviewcontentframediv4"[^>]*>(.*?)</div>\s*(?:<div|<h2|$)', html_body, re.S)
     if m:
@@ -196,9 +225,46 @@ def precheck_program(pid, sess=None):
         flag('CAT-2', f"Effective term is {dec} — program-requirement changes take effect on a "
              f"Fall (catalog-year) basis only; if this changes requirements, move it to the next Fall.")
 
+    # Catalog-backed rules (Course Inventory: credits, status, college, repeatability).
+    # The map is empty until fetch_course_inventory has run; these silently no-op then.
+    try:
+        import fetch_course_inventory
+        cat = fetch_course_inventory.load_map(conn)
+    except Exception:
+        cat = {}
+    if cat:
+        crows = _course_rows(body)
+
+        # (SH-6 credit-match was attempted but dropped: the program's hours column
+        # conflates per-course credits with group/requirement totals, so it can't
+        # be compared to the catalog reliably. Needs a structural courselist parser.)
+
+        # HYG-5 — a listed course is deactivated in the catalog AS OF the program's
+        # effective term. Deactivations are future-dated, so compare the course's
+        # `inactive_as_of` term against the program's eff_term (skip if we can't
+        # tell — no program term, or the course's final run is still Active).
+        prog_term = (row.get('eff_term') or '').strip()
+        if prog_term:
+            inactive = sorted({code for r in crows for code in r['codes']
+                               if (cat.get(code) or {}).get('inactive_as_of')
+                               and prog_term >= cat[code]['inactive_as_of']})
+            if inactive:
+                flag('HYG-5', f"Course(s) listed but deactivated as of this program's term: "
+                     f"{', '.join(inactive[:15])} — remove or replace (deactivated courses "
+                     f"can't be used from their deactivation term onward).")
+
+        # THESIS-1 — a zero-credit course sits in an electives section.
+        zero_elec = sorted({r['code'] for r in crows
+                            if 'elective' in r['section'].lower()
+                            and (cat.get(r['code']) or {}).get('credit_num') == 0})
+        if zero_elec:
+            flag('THESIS-1', f"Zero-credit course(s) in an electives section: {', '.join(zero_elec)} "
+                 f"— confirm they belong (0-credit thesis/research courses award no elective hours).")
+
     # ---- review checklist: human / data rules not (yet) auto-implemented ----
     AUTO_DONE = {'CAT-1', 'CAT-2', 'SH-4', 'SH-3', 'SH-1', 'SH-7', 'STRUCT-5',
-                 'HYG-2', 'ROUTE-3', 'HYG-1', 'SETUP-1', 'TITLE-2', 'TITLE-1'}
+                 'HYG-2', 'HYG-5', 'ROUTE-3', 'HYG-1', 'SETUP-1', 'TITLE-2',
+                 'TITLE-1', 'THESIS-1'}
     # 'llm' rules are now evaluated by the AI review pass (precheck_llm), so they
     # are NOT listed here — only rules neither tier covers: 'data' (CIM-data
     # lookups not yet automated) and 'human' (need human/calendar context).

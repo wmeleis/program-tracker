@@ -850,6 +850,7 @@ def api_source_health():
     add('GTM', _success('GTM (Smartsheet API)'))
     add('GLS', _success('GLS (Tableau)'))
     add('Regulatory', _mtime(os.path.join(_DATA_DIR, 'last_regulatory_fetch')))
+    add('Course Inventory', _mtime(os.path.join(_DATA_DIR, 'last_course_inventory_fetch')))
 
     return jsonify({
         'threshold_days': STALE_SOURCE_DAYS,
@@ -1579,6 +1580,28 @@ def api_scan_trigger():
                 # Regulatory fetch is best-effort — a missing SharePoint tab
                 # or expired session must not block the rest of the scan.
                 print(f"Regulatory fetch error: {e}")
+
+            # Course Inventory (Registrar Tableau catalog) — feeds the Registrar
+            # pre-check's data rules (HYG-5 deactivated-course, etc.). The catalog
+            # changes rarely, so gate to once per 24h like the regulatory pull.
+            try:
+                import fetch_course_inventory
+                cwd = os.path.dirname(os.path.abspath(__file__))
+                ci_stamp = os.path.join(cwd, 'data', 'last_course_inventory_fetch')
+                ci_due = True
+                if os.path.exists(ci_stamp):
+                    age_h = (time.time() - os.path.getmtime(ci_stamp)) / 3600.0
+                    if age_h < 24:
+                        ci_due = False
+                        print(f"Course inventory: skipping (last run {age_h:.1f}h ago, < 24h)")
+                if ci_due:
+                    n_ci = fetch_course_inventory.fetch_course_inventory()
+                    print(f"Course inventory: stored {n_ci} courses")
+                    with open(ci_stamp, 'w') as f:
+                        f.write(str(int(time.time())))
+            except Exception as e:
+                # Best-effort — a Tableau/PAT hiccup must not block the scan.
+                print(f"Course inventory fetch error: {e}")
 
             # Portfolio: re-download feeds (SharePoint/Smartsheet/Tableau) then
             # ingest. Rate-limited to once per hour — the Portfolio tab's feeds
