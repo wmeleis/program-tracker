@@ -3207,7 +3207,7 @@ async function loadPrecheckDetail(programId) {
           <button onclick="event.stopPropagation(); loadPrecheckLLM(${programId}, false)"
             style="font-size:11px;padding:3px 10px;border:1px solid var(--accent);background:#eff6ff;color:var(--accent);border-radius:6px;cursor:pointer">Run AI review</button>
         </div>
-        <p style="color:#64748b;font-size:11px;margin:4px 0 0">Uses Claude to evaluate the ~18 judgment rules against this program's overview &amp; structure. Cached per proposal version.</p>
+        <p style="color:#64748b;font-size:11px;margin:4px 0 0">Uses Claude to evaluate the judgment rules against this program's curriculum &amp; internal CIM fields. Cached per proposal version.</p>
       </div>`;
     // Manual-review checklist — rules that neither the deterministic pass nor the
     // AI review covers (need human/calendar context, or CIM-data lookups not yet built).

@@ -41,6 +41,12 @@ _LLM_MODEL = 'claude-haiku-4-5'
 
 _VARIANT = re.compile(r'\b(align|bridge|connect)\b', re.I)  # allowed to exceed min hours
 
+# Rule ids evaluated deterministically in precheck_program (real flags). Shared
+# with precheck_llm so the two tiers partition the rule set cleanly.
+_AUTO_DONE = {'CAT-1', 'CAT-2', 'SH-4', 'SH-3', 'SH-2', 'SH-1', 'SH-7', 'STRUCT-5',
+              'HYG-2', 'HYG-5', 'ROUTE-3', 'HYG-1', 'SETUP-1', 'TITLE-2', 'TITLE-1',
+              'THESIS-1', 'CONC-3'}
+
 
 def _rules():
     try:
@@ -271,17 +277,17 @@ def precheck_program(pid, sess=None):
             flag('THESIS-1', f"Zero-credit course(s) in an electives section: {', '.join(zero_elec)} "
                  f"— confirm they belong (0-credit thesis/research courses award no elective hours).")
 
-    # ---- review checklist: human / data rules not (yet) auto-implemented ----
-    AUTO_DONE = {'CAT-1', 'CAT-2', 'SH-4', 'SH-3', 'SH-2', 'SH-1', 'SH-7', 'STRUCT-5',
-                 'HYG-2', 'HYG-5', 'ROUTE-3', 'HYG-1', 'SETUP-1', 'TITLE-2',
-                 'TITLE-1', 'THESIS-1', 'CONC-3'}
-    # Everything not deterministically flagged (AUTO_DONE) and not covered by the
-    # AI review ('llm') belongs on the manual checklist — that includes 'auto'
-    # rules we haven't built a detector for yet, plus 'data'/'human' rules.
+    # ---- manual checklist ----
+    # Deterministic flags cover _AUTO_DONE; the AI review (precheck_llm) covers the
+    # judgment rules it can assess. What's left for a human: pure 'human' rules
+    # (external calendar / Registrar action / meeting decision) plus the
+    # context-dependent rules the AI can't judge (_AI_EXCLUDE — attachments,
+    # workflow steps, "what changed", cross-program references).
     review = [{'id': r['id'], 'theme': r['theme'], 'severity': r['severity'],
                'method': r.get('check_method', ''), 'rule': r['rule']}
               for r in rules.values()
-              if r['id'] not in AUTO_DONE and r.get('check_method') != 'llm']
+              if r['id'] not in _AUTO_DONE
+              and (r.get('check_method') == 'human' or r['id'] in _AI_EXCLUDE)]
     review.sort(key=lambda r: (r['method'], r['id']))
 
     return {
@@ -313,8 +319,43 @@ def _api_key():
         return None
 
 
-def _llm_rules(rules):
-    return [r for r in rules.values() if r.get('check_method') == 'llm']
+# Rules the AI can't assess from a single program's curriculum + XML facts, so we
+# DON'T feed them to it (it would flag on absence-of-evidence or just say
+# "unclear"). They need attachments, workflow-step inspection, a prior version /
+# "what changed", a Boston counterpart, or per-course catalog data. These stay on
+# the manual checklist alongside the human rules.
+_AI_EXCLUDE = {'SETUP-2', 'SETUP-4', 'SETUP-5', 'CAT-6', 'ADM-1', 'ADM-2', 'ADM-3',
+               'CONC-4', 'ROUTE-1', 'ROUTE-2', 'ROUTE-4', 'DUAL-1', 'DA-3', 'DA-4',
+               'HYG-3', 'SH-6', 'THESIS-3', 'STRUCT-1', 'STRUCT-3'}
+
+
+def _ai_rules(rules):
+    """Rules the AI review attempts: judgment rules it can actually assess from the
+    program's curriculum text + internal XML facts. Excludes deterministic
+    (_AUTO_DONE), pure 'human', and context-dependent (_AI_EXCLUDE) rules."""
+    return [r for r in rules.values()
+            if r['id'] not in _AUTO_DONE and r['id'] not in _AI_EXCLUDE
+            and r.get('check_method') != 'human']
+
+
+_XML_FACT_TAGS = ('subject', 'secondary_subject', 'majorcode', 'majortitle', 'campus',
+                  'cip_code', 'notify_admissions', 'assoc_concentrations',
+                  'existing_concentration', 'concentration', 'concentration_atadmit',
+                  'concentration_admit', 'eff_term', 'eff_cat')
+
+
+def _xml_facts(sess, pid):
+    """Pull the internal CIM fields (from index.xml) that the judgment rules need
+    but that aren't visible in the rendered curriculum. Returns {tag: value}."""
+    xml = sess.get(f"/programadmin/{pid}/index.xml") or ''
+    facts = {}
+    for t in _XML_FACT_TAGS:
+        m = re.search(rf'<{t}>(.*?)</{t}>', xml, re.S)
+        if m:
+            v = re.sub(r'\s+', ' ', _strip(m.group(1))).strip()
+            if v:
+                facts[t] = v[:120]
+    return facts
 
 
 def _ensure_cache_table(conn):
@@ -323,21 +364,22 @@ def _ensure_cache_table(conn):
         content_hash TEXT, model TEXT, result_json TEXT, evaluated_at TEXT)""")
 
 
-def _fingerprint(model, overview, headings, lists, rule_ids):
-    """Content hash: re-run only when the program text, model, or rule set changes."""
+def _fingerprint(model, overview, headings, lists, facts, rule_ids):
+    """Content hash: re-run only when the program text, facts, model, or rule set changes."""
     payload = json.dumps({
-        'm': model, 'o': overview, 'h': headings, 'l': lists, 'r': sorted(rule_ids),
+        'm': model, 'o': overview, 'h': headings, 'l': lists, 'f': facts, 'r': sorted(rule_ids),
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
 def precheck_llm(pid, sess=None, force=False):
-    """Evaluate the judgment (check_method='llm') rules against a program's
-    overview + requirement structure using Claude. Cached per program+content;
-    returns {available, ...}. Never raises for a missing key — reports it."""
+    """Evaluate the judgment rules (everything not deterministically flagged and
+    not a pure-human rule) against a program's overview + requirement structure +
+    internal CIM (XML) facts using Claude. Cached per program+content; returns
+    {available, ...}. Never raises for a missing key — reports it."""
     import datetime
     rules = _rules()
-    llm_rules = _llm_rules(rules)
+    llm_rules = _ai_rules(rules)
     conn = sqlite3.connect(_DB); conn.row_factory = sqlite3.Row
     _ensure_cache_table(conn)
     row = conn.execute("SELECT * FROM programs WHERE id=?", (pid,)).fetchone()
@@ -362,7 +404,8 @@ def precheck_llm(pid, sess=None, force=False):
     overview = _overview(body)
     headings = _headings(body)
     lists = _course_lists(body)
-    fp = _fingerprint(_LLM_MODEL, overview, headings, lists, [r['id'] for r in llm_rules])
+    facts = _xml_facts(sess, pid)
+    fp = _fingerprint(_LLM_MODEL, overview, headings, lists, facts, [r['id'] for r in llm_rules])
 
     if not force:
         c = conn.execute("SELECT content_hash, model, result_json, evaluated_at "
@@ -379,6 +422,10 @@ def precheck_llm(pid, sess=None, force=False):
         for r in llm_rules)
     lists_txt = "\n".join(f"  list {i+1}: {', '.join(lst) or '(empty)'}"
                           for i, lst in enumerate(lists)) or "  (none)"
+    facts_txt = "\n".join(f"  {k} = {v}" for k, v in facts.items()) or "  (none)"
+    # Requirement prose (grade statements, footnotes, instructional text) beyond the
+    # bare headings/codes — needed for GRADE / PREREQ / EXP / footnote rules.
+    req_text = _strip(body)[:4500]
     user = (
         "You are a Northeastern University Registrar's Office reviewer checking a graduate "
         "program proposal against the Registrar's curriculum-review rules. For EACH rule, "
@@ -388,14 +435,22 @@ def precheck_llm(pid, sess=None, force=False):
         f"OVERVIEW TEXT:\n{overview or '(none)'}\n\n"
         f"REQUIREMENT HEADINGS:\n{' | '.join(headings) or '(none)'}\n\n"
         f"COURSE LISTS (by requirement table):\n{lists_txt}\n\n"
+        f"REQUIREMENTS TEXT (grade statements, footnotes, instructions):\n{req_text or '(none)'}\n\n"
+        "INTERNAL CIM FIELDS (from the program record; blank = not set):\n" + facts_txt + "\n"
+        "  Notes: subject = the program's own subject code; notify_admissions = whether it's "
+        "open to admissions (a program admitting PlusOne students via Slate must be Yes even "
+        "if closed to external applicants); assoc_concentrations/concentration_* describe the "
+        "internal concentration setup.\n\n"
         "RULES TO CHECK:\n" + rules_block + "\n\n"
         "For each rule id, return a verdict:\n"
         "  \"flag\"    — the proposal appears to violate the rule (explain what to fix)\n"
         "  \"ok\"      — the rule applies and appears satisfied\n"
         "  \"na\"      — the rule does not apply to this program\n"
-        "  \"unclear\" — cannot tell from the text provided (say what's missing)\n"
-        "Only the overview, headings, and course lists above are available to you — do not "
-        "assume fields you cannot see. Be conservative: prefer \"unclear\"/\"na\" over a "
+        "  \"unclear\" — cannot tell from the information provided (say what's missing)\n"
+        "Only the information above is available to you. If a rule concerns something NOT "
+        "present in that information, return \"na\" or \"unclear\" — NEVER \"flag\" based on "
+        "the absence of evidence (e.g. do not flag a missing attachment, workflow step, or "
+        "field you simply weren't given). Be conservative: prefer \"unclear\"/\"na\" over a "
         "false \"flag\". Keep each reason to one sentence.")
 
     schema = {
