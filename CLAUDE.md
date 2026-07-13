@@ -296,9 +296,20 @@ After a full scan completes (`do_scan` in `app.py`) AND after every "Update Now"
 ## Dependencies
 - Python 3.9+ (macOS system Python works)
 - Flask, flask-cors, cryptography, python-docx (`pip install flask flask-cors cryptography python-docx`). `python-docx` powers the standardized reference `.docx` download (`reference_docx.py`); `pdfplumber` is needed only for PDF reference uploads.
+- `anthropic` (`pip install anthropic`) — only for the Registrar Check AI review (`precheck.precheck_llm`); the rest of the app runs without it.
 - Microsoft Edge or Google Chrome with CourseLeaf session (selected by `BROWSER_APP`; launchd default Edge)
 - macOS (AppleScript)
 - Git configured with push access to the repo
+
+## Credentials
+All secrets live in **gitignored files inside the project** (`data/` is gitignored), so the project is self-contained; none are committed. Never paste a secret into chat, code, or docs — document only the location and how to obtain it.
+
+| File | What | How to obtain |
+|------|------|---------------|
+| `data/anthropic_api_key` | Anthropic API key (plaintext, `sk-ant-…`) for the Registrar Check AI review. Read by `precheck._api_key()` — env `ANTHROPIC_API_KEY` takes precedence, else this file. Absent → the AI tier reports `{available:false}` and everything else is unaffected. | Create at console.anthropic.com → **API keys** → Create key, and load a credit balance (Billing). Save with `printf '%s' 'sk-ant-…' > data/anthropic_api_key`. |
+| `data/tableau_pat.json` | Tableau Personal Access Token — `{server, site, token_name, token_secret}`. Used by `fetch_course_inventory.py` (Course Inventory catalog) and `fetch_portfolio_data.py` (GLS/SVT/IPD/enrollment feeds). `fetch_course_inventory.py` also falls back to the Section Tracker's copy at `~/committees/nu-docs/Curriculum/SectionTracker/data/tableau_pat.json` (same token). | tableau.northeastern.edu → account settings → **Personal Access Tokens** → create; put the name/secret in the JSON. `site` is per-view (`Registrar` for Course Inventory; `ProfessionalAdvancementNetwork` for enrollment — the portfolio fetcher signs into the site each feed needs). |
+| GitHub push auth | Not a file — `git push` (and the gh-pages deploy) authenticate via the **`gh` CLI**, not the keychain. | Renew with `gh auth login` (not `git-credential-osxkeychain`). |
+| CourseLeaf session | Not a file — the scraper drives a logged-in Chrome/Edge session (`cim_http.py` reuses its cookies). | Log into CourseLeaf in the browser `BROWSER_APP` points at; re-login when the session expires. |
 
 ## Common Operations
 
