@@ -189,9 +189,16 @@ def precheck_program(pid, sess=None):
             and not paren):
         flag('TITLE-1', f"Campus-specific record (campus={camp}) has no \"(Campus)\" in the full title.")
 
-    # ---- review checklist: llm / human / not-auto-implemented rules ----
-    AUTO_DONE = {'CAT-1', 'SH-4', 'SH-3', 'SH-1', 'SH-7', 'STRUCT-5', 'HYG-2', 'ROUTE-3',
-                 'HYG-1', 'SETUP-1', 'TITLE-2', 'TITLE-1'}
+    # ---- data-lookup rules (cross-reference CIM data) ----
+    # CAT-2 — program-requirement changes must take effect in a Fall term.
+    dec = uip_correlate._decode_term(row.get('eff_term') or '')
+    if dec and not dec.startswith('Fall'):
+        flag('CAT-2', f"Effective term is {dec} — program-requirement changes take effect on a "
+             f"Fall (catalog-year) basis only; if this changes requirements, move it to the next Fall.")
+
+    # ---- review checklist: human / data rules not (yet) auto-implemented ----
+    AUTO_DONE = {'CAT-1', 'CAT-2', 'SH-4', 'SH-3', 'SH-1', 'SH-7', 'STRUCT-5',
+                 'HYG-2', 'ROUTE-3', 'HYG-1', 'SETUP-1', 'TITLE-2', 'TITLE-1'}
     # 'llm' rules are now evaluated by the AI review pass (precheck_llm), so they
     # are NOT listed here — only rules neither tier covers: 'data' (CIM-data
     # lookups not yet automated) and 'human' (need human/calendar context).
