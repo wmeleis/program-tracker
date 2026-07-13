@@ -2131,7 +2131,10 @@ function renderTable(items) {
                 <button class="detail-tab ${activeTab === 'curriculum' ? 'active' : ''}" data-tab="curriculum"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'curriculum')">Curriculum</button>
                 <button class="detail-tab ${activeTab === 'changes' ? 'active' : ''}" data-tab="changes"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'changes')">Program Changes</button>
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'changes')">Program Changes</button>` +
+                (!window._staticMode ? `
+                <button class="detail-tab ${activeTab === 'precheck' ? 'active' : ''}" data-tab="precheck"
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'precheck')">Registrar Check</button>` : '') + `
                 <button class="detail-tab ${activeTab === 'reference' ? 'active' : ''}" data-tab="reference"
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'reference')">Alignment Reference</button>
                 <button class="detail-tab ${activeTab === 'misaligned' ? 'active' : ''}" data-tab="misaligned"
@@ -2140,10 +2143,7 @@ function renderTable(items) {
                     onclick="event.stopPropagation(); switchDetailTab(${id}, 'compare')">Alignment Details</button>` +
                 (hasReg ? `
                 <button class="detail-tab ${activeTab === 'regulatory' ? 'active' : ''}" data-tab="regulatory"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory Details</button>` : '') +
-                (!window._staticMode ? `
-                <button class="detail-tab ${activeTab === 'precheck' ? 'active' : ''}" data-tab="precheck"
-                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'precheck')">Registrar Check</button>` : '');
+                    onclick="event.stopPropagation(); switchDetailTab(${id}, 'regulatory')">Regulatory Details</button>` : '');
 
             html += `
                 <tr class="workflow-detail" id="detail-${id}">
