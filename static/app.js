@@ -3209,18 +3209,7 @@ async function loadPrecheckDetail(programId) {
         </div>
         <p style="color:#64748b;font-size:11px;margin:4px 0 0">Uses Claude to evaluate the judgment rules against this program's curriculum &amp; internal CIM fields. Cached per proposal version.</p>
       </div>`;
-    // Manual-review checklist — rules that neither the deterministic pass nor the
-    // AI review covers (need human/calendar context, or CIM-data lookups not yet built).
-    html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:500">Rules not auto-checked (${d.review.length})</summary>`;
-    html += '<p style="color:#64748b;font-size:11px;margin:4px 0">These need human or calendar context, or a CIM-data lookup not yet automated, so they are neither deterministically checked nor covered by the AI review above.</p>';
-    html += '<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
-    for (const r of d.review) {
-        html += `<tr style="border-top:1px solid #eef2f7">
-            <td style="padding:3px 6px;color:#94a3b8;white-space:nowrap">${r.id}</td>
-            <td style="padding:3px 6px;color:#64748b;white-space:nowrap">${escapeHtml(r.theme)}</td>
-            <td style="padding:3px 6px">${escapeHtml(r.rule)}</td></tr>`;
-    }
-    html += '</tbody></table></details></div>';
+    html += '</div>';
     el.innerHTML = html;
 }
 
