@@ -1,19 +1,5 @@
 # Registrar's Office Curriculum Review Guide (Graduate Programs)
 
-*Derived from 2 years of Registrar's Office reviewer comments on graduate program
-proposals in CourseLeaf CIM (2024-07 → 2026-07). Source: 2,779 workflow comments
-across 516 programs; the rules below are the recurring, policy-bearing patterns.
-Registrar's Office authors: Heather Daly (primary), David Rogers (Banner setup),
-Mariana De Paula, MJ Boudreault, Benoy Joseph, Christine Cornwall, Melanie Standig,
-Melissa Couch-Hrinda, Melissa Daigle-Briggs.*
-
-**How to use this.** These are conventions the Registrar's Office applies during
-review that are not fully published elsewhere. Aligning a proposal to them *before*
-submission avoids rollbacks and speeds approval. Each rule states the convention
-and, where useful, why it exists.
-
----
-
 ## 1. Effective term & catalog edition
 
 **1.1 — The effective catalog edition must match the effective term.** A Fall YYYY
@@ -25,6 +11,12 @@ A requirement change cannot be effective mid-year (e.g. Spring); the effective t
 **1.3 — There is an annual college-approval deadline per catalog year; miss it and the proposal rolls to the next edition.** The Registrar moves the edition forward when the deadline has passed.
 
 **1.4 — New degree programs needing Faculty Senate / Board approval may be pushed to a later term/edition**, but can be included in a catalog *addendum* if fully approved before publication.
+
+**1.5 — The effective term is set to the earliest term still achievable** given remaining approvals and deadlines (e.g. a missed Fall becomes the next Spring only if a requirement change isn't involved — see 1.2).
+
+**1.6 — A successor / "exit" program's effective term is set so it directly follows the predecessor's last active catalog** (no gap or overlap between the old program's final catalog and the successor's first).
+
+**1.7 — Added options may apply retroactively; removed options do not.** Newly-*added* course options can be applied retroactively (students already in the program may use them); *removing* an option or changing a requirement takes effect only from the future catalog term, so students who already completed a dropped course keep credit for it. Whether a change applies to already-admitted students is decided at Program Review 2.
 
 ---
 
@@ -75,6 +67,10 @@ A requirement change cannot be effective mid-year (e.g. Spring); the effective t
 **5.4 — Credit hours must be semester hours (SH), not quarter hours (QH).** QH references are corrected (part of the CPS semester conversion).
 
 **5.5 — For "choose N SH from the following" requirements, put the hours in the dedicated hours field and indent the options** so credit is associated with the requirement, not shown per-option. Conversely, **core-requirement courses are un-indented** so their hours display.
+
+**5.6 — A course's credit value in the program must match the course's own approved credits** (e.g. a course approved at 3 SH is shown as 3 SH in the program, not 5).
+
+**5.7 — The "Overall credits required for the degree" field holds the minimum required** (not a range) — same rule as 5.1, applied to that specific field.
 
 ---
 
@@ -164,8 +160,66 @@ A requirement change cannot be effective mid-year (e.g. Spring); the effective t
 
 **14.3 — Lines for courses that don't exist are removed** (phantom courses that were never created).
 
+**14.4 — A mistyped or wrong course reference is corrected to the intended course** (e.g. CMN 6600 → CMG 6600; PHTH 6440 → PHTH 7440, with the owning unit's authorization).
+
+**14.5 — Courses deactivated in the annual NECHE course-deactivation review are removed from options** as of the effective term of the deactivation.
+
+---
+
+## 15. Requirements structure, headings & formatting
+
+**15.1 — Remove headings that have no associated content** (e.g. a "Coursework Option" heading with nothing under it).
+
+**15.2 — Don't use headings or instructions that imply a choice that doesn't exist.** "Core A" / "Core B" subheadings are removed when there is no choice of core; "Complete one of the following" is removed when only one option exists.
+
+**15.3 — Group course options under the college that owns them** (e.g. a CAMD course under CAMD, an IE course under COE).
+
+**15.4 — Footnotes belong at the bottom of the relevant requirements table, with footnote formatting** — not as trailing body text after the electives.
+
+**15.5 — Remove core-requirement subtotals** per current catalog practice.
+
+**15.6 — Don't let formatting merge distinct requirements** (e.g. a "Restricted Electives" block accidentally folded into Core), and don't indent core courses in a way that hides credits or implies every listed course is required.
+
+**15.7 — Heading renames that change meaning are done in consultation with the Provost's Office** (e.g. "Project Option" → "Project Pathway").
+
+---
+
+## 16. Modality & campus designation
+
+**16.1 — Use "Online" only when the program is fully online; use "Primarily Online" when any component must be in person** (e.g. an internship, residency, or on-ground requirement). If an "Online" program has an in-person requirement, it should be re-designated Primarily Online.
+
+**16.2 — Online programs use the campus "Online" and do not name a specific city/NU campus** (a Vancouver-serving online program is still just "Online").
+
+**16.3 — Set the Campus / Modality field to match actual delivery** (e.g. Boston → Primarily Online) when the college confirms the modality.
+
+---
+
+## 17. Instructional-method statement
+
+**17.1 — Programs whose class sections span campuses or instructional methods carry the standard catalog statement:** "Class sections of courses required for this program may be offered at multiple campuses and in multiple instructional methods. Students should carefully review class section instructional method and, as needed, review class section campus at the time of registration." This mirrors the university's [instructional-methods policy](https://catalog.northeastern.edu/graduate/academic-policies-procedures/instructional-methods/).
+
+---
+
+## 18. Shared content
+
+**18.1 — Colleges are responsible for adding the shared-content area to a proposal where appropriate** (per the Catalog/Registrar instructions for programs in workflow).
+
+---
+
+## 19. Proposal setup & workflow
+
+**19.1 — A certificate should comprise multiple courses/modules** — a single-course "certificate" is questioned.
+
+**19.2 — New degree programs must have an executive summary attached for Office of the Provost, Faculty Senate, and Board of Trustees review** before the proposal is approved out of the college dean's office.
+
+**19.3 — Set "Is there a subject code associated with this program?" to the program's own subject** — this auto-includes the program director in the approval workflow for future changes.
+
+**19.4 — New program proposals and substantial program changes receive IPD (Innovation Planning & Development) review at the start of workflow** on behalf of university leadership.
+
+**19.5 — A change-of-academic-unit proposal starts in the "relinquishing" college**, after which the Office of the Provost coordinates subsequent college reviews.
+
 ---
 
 *Companion files: `registrar_rules.json` (machine-readable checks) and
 `registrar_comments.xlsx` (all comments by commenter and program; a Registrar
-flag column marks the Registrar's Office authors listed above).*
+flag column marks the Registrar's Office authors).*

@@ -74,10 +74,12 @@ def extract(window_days=730, limit=None, progress=True):
     sess = cim_http.CIMSession()
     comments = []
     fetched = with_cmts = 0
+    aborted = False
     for i, p in enumerate(progs):
         html_body = sess.get(f"/programadmin/{p['id']}/")
         if sess.logged_out:
             print("!! CIM session expired mid-sweep — stopping. Re-login and rerun.", file=sys.stderr)
+            aborted = True
             break
         if not html_body:
             continue
@@ -118,6 +120,7 @@ def extract(window_days=730, limit=None, progress=True):
         'programs_fetched': fetched,
         'programs_with_comments': with_cmts,
         'total_comments': len(comments),
+        'aborted': aborted,
         'comments': comments,
     }
 
@@ -173,6 +176,13 @@ def main():
     ap.add_argument('--limit', type=int, default=None, help='cap program count (testing)')
     args = ap.parse_args()
     data = extract(window_days=int(args.years * 365), limit=args.limit)
+    # Safety: never overwrite a good corpus with an empty/partial one when the CIM
+    # session dropped. Require a healthy fetch (session live, most programs fetched).
+    if data['aborted'] or data['programs_fetched'] < 0.5 * max(1, data['programs_swept']):
+        print(f"ABORTED: only {data['programs_fetched']}/{data['programs_swept']} programs fetched "
+              f"(CIM session expired?). Corpus NOT overwritten — re-login to CIM and rerun.",
+              file=sys.stderr)
+        return 1
     jpath, xpath = write_corpus(data)
     print(f"Swept {data['programs_swept']} grad programs "
           f"({data['programs_fetched']} fetched, {data['programs_with_comments']} with comments)")
