@@ -7220,6 +7220,21 @@ function setPortfolioCampusBoston() {
     renderPortfolioTable();
 }
 if (typeof window !== 'undefined') window.setPortfolioCampusBoston = setPortfolioCampusBoston;
+
+// Shortcut: set the Campus multi-select to every non-Boston (Network) campus.
+// If exactly the Network set is already active, toggle it off (clear).
+function setPortfolioCampusNetwork() {
+    const s = portfolioCampusFilter;
+    const network = getPortfolioFieldValues('campus').filter(v => v && v !== 'Boston');
+    const isNetwork = !s.has('Boston') && s.size === network.length
+        && network.every(v => s.has(v));
+    s.clear();
+    if (!isNetwork) network.forEach(v => s.add(v));
+    _updateMultiFilterBtn('portfolio-filter-campus', s);
+    updateClearButtons();
+    renderPortfolioTable();
+}
+if (typeof window !== 'undefined') window.setPortfolioCampusNetwork = setPortfolioCampusNetwork;
 let portfolioOtpFilter       = new Set();
 let portfolioIpdFilter       = new Set();
 let portfolioRosterFilter    = new Set();  // SVT Status filter (legacy id)
