@@ -190,6 +190,19 @@ def api_program_precheck(program_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/program/<int:program_id>/precheck_llm')
+def api_program_precheck_llm(program_id):
+    """LLM pass over the judgment (check_method='llm') Registrar rules. Requires an
+    Anthropic API key (env ANTHROPIC_API_KEY or data/anthropic_api_key); returns
+    {available: False, reason} if absent. Cached per program+content; ?force=1 re-runs."""
+    try:
+        import precheck
+        force = request.args.get('force') in ('1', 'true', 'yes')
+        return jsonify(precheck.precheck_llm(program_id, force=force))
+    except Exception as e:
+        return jsonify({'available': False, 'reason': str(e)}), 500
+
+
 @app.route('/api/program/<int:program_id>/regulatory')
 def api_program_regulatory(program_id):
     """Return regulatory approved-curriculum data for a program.

@@ -3,19 +3,28 @@
 BEFORE it moves through CIM workflow, using the rules in
 data/reports/registrar_rules.json.
 
-Two tiers:
+Three tiers:
   • auto / data rules  → evaluated deterministically here (real flags)
-  • llm / human rules   → NOT evaluated (need a language-model read or human/
-    calendar context); returned as a "review manually" checklist, with the
-    program's overview + requirement headings extracted so a reviewer can eyeball.
+  • llm rules           → evaluated by Claude on demand (`precheck_llm`), when an
+    Anthropic API key is configured; returns per-rule verdicts.
+  • human rules         → NOT evaluated (need human / calendar context); returned
+    as a "review manually" checklist, with the program's overview + requirement
+    headings extracted so a reviewer can eyeball.
 
-`precheck_program(pid)` returns a dict consumed by /api/program/<id>/precheck and
-the "Registrar Check" sub-tab.
+`precheck_program(pid)` returns the deterministic pass (consumed by
+/api/program/<id>/precheck); `precheck_llm(pid)` runs the LLM pass (consumed by
+/api/program/<id>/precheck_llm). Both feed the "Registrar Check" sub-tab.
+
+API key: the LLM tier reads ANTHROPIC_API_KEY from the environment, or (if that's
+unset) a gitignored `data/anthropic_api_key` file. The secret is supplied by the
+operator and never committed; if neither is present the LLM tier reports
+{available: False} and the deterministic pass is unaffected.
 """
 import os
 import re
 import json
 import html
+import hashlib
 import sqlite3
 
 import cim_http
@@ -24,6 +33,11 @@ import uip_correlate
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _DB = os.path.join(_DIR, 'data', 'tracker.db')
 _RULES_PATH = os.path.join(_DIR, 'data', 'reports', 'registrar_rules.json')
+_KEY_FILE = os.path.join(_DIR, 'data', 'anthropic_api_key')
+
+# Fast/cheap model is sufficient for these per-program judgment checks (agreed
+# with Waleed). Bump to claude-opus-4-8 here if you want higher-fidelity reads.
+_LLM_MODEL = 'claude-haiku-4-5'
 
 _VARIANT = re.compile(r'\b(align|bridge|connect)\b', re.I)  # allowed to exceed min hours
 
@@ -195,10 +209,198 @@ def precheck_program(pid, sess=None):
     }
 
 
+# ---------------------------------------------------------------------------
+# LLM tier — judgment rules (check_method == 'llm')
+# ---------------------------------------------------------------------------
+
+def _api_key():
+    """Operator-supplied key: env first, then a gitignored file. None if absent.
+    The value is never logged and never leaves this process."""
+    k = os.environ.get('ANTHROPIC_API_KEY')
+    if k and k.strip():
+        return k.strip()
+    try:
+        with open(_KEY_FILE) as f:
+            k = f.read().strip()
+            return k or None
+    except Exception:
+        return None
+
+
+def _llm_rules(rules):
+    return [r for r in rules.values() if r.get('check_method') == 'llm']
+
+
+def _ensure_cache_table(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS precheck_llm_cache (
+        program_id INTEGER PRIMARY KEY,
+        content_hash TEXT, model TEXT, result_json TEXT, evaluated_at TEXT)""")
+
+
+def _fingerprint(model, overview, headings, lists, rule_ids):
+    """Content hash: re-run only when the program text, model, or rule set changes."""
+    payload = json.dumps({
+        'm': model, 'o': overview, 'h': headings, 'l': lists, 'r': sorted(rule_ids),
+    }, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def precheck_llm(pid, sess=None, force=False):
+    """Evaluate the judgment (check_method='llm') rules against a program's
+    overview + requirement structure using Claude. Cached per program+content;
+    returns {available, ...}. Never raises for a missing key — reports it."""
+    import datetime
+    rules = _rules()
+    llm_rules = _llm_rules(rules)
+    conn = sqlite3.connect(_DB); conn.row_factory = sqlite3.Row
+    _ensure_cache_table(conn)
+    row = conn.execute("SELECT * FROM programs WHERE id=?", (pid,)).fetchone()
+    if not row:
+        return {'available': False, 'reason': f'program {pid} not found'}
+    row = dict(row)
+    name = row.get('name') or ''
+
+    key = _api_key()
+    if not key:
+        return {'available': False, 'model': _LLM_MODEL,
+                'reason': 'No Anthropic API key configured. Set ANTHROPIC_API_KEY '
+                          'in the server environment, or place the key in '
+                          'data/anthropic_api_key, then restart.'}
+
+    sess = sess or cim_http.CIMSession()
+    live = sess.get(f"/programadmin/{pid}/")
+    body = live or row.get('curriculum_html') or ''
+    if not body:
+        return {'available': False, 'model': _LLM_MODEL,
+                'reason': 'No curriculum content available for this program.'}
+    overview = _overview(body)
+    headings = _headings(body)
+    lists = _course_lists(body)
+    fp = _fingerprint(_LLM_MODEL, overview, headings, lists, [r['id'] for r in llm_rules])
+
+    if not force:
+        c = conn.execute("SELECT content_hash, model, result_json, evaluated_at "
+                         "FROM precheck_llm_cache WHERE program_id=?", (pid,)).fetchone()
+        if c and c['content_hash'] == fp and c['model'] == _LLM_MODEL:
+            cached = json.loads(c['result_json'])
+            cached.update({'available': True, 'cached': True,
+                           'model': _LLM_MODEL, 'evaluated_at': c['evaluated_at']})
+            return cached
+
+    # Build the request. One compact instruction; the model returns a verdict per rule.
+    rules_block = "\n".join(
+        f"- {r['id']} ({r['severity']}, {r['theme']}): {r['rule']} — CHECK: {r.get('check','')}"
+        for r in llm_rules)
+    lists_txt = "\n".join(f"  list {i+1}: {', '.join(lst) or '(empty)'}"
+                          for i, lst in enumerate(lists)) or "  (none)"
+    user = (
+        "You are a Northeastern University Registrar's Office reviewer checking a graduate "
+        "program proposal against the Registrar's curriculum-review rules. For EACH rule, "
+        "decide whether the proposal, as described below, appears to VIOLATE it.\n\n"
+        f"PROGRAM: {name}\n"
+        f"CAMPUS: {row.get('campus') or '(none)'}\n\n"
+        f"OVERVIEW TEXT:\n{overview or '(none)'}\n\n"
+        f"REQUIREMENT HEADINGS:\n{' | '.join(headings) or '(none)'}\n\n"
+        f"COURSE LISTS (by requirement table):\n{lists_txt}\n\n"
+        "RULES TO CHECK:\n" + rules_block + "\n\n"
+        "For each rule id, return a verdict:\n"
+        "  \"flag\"    — the proposal appears to violate the rule (explain what to fix)\n"
+        "  \"ok\"      — the rule applies and appears satisfied\n"
+        "  \"na\"      — the rule does not apply to this program\n"
+        "  \"unclear\" — cannot tell from the text provided (say what's missing)\n"
+        "Only the overview, headings, and course lists above are available to you — do not "
+        "assume fields you cannot see. Be conservative: prefer \"unclear\"/\"na\" over a "
+        "false \"flag\". Keep each reason to one sentence.")
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "verdict": {"type": "string", "enum": ["flag", "ok", "na", "unclear"]},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["id", "verdict", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["findings"],
+        "additionalProperties": False,
+    }
+
+    import anthropic
+    client = anthropic.Anthropic(api_key=key)
+    try:
+        resp = client.messages.create(
+            model=_LLM_MODEL, max_tokens=4096,
+            output_config={"format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": user}],
+        )
+        raw = next((b.text for b in resp.content if b.type == "text"), "{}")
+    except Exception:
+        # Fallback: no structured-output support — ask for JSON in the prompt.
+        try:
+            resp = client.messages.create(
+                model=_LLM_MODEL, max_tokens=4096,
+                messages=[{"role": "user", "content": user +
+                           "\n\nReturn ONLY a JSON object: "
+                           '{"findings":[{"id","verdict","reason"}, ...]}'}],
+            )
+            raw = next((b.text for b in resp.content if b.type == "text"), "{}")
+            m = re.search(r'\{.*\}', raw, re.S)
+            raw = m.group(0) if m else "{}"
+        except Exception as e:
+            return {'available': False, 'model': _LLM_MODEL,
+                    'reason': f'LLM request failed: {e}'}
+
+    try:
+        parsed = json.loads(raw).get('findings', [])
+    except Exception:
+        parsed = []
+
+    by_id = {p.get('id'): p for p in parsed if isinstance(p, dict)}
+    out_findings = []
+    for r in llm_rules:
+        p = by_id.get(r['id'], {})
+        out_findings.append({
+            'id': r['id'], 'theme': r['theme'], 'severity': r['severity'],
+            'rule': r['rule'],
+            'verdict': p.get('verdict', 'unclear'),
+            'reason': (p.get('reason') or '').strip(),
+        })
+    # Sort so flags surface first, then unclear, then ok/na.
+    order = {'flag': 0, 'unclear': 1, 'ok': 2, 'na': 3}
+    out_findings.sort(key=lambda f: (order.get(f['verdict'], 4), f['id']))
+
+    result = {
+        'program_id': pid, 'name': name,
+        'findings': out_findings,
+        'n_flag': sum(1 for f in out_findings if f['verdict'] == 'flag'),
+        'source': 'live' if live else 'cache',
+    }
+    now = datetime.datetime.now().astimezone().isoformat()
+    conn.execute("INSERT INTO precheck_llm_cache (program_id, content_hash, model, "
+                 "result_json, evaluated_at) VALUES (?,?,?,?,?) "
+                 "ON CONFLICT(program_id) DO UPDATE SET content_hash=excluded.content_hash, "
+                 "model=excluded.model, result_json=excluded.result_json, "
+                 "evaluated_at=excluded.evaluated_at",
+                 (pid, fp, _LLM_MODEL, json.dumps(result), now))
+    conn.commit(); conn.close()
+    result.update({'available': True, 'cached': False, 'model': _LLM_MODEL, 'evaluated_at': now})
+    return result
+
+
 if __name__ == '__main__':
     import sys
+    args = [a for a in sys.argv[1:] if a != '--llm']
+    run_llm = '--llm' in sys.argv
     sess = cim_http.CIMSession()
-    for pid in [int(x) for x in sys.argv[1:]]:
+    for pid in [int(x) for x in args]:
         r = precheck_program(pid, sess)
         print(f"\n=== {pid} {r.get('name','')} @ {r.get('current_step','')} ===")
         for f in r['findings']:
@@ -206,3 +408,11 @@ if __name__ == '__main__':
         if not r['findings']:
             print("  (no deterministic flags)")
         print(f"  + {len(r['review'])} rules to review manually")
+        if run_llm:
+            lr = precheck_llm(pid, sess, force=True)
+            if not lr.get('available'):
+                print(f"  LLM tier unavailable: {lr.get('reason')}")
+            else:
+                print(f"  --- AI review ({lr['model']}, {lr['n_flag']} flag) ---")
+                for f in lr['findings']:
+                    print(f"    [{f['verdict']:7} {f['id']:8}] {f['reason']}")

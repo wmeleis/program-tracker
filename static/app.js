@@ -3200,6 +3200,15 @@ async function loadPrecheckDetail(programId) {
             </div>`;
         }
     }
+    // AI review section (llm judgment rules) — evaluated on demand via Claude.
+    html += `<div id="precheck-llm-${programId}" style="margin-top:12px;border-top:1px solid #eef2f7;padding-top:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <h4 style="margin:0">AI review of judgment rules</h4>
+          <button onclick="event.stopPropagation(); loadPrecheckLLM(${programId}, false)"
+            style="font-size:11px;padding:3px 10px;border:1px solid var(--accent);background:#eff6ff;color:var(--accent);border-radius:6px;cursor:pointer">Run AI review</button>
+        </div>
+        <p style="color:#64748b;font-size:11px;margin:4px 0 0">Uses Claude to evaluate the ~18 judgment rules against this program's overview &amp; structure. Cached per proposal version.</p>
+      </div>`;
     // Extracts to support manual review
     const ex = d.extracts || {};
     html += `<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Overview &amp; headings (for manual review)</summary>`;
@@ -3218,6 +3227,55 @@ async function loadPrecheckDetail(programId) {
     }
     html += '</tbody></table></details></div>';
     el.innerHTML = html;
+}
+
+// AI pass over the judgment (llm) Registrar rules. Renders into the section
+// created by loadPrecheckDetail. Needs the Flask backend + an Anthropic key.
+async function loadPrecheckLLM(programId, force) {
+    const box = document.getElementById(`precheck-llm-${programId}`);
+    if (!box) return;
+    const btn = box.querySelector('button');
+    if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+    let d;
+    try {
+        const resp = await fetch(`/api/program/${programId}/precheck_llm${force ? '?force=1' : ''}`);
+        d = await resp.json();
+    } catch (e) {
+        d = {available: false, reason: e.message};
+    }
+    let h = `<div style="display:flex;align-items:center;gap:8px">
+          <h4 style="margin:0">AI review of judgment rules</h4>`;
+    if (d.available) {
+        h += `<button onclick="event.stopPropagation(); loadPrecheckLLM(${programId}, true)"
+              style="font-size:11px;padding:3px 10px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;cursor:pointer">Re-run</button>
+          <span style="color:#94a3b8;font-size:11px">${d.model}${d.cached ? ' · cached' : ''}</span></div>`;
+        const VER = {
+            flag: ['#fee2e2', '#991b1b', 'FLAG'],
+            unclear: ['#fef9c3', '#854d0e', 'UNCLEAR'],
+            ok: ['#dcfce7', '#166534', 'OK'],
+            na: ['#f1f5f9', '#64748b', 'N/A'],
+        };
+        const nflag = d.n_flag || 0;
+        h += `<p style="font-size:12px;margin:6px 0;color:${nflag ? '#991b1b' : '#166534'}">`
+           + `${nflag ? nflag + ' rule(s) flagged' : 'No judgment rules flagged'} `
+           + `<span style="color:#94a3b8">(${d.findings.length} evaluated)</span></p>`;
+        for (const f of d.findings) {
+            const v = VER[f.verdict] || VER.unclear;
+            const dim = (f.verdict === 'ok' || f.verdict === 'na') ? 'opacity:0.6;' : '';
+            h += `<div style="border-left:3px solid ${v[1]};background:${v[0]}55;padding:5px 10px;margin:0 0 5px;border-radius:0 6px 6px 0;${dim}">
+                <span style="background:${v[0]};color:${v[1]};font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${v[2]}</span>
+                <span style="color:#94a3b8;font-size:11px;margin-left:6px">${f.id} · ${escapeHtml(f.theme)}</span>
+                <div style="font-size:12px;color:#334155;margin-top:2px">${escapeHtml(f.rule)}</div>
+                ${f.reason ? `<div style="font-size:12px;color:${v[1]};margin-top:2px">${escapeHtml(f.reason)}</div>` : ''}
+            </div>`;
+        }
+    } else {
+        h += `</div><p style="color:#b45309;background:#fffbeb;font-size:12px;padding:6px 10px;border-radius:6px;margin:6px 0">
+              ${escapeHtml(d.reason || 'AI review unavailable.')}</p>
+              <button onclick="event.stopPropagation(); loadPrecheckLLM(${programId}, false)"
+                style="font-size:11px;padding:3px 10px;border:1px solid var(--accent);background:#eff6ff;color:var(--accent);border-radius:6px;cursor:pointer">Retry</button>`;
+    }
+    box.innerHTML = h;
 }
 
 // Normalize whitespace: collapse all types (including &nbsp;) to single spaces,
