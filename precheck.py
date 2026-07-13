@@ -165,6 +165,14 @@ def precheck_program(pid, sess=None):
     if m:
         flag('SH-3', "States a maximum number of hours (catalog publishes only the minimum).", m.group(0))
 
+    # SH-2 — a restricted-elective CHOICE requirement stated as a range
+    # ("Complete 6–8 SH from the following") instead of "at least N SH".
+    m = re.search(r'(\d+\s*[–-]\s*\d+)\s*(?:SH|semester hours?)[^.]{0,40}?(?:from the following|choose|select)',
+                  text, re.I)
+    if m:
+        flag('SH-2', "A choice/restricted-elective requirement uses a credit RANGE "
+             f"(\"{m.group(0).strip()[:60]}\") — use \"at least N SH\" / \"a minimum of N SH\".", m.group(0))
+
     # SH-1 / SH-7 — a credit RANGE in a program-total / requirement context (not Align/Bridge/Connect)
     if not _VARIANT.search(name):
         rng = None
@@ -239,10 +247,12 @@ def precheck_program(pid, sess=None):
         # conflates per-course credits with group/requirement totals, so it can't
         # be compared to the catalog reliably. Needs a structural courselist parser.)
 
-        # HYG-5 — a listed course is deactivated in the catalog AS OF the program's
-        # effective term. Deactivations are future-dated, so compare the course's
-        # `inactive_as_of` term against the program's eff_term (skip if we can't
-        # tell — no program term, or the course's final run is still Active).
+        # HYG-5 (also covers CONC-3) — a listed course is deactivated in the catalog
+        # AS OF the program's effective term. Checks every course code regardless of
+        # section, so inactive courses inside a concentration (CONC-3) are caught too.
+        # Deactivations are future-dated, so compare the course's `inactive_as_of`
+        # term against the program's eff_term (skip if we can't tell — no program
+        # term, or the course's final run is still Active).
         prog_term = (row.get('eff_term') or '').strip()
         if prog_term:
             inactive = sorted({code for r in crows for code in r['codes']
@@ -262,16 +272,16 @@ def precheck_program(pid, sess=None):
                  f"— confirm they belong (0-credit thesis/research courses award no elective hours).")
 
     # ---- review checklist: human / data rules not (yet) auto-implemented ----
-    AUTO_DONE = {'CAT-1', 'CAT-2', 'SH-4', 'SH-3', 'SH-1', 'SH-7', 'STRUCT-5',
+    AUTO_DONE = {'CAT-1', 'CAT-2', 'SH-4', 'SH-3', 'SH-2', 'SH-1', 'SH-7', 'STRUCT-5',
                  'HYG-2', 'HYG-5', 'ROUTE-3', 'HYG-1', 'SETUP-1', 'TITLE-2',
-                 'TITLE-1', 'THESIS-1'}
-    # 'llm' rules are now evaluated by the AI review pass (precheck_llm), so they
-    # are NOT listed here — only rules neither tier covers: 'data' (CIM-data
-    # lookups not yet automated) and 'human' (need human/calendar context).
+                 'TITLE-1', 'THESIS-1', 'CONC-3'}
+    # Everything not deterministically flagged (AUTO_DONE) and not covered by the
+    # AI review ('llm') belongs on the manual checklist — that includes 'auto'
+    # rules we haven't built a detector for yet, plus 'data'/'human' rules.
     review = [{'id': r['id'], 'theme': r['theme'], 'severity': r['severity'],
                'method': r.get('check_method', ''), 'rule': r['rule']}
               for r in rules.values()
-              if r['id'] not in AUTO_DONE and r.get('check_method') in ('data', 'human')]
+              if r['id'] not in AUTO_DONE and r.get('check_method') != 'llm']
     review.sort(key=lambda r: (r['method'], r['id']))
 
     return {
