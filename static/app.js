@@ -5073,6 +5073,16 @@ async function discGenerate() {
 // ---- SVT dispositions editor (Flask-local tool) ----
 let _svtDispRows = [];
 let _svtCimPrograms = [];
+let _svtCimNameById = {};   // id → program name (for initializing the picker)
+let _svtCimIdByName = {};   // program name → id (to resolve a picked name)
+
+function _buildSvtCimMaps() {
+    _svtCimNameById = {}; _svtCimIdByName = {};
+    for (const p of _svtCimPrograms) {
+        _svtCimNameById[String(p.id)] = p.name;
+        _svtCimIdByName[p.name] = String(p.id);
+    }
+}
 
 async function loadSvtDispositions() {
     const bodyEl = document.getElementById('svt-disp-body');
@@ -5082,6 +5092,7 @@ async function loadSvtDispositions() {
         const data = await resp.json();
         _svtDispRows = data.rows || [];
         _svtCimPrograms = data.cim_programs || [];
+        _buildSvtCimMaps();
         renderSvtDispositions();
         const s = document.getElementById('svt-disp-search');
         const f = document.getElementById('svt-disp-filter');
@@ -5182,11 +5193,12 @@ function renderSvtDispositions() {
         html += _renderSvtDispRow(r);
     }
     html += '</tbody></table>';
-    // Datalist of CIM programs for the concentration parent picker (value = id,
-    // label shows the name). Built once.
-    html += '<datalist id="svt-cim-list">';
+    // Datalist of CIM program NAMES for the program picker (Existing program /
+    // Concentration parent). The user types/selects a name; the row wiring
+    // resolves it back to the CIM id via _svtCimIdByName. Built once.
+    html += '<datalist id="svt-cim-names">';
     for (const p of _svtCimPrograms) {
-        html += `<option value="${p.id}">${escapeHtml(p.name)}</option>`;
+        html += `<option value="${escapeHtml(p.name)}"></option>`;
     }
     html += '</datalist>';
     bodyEl.innerHTML = html;
@@ -5196,17 +5208,23 @@ function renderSvtDispositions() {
 function _renderSvtDispRow(r) {
     const k = r.svt_key;
     const disp = r.disposition || 'auto';
-    // Disposition is a two-step control: mode (Auto | Edit) and, when Edit, a
-    // type (Program | Concentration | Non-Program). Stored value maps back:
-    //   auto/pending → Auto;  program/concentration/non_program → Edit + that type.
-    const mode = ['program', 'concentration', 'non_program'].includes(disp) ? 'edit' : 'auto';
-    const type = (disp === 'concentration' || disp === 'non_program') ? disp : 'program';
+    // Disposition is a two-step control: mode (Auto | Edit) and, when Edit, a type.
+    // Stored value maps back: auto/pending → Auto; match/concentration/program/
+    // non_program → Edit + that type. Default type when switching to Edit = match
+    // (Existing program).
+    const EDIT_TYPES = ['match', 'concentration', 'program', 'non_program'];
+    const mode = EDIT_TYPES.includes(disp) ? 'edit' : 'auto';
+    const type = EDIT_TYPES.includes(disp) ? disp : 'match';
     const detail = r.outcome_detail ? `<div style="color:#94a3b8;font-size:10px">${escapeHtml(r.outcome_detail)}</div>` : '';
-    // Parent picker (Edit → Concentration) — a datalist of CIM programs.
+    // Program picker — a searchable name list shared by "Existing program" (match)
+    // and "Concentration" (parent). The visible input shows/searches the program
+    // NAME; a hidden .svt-parent holds the CIM id that save reads.
     const parentVal = r.parent_cim_id || '';
-    const showParent = mode === 'edit' && type === 'concentration';
+    const parentName = _svtCimNameById[String(parentVal)] || '';
+    const showPicker = mode === 'edit' && (type === 'match' || type === 'concentration');
     const showProg   = mode === 'edit' && type === 'program';
-    const parentPick = `<input list="svt-cim-list" class="svt-parent" data-k="${k}" value="${parentVal}" placeholder="parent CIM id" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;display:${showParent?'inline-block':'none'}">`;
+    const parentPick = `<input list="svt-cim-names" class="svt-cim-name" data-k="${k}" value="${escapeHtml(parentName)}" placeholder="search CIM program…" style="width:230px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;display:${showPicker?'inline-block':'none'}">
+        <input type="hidden" class="svt-parent" data-k="${k}" value="${parentVal}">`;
     const progFields = `<span class="svt-progfields" data-k="${k}" style="display:${showProg?'inline-flex':'none'};gap:4px">
         <input class="svt-oname" data-k="${k}" value="${escapeHtml(r.override_name||'')}" placeholder="name" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
         <input class="svt-odeg" data-k="${k}" value="${escapeHtml(r.override_degree||'')}" placeholder="degree" style="width:60px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
@@ -5236,8 +5254,9 @@ function _renderSvtDispRow(r) {
                 <option value="edit"${mode==='edit'?' selected':''}>Edit</option>
             </select>
             <select class="svt-disp-type" data-k="${k}" style="width:140px;margin-top:4px;padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px;display:${mode==='edit'?'block':'none'}">
-                <option value="program"${type==='program'?' selected':''}>Program</option>
+                <option value="match"${type==='match'?' selected':''}>Existing program</option>
                 <option value="concentration"${type==='concentration'?' selected':''}>Concentration</option>
+                <option value="program"${type==='program'?' selected':''}>New program</option>
                 <option value="non_program"${type==='non_program'?' selected':''}>Non-Program</option>
             </select>
         </td>
@@ -5251,17 +5270,23 @@ function _renderSvtDispRow(r) {
 function _svtWireRow(k) {
     const modeSel = document.querySelector(`.svt-disp-mode[data-k="${CSS.escape(k)}"]`);
     const typeSel = document.querySelector(`.svt-disp-type[data-k="${CSS.escape(k)}"]`);
+    const nameInput = document.querySelector(`.svt-cim-name[data-k="${CSS.escape(k)}"]`);
     const sync = () => {
         const edit = modeSel && modeSel.value === 'edit';
-        const type = typeSel ? typeSel.value : 'program';
+        const type = typeSel ? typeSel.value : 'match';
         if (typeSel) typeSel.style.display = edit ? 'block' : 'none';
-        const pp = document.querySelector(`.svt-parent[data-k="${CSS.escape(k)}"]`);
         const pf = document.querySelector(`.svt-progfields[data-k="${CSS.escape(k)}"]`);
-        if (pp) pp.style.display = (edit && type === 'concentration') ? 'inline-block' : 'none';
+        // The program name picker serves both "Existing program" and "Concentration".
+        if (nameInput) nameInput.style.display = (edit && (type === 'match' || type === 'concentration')) ? 'inline-block' : 'none';
         if (pf) pf.style.display = (edit && type === 'program') ? 'inline-flex' : 'none';
     };
     if (modeSel) modeSel.onchange = sync;
     if (typeSel) typeSel.onchange = sync;
+    // Resolve the picked/typed program name back to its CIM id in the hidden field.
+    if (nameInput) nameInput.oninput = () => {
+        const hidden = document.querySelector(`.svt-parent[data-k="${CSS.escape(k)}"]`);
+        if (hidden) hidden.value = _svtCimIdByName[nameInput.value] || '';
+    };
     const btn = document.querySelector(`.svt-save[data-k="${CSS.escape(k)}"]`);
     if (btn) btn.onclick = () => svtSaveRow(k, btn);
 }

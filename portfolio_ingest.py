@@ -3225,6 +3225,24 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
                                     'reason': (ov.get('note') or 'Held for analysis (manual)')})
                 _svt_resolve(svt_key, 'pending', 'manual')
                 continue
+            if disp == 'match' and ov.get('parent_cim_id'):
+                # Link this SVT entry to an existing CIM program chosen by the
+                # user (by id) — same effect as an auto match, applied manually.
+                _pid = ov['parent_cim_id']
+                _row = cim_id_index.get(int(_pid)) if str(_pid).isdigit() else None
+                if _row is not None:
+                    n_svt_matched += 1
+                    _apply_svt_fields(_row, p)
+                    _new_col = _normalize_college(p.get('college') or '')
+                    if not _row.get('college') and _new_col:
+                        _row['college'] = _new_col
+                    _svt_resolve(svt_key, 'matched', f"{_row.get('program_name', '')} (manual)")
+                    continue
+                svt_pending.append({'source_name': original_name, 'campus': p.get('campus', ''),
+                                    'svt_key': svt_key,
+                                    'reason': 'Manual map-to-program, but CIM id not found'})
+                _svt_resolve(svt_key, 'pending', 'target not found')
+                continue
             if disp == 'concentration' and ov.get('parent_cim_id'):
                 _par = _attach_conc_to_parent(original_name, ov['parent_cim_id'], p)
                 if _par is not None:
