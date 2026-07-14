@@ -5140,6 +5140,14 @@ const _SVT_OUTCOME_BADGE = {
     mismatch:      ['#fee2e2', '#991b1b', 'Unknown'],
 };
 
+// Append " (Campus)" to a label unless the campus name already appears in it —
+// used for both the SVT entry and the mapping-status guess so campus is explicit.
+function _campusParen(text, campus) {
+    text = text || '';
+    if (!campus || text.toLowerCase().includes(campus.toLowerCase())) return text;
+    return `${text} (${campus})`;
+}
+
 function _svtBadge(outcome) {
     const b = _SVT_OUTCOME_BADGE[outcome] || ['#f1f5f9', '#475569', outcome || '—'];
     return `<span style="background:${b[0]};color:${b[1]};font-size:11px;padding:2px 7px;border-radius:10px;white-space:nowrap">${b[2]}</span>`;
@@ -5215,7 +5223,7 @@ function _renderSvtDispRow(r) {
     const EDIT_TYPES = ['match', 'concentration', 'program', 'non_program'];
     const mode = EDIT_TYPES.includes(disp) ? 'edit' : 'auto';
     const type = EDIT_TYPES.includes(disp) ? disp : 'match';
-    const detail = r.outcome_detail ? `<div style="color:#94a3b8;font-size:10px">${escapeHtml(r.outcome_detail)}</div>` : '';
+    const detail = r.outcome_detail ? `<div style="color:#94a3b8;font-size:10px">${escapeHtml(_campusParen(r.outcome_detail, r.campus))}</div>` : '';
     // Program picker — a searchable name list shared by "Existing program" (match)
     // and "Concentration" (parent). The visible input shows/searches the program
     // NAME; a hidden .svt-parent holds the CIM id that save reads.
@@ -5246,7 +5254,7 @@ function _renderSvtDispRow(r) {
         ? 'border-top:1px solid #e2e8f0;border-left:3px solid #f59e0b;background:#fffdf5'
         : 'border-top:1px solid #e2e8f0';
     return `<tr style="${rowStyle}" data-k="${k}">
-        <td style="padding:5px 8px"><div>${escapeHtml(r.name)}${chip}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}${r.campus?' · '+escapeHtml(r.campus):''}</div></td>
+        <td style="padding:5px 8px"><div>${escapeHtml(_campusParen(r.name, r.campus))}${chip}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}</div></td>
         <td style="padding:5px 8px">${_svtBadge(r.outcome)}${detail}</td>
         <td style="padding:5px 8px">
             <select class="svt-disp-mode" data-k="${k}" style="width:140px;padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
