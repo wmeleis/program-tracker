@@ -5135,7 +5135,7 @@ const _SVT_OUTCOME_BADGE = {
     matched:       ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
     concentration: ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
     non_program:   ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
-    added:         ['#fef3c7', '#92400e', 'Low-Confidence Auto Match'],
+    added:         ['#fef3c7', '#92400e', 'New — Not in CIM'],
     pending:       ['#fee2e2', '#991b1b', 'Unknown'],
     mismatch:      ['#fee2e2', '#991b1b', 'Unknown'],
 };
