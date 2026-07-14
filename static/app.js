@@ -5132,9 +5132,9 @@ function svtMarkAllShownReviewed() {
 // couldn't be classified. Stored outcome values are unchanged — display only.
 // The detail line under the badge disambiguates (e.g. "under <parent>").
 const _SVT_OUTCOME_BADGE = {
-    matched:       ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
-    concentration: ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
-    non_program:   ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
+    matched:       ['#dcfce7', '#166534', 'High-Confidence Auto Match to CIM'],
+    concentration: ['#dcfce7', '#166534', 'High-Confidence Auto Match to CIM'],
+    non_program:   ['#dcfce7', '#166534', 'High-Confidence Auto Match to CIM'],
     added:         ['#fef3c7', '#92400e', 'New — Not in CIM'],
     pending:       ['#fee2e2', '#991b1b', 'Unknown'],
     mismatch:      ['#fee2e2', '#991b1b', 'Unknown'],
