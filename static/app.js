@@ -5223,7 +5223,7 @@ function _renderSvtDispRow(r) {
     const parentName = _svtCimNameById[String(parentVal)] || '';
     const showPicker = mode === 'edit' && (type === 'match' || type === 'concentration');
     const showProg   = mode === 'edit' && type === 'program';
-    const parentPick = `<input list="svt-cim-names" class="svt-cim-name" data-k="${k}" value="${escapeHtml(parentName)}" placeholder="search CIM program…" style="width:230px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;display:${showPicker?'inline-block':'none'}">
+    const parentPick = `<input list="svt-cim-names" class="svt-cim-name" data-k="${k}" value="${escapeHtml(parentName)}" placeholder="search CIM program…" style="width:360px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;display:${showPicker?'inline-block':'none'}">
         <input type="hidden" class="svt-parent" data-k="${k}" value="${parentVal}">`;
     const progFields = `<span class="svt-progfields" data-k="${k}" style="display:${showProg?'inline-flex':'none'};gap:4px">
         <input class="svt-oname" data-k="${k}" value="${escapeHtml(r.override_name||'')}" placeholder="name" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
