@@ -5115,16 +5115,18 @@ function svtMarkAllShownReviewed() {
     svtMarkReviewed(keys);
 }
 
-// 'pending' and 'mismatch' are distinct stored outcomes but both mean the same
-// thing to the reviewer — the entry needs manual editing — so they share the
-// "edit" badge. (Values stay distinct in the DB; only the display merges.)
+// Mapping status = the auto-classifier's result, collapsed to three confidence
+// buckets (capitalized). matched/concentration/non_program are all confident
+// classifications the user just confirms; added is a best guess; pending/mismatch
+// couldn't be classified. Stored outcome values are unchanged — display only.
+// The detail line under the badge disambiguates (e.g. "under <parent>").
 const _SVT_OUTCOME_BADGE = {
-    matched:       ['#dcfce7', '#166534', 'matched'],
-    added:         ['#dbeafe', '#1e40af', 'added'],
-    concentration: ['#f3e8ff', '#6b21a8', 'concentration'],
-    pending:       ['#fef3c7', '#92400e', 'edit'],
-    non_program:   ['#f1f5f9', '#475569', 'non-program'],
-    mismatch:      ['#fef3c7', '#92400e', 'edit'],
+    matched:       ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
+    concentration: ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
+    non_program:   ['#dcfce7', '#166534', 'High-Confidence Auto Match'],
+    added:         ['#fef3c7', '#92400e', 'Low-Confidence Auto Match'],
+    pending:       ['#fee2e2', '#991b1b', 'Unknown'],
+    mismatch:      ['#fee2e2', '#991b1b', 'Unknown'],
 };
 
 function _svtBadge(outcome) {
@@ -5146,7 +5148,9 @@ function renderSvtDispositions() {
         // of this queue until it next changes (then it re-appears). Matched /
         // concentration / non-program are resolved, so they never show here.
         if (filter === 'attention') return ['added','pending','mismatch'].includes(r.outcome) && r.flagged;
-        if (filter === 'edit') return ['pending','mismatch'].includes(r.outcome);
+        if (filter === 'highconf') return ['matched','concentration','non_program'].includes(r.outcome);
+        if (filter === 'lowconf') return r.outcome === 'added';
+        if (filter === 'unknown') return ['pending','mismatch'].includes(r.outcome);
         if (filter === 'flagged') return r.flagged;
         if (filter === 'overridden') return r.disposition !== 'auto';
         return r.outcome === filter;
@@ -5170,7 +5174,7 @@ function renderSvtDispositions() {
     html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     html += `<thead><tr style="background:#f8fafc;text-align:left">
         <th style="padding:4px 8px">SVT entry</th>
-        <th style="padding:4px 8px">Now</th>
+        <th style="padding:4px 8px">Mapping status</th>
         <th style="padding:4px 8px">Disposition</th>
         <th style="padding:4px 8px">Details</th>
         <th style="padding:4px 8px"></th></tr></thead><tbody>`;
@@ -5192,12 +5196,18 @@ function renderSvtDispositions() {
 function _renderSvtDispRow(r) {
     const k = r.svt_key;
     const disp = r.disposition || 'auto';
-    const opt = (v, label) => `<option value="${v}"${disp===v?' selected':''}>${label}</option>`;
+    // Disposition is a two-step control: mode (Auto | Edit) and, when Edit, a
+    // type (Program | Concentration | Non-Program). Stored value maps back:
+    //   auto/pending → Auto;  program/concentration/non_program → Edit + that type.
+    const mode = ['program', 'concentration', 'non_program'].includes(disp) ? 'edit' : 'auto';
+    const type = (disp === 'concentration' || disp === 'non_program') ? disp : 'program';
     const detail = r.outcome_detail ? `<div style="color:#94a3b8;font-size:10px">${escapeHtml(r.outcome_detail)}</div>` : '';
-    // Parent picker (concentration) — a datalist of CIM programs.
+    // Parent picker (Edit → Concentration) — a datalist of CIM programs.
     const parentVal = r.parent_cim_id || '';
-    const parentPick = `<input list="svt-cim-list" class="svt-parent" data-k="${k}" value="${parentVal}" placeholder="parent CIM id" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;display:${disp==='concentration'?'inline-block':'none'}">`;
-    const progFields = `<span class="svt-progfields" data-k="${k}" style="display:${disp==='program'?'inline-flex':'none'};gap:4px">
+    const showParent = mode === 'edit' && type === 'concentration';
+    const showProg   = mode === 'edit' && type === 'program';
+    const parentPick = `<input list="svt-cim-list" class="svt-parent" data-k="${k}" value="${parentVal}" placeholder="parent CIM id" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px;display:${showParent?'inline-block':'none'}">`;
+    const progFields = `<span class="svt-progfields" data-k="${k}" style="display:${showProg?'inline-flex':'none'};gap:4px">
         <input class="svt-oname" data-k="${k}" value="${escapeHtml(r.override_name||'')}" placeholder="name" style="width:120px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
         <input class="svt-odeg" data-k="${k}" value="${escapeHtml(r.override_degree||'')}" placeholder="degree" style="width:60px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
         <input class="svt-ocampus" data-k="${k}" value="${escapeHtml(r.override_campus||'')}" placeholder="campus" style="width:80px;padding:3px 5px;font-size:11px;border:1px solid #cbd5e1;border-radius:5px">
@@ -5221,8 +5231,14 @@ function _renderSvtDispRow(r) {
         <td style="padding:5px 8px"><div>${escapeHtml(r.name)}${chip}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}${r.campus?' · '+escapeHtml(r.campus):''}</div></td>
         <td style="padding:5px 8px">${_svtBadge(r.outcome)}${detail}</td>
         <td style="padding:5px 8px">
-            <select class="svt-disp-sel" data-k="${k}" style="padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
-                ${opt('auto','Auto')}${opt('program','Program')}${opt('concentration','Concentration')}${opt('non_program','Non-program')}${opt('pending','Edit')}
+            <select class="svt-disp-mode" data-k="${k}" style="padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
+                <option value="auto"${mode==='auto'?' selected':''}>Auto</option>
+                <option value="edit"${mode==='edit'?' selected':''}>Edit</option>
+            </select>
+            <select class="svt-disp-type" data-k="${k}" style="margin-top:4px;padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px;display:${mode==='edit'?'block':'none'}">
+                <option value="program"${type==='program'?' selected':''}>Program</option>
+                <option value="concentration"${type==='concentration'?' selected':''}>Concentration</option>
+                <option value="non_program"${type==='non_program'?' selected':''}>Non-Program</option>
             </select>
         </td>
         <td style="padding:5px 8px">${parentPick}${progFields}
@@ -5233,23 +5249,30 @@ function _renderSvtDispRow(r) {
 }
 
 function _svtWireRow(k) {
-    const sel = document.querySelector(`.svt-disp-sel[data-k="${CSS.escape(k)}"]`);
-    if (sel) sel.onchange = () => {
-        const v = sel.value;
+    const modeSel = document.querySelector(`.svt-disp-mode[data-k="${CSS.escape(k)}"]`);
+    const typeSel = document.querySelector(`.svt-disp-type[data-k="${CSS.escape(k)}"]`);
+    const sync = () => {
+        const edit = modeSel && modeSel.value === 'edit';
+        const type = typeSel ? typeSel.value : 'program';
+        if (typeSel) typeSel.style.display = edit ? 'block' : 'none';
         const pp = document.querySelector(`.svt-parent[data-k="${CSS.escape(k)}"]`);
         const pf = document.querySelector(`.svt-progfields[data-k="${CSS.escape(k)}"]`);
-        if (pp) pp.style.display = v === 'concentration' ? 'inline-block' : 'none';
-        if (pf) pf.style.display = v === 'program' ? 'inline-flex' : 'none';
+        if (pp) pp.style.display = (edit && type === 'concentration') ? 'inline-block' : 'none';
+        if (pf) pf.style.display = (edit && type === 'program') ? 'inline-flex' : 'none';
     };
+    if (modeSel) modeSel.onchange = sync;
+    if (typeSel) typeSel.onchange = sync;
     const btn = document.querySelector(`.svt-save[data-k="${CSS.escape(k)}"]`);
     if (btn) btn.onclick = () => svtSaveRow(k, btn);
 }
 
 async function svtSaveRow(k, btn) {
     const val = sel => document.querySelector(`${sel}[data-k="${CSS.escape(k)}"]`)?.value || '';
+    // Auto → 'auto'; Edit → the chosen type (program|concentration|non_program).
+    const disposition = val('.svt-disp-mode') === 'edit' ? val('.svt-disp-type') : 'auto';
     const payload = {
         svt_key: k,
-        disposition: val('.svt-disp-sel'),
+        disposition,
         parent_cim_id: val('.svt-parent'),
         override_name: val('.svt-oname'),
         override_degree: val('.svt-odeg'),
