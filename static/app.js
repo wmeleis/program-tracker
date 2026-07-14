@@ -5115,13 +5115,16 @@ function svtMarkAllShownReviewed() {
     svtMarkReviewed(keys);
 }
 
+// 'pending' and 'mismatch' are distinct stored outcomes but both mean the same
+// thing to the reviewer — the entry needs manual editing — so they share the
+// "edit" badge. (Values stay distinct in the DB; only the display merges.)
 const _SVT_OUTCOME_BADGE = {
     matched:       ['#dcfce7', '#166534', 'matched'],
     added:         ['#dbeafe', '#1e40af', 'added'],
     concentration: ['#f3e8ff', '#6b21a8', 'concentration'],
-    pending:       ['#fef3c7', '#92400e', 'pending'],
+    pending:       ['#fef3c7', '#92400e', 'edit'],
     non_program:   ['#f1f5f9', '#475569', 'non-program'],
-    mismatch:      ['#fee2e2', '#991b1b', 'mismatch'],
+    mismatch:      ['#fef3c7', '#92400e', 'edit'],
 };
 
 function _svtBadge(outcome) {
@@ -5141,6 +5144,7 @@ function renderSvtDispositions() {
         // non-program are resolved (even when set by hand), so they're excluded
         // here — review manual overrides via the "Manually set" filter instead.
         if (filter === 'attention') return ['added','pending','mismatch'].includes(r.outcome);
+        if (filter === 'edit') return ['pending','mismatch'].includes(r.outcome);
         if (filter === 'flagged') return r.flagged;
         if (filter === 'overridden') return r.disposition !== 'auto';
         return r.outcome === filter;
@@ -5216,7 +5220,7 @@ function _renderSvtDispRow(r) {
         <td style="padding:5px 8px">${_svtBadge(r.outcome)}${detail}</td>
         <td style="padding:5px 8px">
             <select class="svt-disp-sel" data-k="${k}" style="padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
-                ${opt('auto','Auto')}${opt('program','Program')}${opt('concentration','Concentration')}${opt('non_program','Non-program')}${opt('pending','Pending')}
+                ${opt('auto','Auto')}${opt('program','Program')}${opt('concentration','Concentration')}${opt('non_program','Non-program')}${opt('pending','Edit')}
             </select>
         </td>
         <td style="padding:5px 8px">${parentPick}${progFields}
@@ -5449,7 +5453,7 @@ function renderConsoleContent(data) {
     }
 
     const svtPending = mm.svt_pending_analysis || [];
-    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">SVT concentrations pending analysis (${svtPending.length})</h4>`;
+    html += `<h4 style="margin:0 0 4px;font-size:13px;color:#92400e">SVT concentrations needing edits (${svtPending.length})</h4>`;
     html += '<p style="color:#64748b;font-size:11px;margin:0 0 6px">Concentration proposals whose parent program is unclear or that bundle multiple concentrations — held out of the portfolio until a parent is assigned.</p>';
     if (!svtPending.length) {
         html += '<p style="color:#64748b;font-size:12px;margin:0 0 12px">None.</p>';
