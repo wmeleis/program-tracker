@@ -5140,10 +5140,12 @@ function renderSvtDispositions() {
     let rows = _svtDispRows.filter(r => {
         if (q && !(`${r.name} ${r.svt_key}`.toLowerCase().includes(q))) return false;
         if (filter === 'all') return true;
-        // "Needs attention" = unresolved outcomes only. Matched / concentration /
-        // non-program are resolved (even when set by hand), so they're excluded
-        // here — review manual overrides via the "Manually set" filter instead.
-        if (filter === 'attention') return ['added','pending','mismatch'].includes(r.outcome);
+        // "Needs attention" = an unresolved outcome (added / pending / mismatch)
+        // that hasn't been confirmed yet. `flagged` is true when the row is new
+        // or changed since it was last reviewed, so confirming a row drops it out
+        // of this queue until it next changes (then it re-appears). Matched /
+        // concentration / non-program are resolved, so they never show here.
+        if (filter === 'attention') return ['added','pending','mismatch'].includes(r.outcome) && r.flagged;
         if (filter === 'edit') return ['pending','mismatch'].includes(r.outcome);
         if (filter === 'flagged') return r.flagged;
         if (filter === 'overridden') return r.disposition !== 'auto';
