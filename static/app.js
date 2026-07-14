@@ -5231,11 +5231,11 @@ function _renderSvtDispRow(r) {
         <td style="padding:5px 8px"><div>${escapeHtml(r.name)}${chip}</div><div style="color:#94a3b8;font-size:10px">${escapeHtml(r.svt_key)}${r.campus?' · '+escapeHtml(r.campus):''}</div></td>
         <td style="padding:5px 8px">${_svtBadge(r.outcome)}${detail}</td>
         <td style="padding:5px 8px">
-            <select class="svt-disp-mode" data-k="${k}" style="padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
+            <select class="svt-disp-mode" data-k="${k}" style="width:140px;padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px">
                 <option value="auto"${mode==='auto'?' selected':''}>Auto</option>
                 <option value="edit"${mode==='edit'?' selected':''}>Edit</option>
             </select>
-            <select class="svt-disp-type" data-k="${k}" style="margin-top:4px;padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px;display:${mode==='edit'?'block':'none'}">
+            <select class="svt-disp-type" data-k="${k}" style="width:140px;margin-top:4px;padding:3px 6px;font-size:12px;border:1px solid #cbd5e1;border-radius:5px;display:${mode==='edit'?'block':'none'}">
                 <option value="program"${type==='program'?' selected':''}>Program</option>
                 <option value="concentration"${type==='concentration'?' selected':''}>Concentration</option>
                 <option value="non_program"${type==='non_program'?' selected':''}>Non-Program</option>
