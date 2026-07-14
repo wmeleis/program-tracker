@@ -1320,6 +1320,22 @@ _MULTI_PROG_DEGREE_RE = re.compile(
 )
 
 
+# SVT mapping is graduate-only. An entry is undergraduate when its degree token is
+# a bachelor's/minor/undergrad-certificate, or the name says "Bachelor of…" /
+# "Pre-…" / "Minor" / "Undergraduate Certificate". Ambiguous → graduate (kept).
+# Definition confirmed with Waleed 2026-07-13.
+_UNDERGRAD_RE = re.compile(
+    r'bachelor of|bachelor\'s|'
+    r'\b(BS|BA|BFA|BSc|BSN|BSBA|BSCS|BArch|BSE|BSChE|BSEnvE|B\.S\.|B\.A\.)\b|'
+    r'\bpre-|\bminor\b|undergraduate certificate', re.I)
+
+
+def is_undergrad_svt(name):
+    """True if an SVT entry is an undergraduate program (out of scope for the
+    graduate-only SVT→CIM mapping)."""
+    return bool(_UNDERGRAD_RE.search(name or ''))
+
+
 def _is_non_program(name):
     """Return True if the entry is clearly not an academic degree program."""
     if _NON_PROGRAM_RE.search(name):
@@ -2863,6 +2879,7 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     gls_mismatches = []
     non_programs   = []  # entries from SVT/IPD that are clearly not degree programs
     svt_pending    = []  # SVT concentration proposals awaiting parent identification
+    svt_undergrad  = []  # SVT undergraduate entries — mapping is graduate-only (skipped)
 
 
     # ─── Concentration-proposal preprocessor helpers ───────────────────────
@@ -3205,6 +3222,16 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
 
         code = (p.get('program_code') or '').strip().upper()
         svt_key = p.get('svt_key', '')
+
+        # ── Graduate-only gate (highest precedence) ───────────────────────────
+        # SVT mapping applies only to graduate programs. Undergraduate entries
+        # are skipped entirely (not matched / added / held) and logged to an
+        # auditable bucket. Confirmed with Waleed 2026-07-13.
+        if is_undergrad_svt(original_name):
+            svt_undergrad.append({'source_name': original_name,
+                                  'campus': p.get('campus', ''), 'svt_key': svt_key})
+            _svt_resolve(svt_key, 'undergrad', 'undergraduate — mapping is graduate-only')
+            continue
 
         # ── Manual disposition override (highest precedence) ──────────────────
         # A user-set row in svt_overrides wins over every heuristic below.
@@ -4298,11 +4325,13 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         _om   = _dedup(sorted(otp_mismatches, key=lambda x: x['source_name']), 'source_name')
         _gm   = _dedup(sorted(gls_mismatches, key=lambda x: x.get('source_name', '')), 'source_name')
         _sp   = _dedup(sorted(svt_pending,    key=lambda x: x['source_name']), 'source_name', 'campus')
+        _su   = _dedup(sorted(svt_undergrad,  key=lambda x: x['source_name']), 'source_name', 'campus')
         _mismatch_data = {
             'updated_at':     now,
             'non_programs':   _np,
             'svt_added':      _sa,
             'svt_pending_analysis': _sp,
+            'svt_undergrad_skipped': _su,
             'svt_resolution': svt_resolution,
             'svt_mismatches': _sm,
             'ipd_mismatches': _im,

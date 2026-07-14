@@ -1803,8 +1803,13 @@ def api_svt_overrides_get():
             resolution = _json.load(f).get('svt_resolution', {})
     except Exception:
         pass
+    from portfolio_ingest import is_undergrad_svt
     rows = []
     for p in parse_svt():
+        # SVT mapping is graduate-only — undergraduate entries are out of scope
+        # and hidden from the Mappings tab (matches the ingest's graduate-only gate).
+        if is_undergrad_svt(p.get('program_name', '')):
+            continue
         key = p.get('svt_key', '')
         ov = overrides.get(key, {})
         res = resolution.get(key, {})
