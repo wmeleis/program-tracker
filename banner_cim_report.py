@@ -34,31 +34,54 @@ def _credential(conn, cim_code, program):
     return tail
 
 
-def generate():
-    with open(_MISMATCHES) as f:
-        cm = json.load(f).get('banner_reconciliation', {}).get('code_mismatch', []) or []
-    conn = sqlite3.connect(_DB)
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = 'Banner-CIM code mismatch'
-    headers = ['Program', 'Credential', 'CIM Code', 'Banner Code(s)']
-    ws.append(headers)
-    hfill = PatternFill('solid', fgColor='1F3864')
+_HFILL = PatternFill('solid', fgColor='1F3864')
+
+
+def _style_header(ws):
     for c in ws[1]:
         c.font = Font(bold=True, color='FFFFFF')
-        c.fill = hfill
+        c.fill = _HFILL
+    ws.freeze_panes = 'A2'
+
+
+def generate():
+    with open(_MISMATCHES) as f:
+        br = json.load(f).get('banner_reconciliation', {})
+    cm = br.get('code_mismatch', []) or []
+    cd = br.get('campus_diff', []) or []
+    conn = sqlite3.connect(_DB)
+    wb = openpyxl.Workbook()
+
+    # Sheet 1 — code mismatch
+    ws = wb.active
+    ws.title = 'Banner-CIM code mismatch'
+    ws.append(['Program', 'Credential', 'CIM Code', 'Banner Code(s)'])
+    _style_header(ws)
     for e in sorted(cm, key=lambda x: x.get('program', '')):
         prog = e.get('program', '')
         ws.append([prog, _credential(conn, e.get('cim_code', ''), prog),
                    e.get('cim_code', ''), e.get('banner_code', '')])
-    widths = [46, 16, 16, 60]
-    for i, w in enumerate(widths, 1):
+    for i, w in enumerate([46, 16, 16, 60], 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
-    ws.freeze_panes = 'A2'
+
+    # Sheet 2 — campus differences (per program: where Banner and CIM disagree)
+    ws2 = wb.create_sheet('Campus differences')
+    ws2.append(['Program (all campuses)', 'Only in Banner', 'Only in CIM',
+                'Banner campuses', 'CIM campuses'])
+    _style_header(ws2)
+    for e in sorted(cd, key=lambda x: x.get('program', '')):
+        ws2.append([e.get('program', ''),
+                    ', '.join(e.get('only_banner', [])) or '—',
+                    ', '.join(e.get('only_portfolio', [])) or '—',
+                    ', '.join(e.get('banner_campuses', [])),
+                    ', '.join(e.get('cim_campuses', []))])
+    for i, w in enumerate([46, 22, 22, 42, 42], 1):
+        ws2.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
     wb.save(_OUT)
     conn.close()
-    print(f"Wrote {len(cm)} code-mismatch rows to {_OUT}")
-    return len(cm)
+    print(f"Wrote {len(cm)} code-mismatch + {len(cd)} campus-difference rows to {_OUT}")
+    return len(cm), len(cd)
 
 
 if __name__ == '__main__':

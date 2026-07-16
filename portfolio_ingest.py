@@ -1028,7 +1028,9 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
             only_b = sorted(bcamp - g['campuses'])
             if only_p or only_b:
                 campus_diff.append({'program': g['name'], 'banner_code': g['bcode'],
-                                    'only_portfolio': only_p, 'only_banner': only_b})
+                                    'only_portfolio': only_p, 'only_banner': only_b,
+                                    'banner_campuses': sorted(bcamp),
+                                    'cim_campuses': sorted(g['campuses'])})
 
     # A program the portfolio already has under a *different* code is a code
     # variant (surfaced in code_mismatch), not truly missing — skip those here.
