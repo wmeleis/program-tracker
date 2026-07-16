@@ -968,6 +968,13 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
             continue                      # external (SVT-added) rows are not Banner programs
         meta = cim_meta.get(cimid, {})
         bcode = (meta.get('banner_code') or '').strip()
+        # Skip CIM programs whose stored banner_code is a CPS "P-" quarter code
+        # (and ND-/SPEC-/-DE), symmetric with the Banner-side skip. Per the
+        # Registrar (2026-07): CPS dropped the "P-" when moving quarters→semesters,
+        # so a CIM "P-" code is a stale/dying quarter program — quarters are going
+        # away and out of scope, so don't flag them as mismatches.
+        if bcode and _BANNER_SKIP_CODE_RE.search(bcode):
+            continue
         subj = _norm(meta.get('subject') or '')
         deg = _norm(_norm_degree(meta.get('degree') or ''))
         # Skip minors and combined/dual majors on the CIM side too — Banner
