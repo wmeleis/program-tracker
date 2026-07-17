@@ -988,6 +988,10 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
         # Skip minors and combined/dual majors on the CIM side too — Banner
         # excludes them, so they'd otherwise show as false "missing in Banner".
         nm = row.get('program_name', '')
+        # Graduate-only discrepancy scan (Waleed 2026-07-17): undergrad programs
+        # (BS/BA/BFA/BSBA/minors/undergrad certs) are out of scope — skip them.
+        if is_undergrad_svt(nm):
+            continue
         if deg == 'minor' or re.search(r'\bminor\b', nm, re.I):
             continue
         # Concentrations are not standalone Banner programs (Banner tracks them as
@@ -1044,6 +1048,12 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
             bcamp = set()
             for c in codes:
                 bcamp |= progs[c]['active_campuses']
+            # Skip when Banner has the code but NO Active/Future-Active campus —
+            # the program is inactive in Banner, so campus differences aren't
+            # real discrepancies (Waleed 2026-07-17). Covers e.g. Pharmacy PharmD,
+            # Software Product Management Grad Cert.
+            if not bcamp:
+                continue
             only_p = sorted(g['campuses'] - bcamp)
             only_b = sorted(bcamp - g['campuses'])
             if only_p or only_b:
@@ -1057,6 +1067,8 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
     port_sd = {(g['subj'], g['deg']) for g in port.values() if g['subj'] and g['deg']}
     missing_in_portfolio = []
     for code, p in progs.items():
+        if is_undergrad_svt(p['name']):       # graduate-only scan (Waleed 2026-07-17)
+            continue
         is_active = bool(p['active_campuses']) or (p['statuses'] & {'Active', 'Future Active'})
         if is_active and code not in matched_codes and (p['major'], p['degree']) not in port_sd:
             missing_in_portfolio.append({'banner_code': code, 'name': p['name']})
