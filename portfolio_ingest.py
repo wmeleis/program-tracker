@@ -961,11 +961,19 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
 
     # Portfolio program groups (CIM-seeded only), keyed by banner_code if present
     # else (subject, degree). Collect campuses + lifecycle flags.
+    # **Compare only COMPLETED portfolio programs to Banner** (Waleed 2026-07-13):
+    # in-workflow proposals aren't in Banner yet (Banner is set up when a proposal
+    # finishes), so including them produces false discrepancies (e.g. an online
+    # MS-ABA-O still in Program Editor flagged as a code mismatch). Skip any
+    # deployment that is currently in workflow; a program group is built only from
+    # its completed (workflow-finished) deployments.
     port = {}
     for row in tracker.values():
         cimid = row.get('cim_program_id')
         if not cimid:
             continue                      # external (SVT-added) rows are not Banner programs
+        if row.get('cim_step'):
+            continue                      # in workflow — not yet in Banner, out of scope
         meta = cim_meta.get(cimid, {})
         bcode = (meta.get('banner_code') or '').strip()
         # Skip CIM programs whose stored banner_code is a CPS "P-" quarter code
@@ -982,8 +990,16 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
         nm = row.get('program_name', '')
         if deg == 'minor' or re.search(r'\bminor\b', nm, re.I):
             continue
-        if re.search(r'\S+\s+and\s+\S+.*,\s*(?:BA|BS|BACS|BSBA|BSCS)\b', nm):
-            continue                      # combined/dual major (ignored per decision)
+        # Concentrations are not standalone Banner programs (Banner tracks them as
+        # majors under a parent), so exclude CIM concentration records.
+        if re.search(r'\bconcentration\b', nm, re.I):
+            continue
+        # Combined / dual-degree majors: Banner marks them Combined Major Ind.=Y
+        # and we skip them on the Banner side, so skip them on the CIM side too.
+        # Signals: an "X and Y, <BS/BA…>" combined-major name, or a dual code with
+        # a "/" (e.g. "MBA-BSAD-F / MSF-FINA").
+        if re.search(r'\S+\s+and\s+\S+.*,\s*(?:BA|BS)\w*\b', nm) or '/' in bcode:
+            continue
         key = ('c', bcode) if bcode else ('s', subj, deg)
         g = port.get(key)
         if not g:
@@ -1011,10 +1027,11 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
         matched_codes |= codes
         should_be_live = not g['wf'] and not g['inact']
         if not codes:
-            # "Missing in Banner" excludes in-workflow proposals, inactivations,
-            # AND completed-history (per project decision) — leaving only
-            # currently-offered programs that Banner should have but doesn't.
-            if should_be_live and not g['completed']:
+            # "Missing in Banner" = a COMPLETED program Banner should have but
+            # doesn't. In-workflow programs are already excluded (skipped above);
+            # inactivations are excluded here (they're being removed, so Banner
+            # legitimately may not carry them).
+            if not g['inact']:
                 missing_in_banner.append({'program': g['name'], 'banner_code': g['bcode'] or '—'})
             continue
         if g['bcode'] and g['bcode'] not in progs:      # code differs from Banner
