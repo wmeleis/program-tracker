@@ -5569,7 +5569,7 @@ function renderConsoleContent(data) {
                    + (rec.code_mismatch || []).length + (rec.campus_diff || []).length;
     if (recTotal) {
         html += `<h3 style="margin:22px 0 6px">Banner ↔ Portfolio reconciliation (${recTotal})</h3>`;
-        html += '<p style="color:#64748b;font-size:11px;margin:0 0 10px">Banner (Registrar system of record) and the portfolio are meant to be in sync. Excludes combined/dual majors, minors, non-degree/pathway records, in-workflow proposals, inactivations, and completed history.</p>';
+        html += '<p style="color:#64748b;font-size:11px;margin:0 0 10px">Banner (Registrar system of record) and the portfolio are meant to be in sync. Graduate programs only; compares programs that have completed the CIM workflow against Banner active codes. Excludes undergraduate programs, combined/dual majors, minors, non-degree/pathway records, in-workflow proposals, inactivations, and programs inactive in Banner.</p>';
         const _simpleTable = (rows, cols, bg) => {
             let t = `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px"><thead><tr style="background:${bg};text-align:left">`;
             t += cols.map(c => `<th style="padding:4px 8px">${escapeHtml(c[0])}</th>`).join('') + '</tr></thead><tbody>';
