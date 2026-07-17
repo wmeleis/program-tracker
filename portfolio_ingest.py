@@ -1034,7 +1034,10 @@ def _reconcile_banner_portfolio(tracker, cim_meta):
             if not g['inact']:
                 missing_in_banner.append({'program': g['name'], 'banner_code': g['bcode'] or '—'})
             continue
-        if g['bcode'] and g['bcode'] not in progs:      # code differs from Banner
+        if g['bcode'] and g['bcode'] not in progs and not g['inact']:   # code differs from Banner
+            # Exclude inactivations (like campus_diff / missing_in_banner do): an
+            # inactivated program (e.g. CERTG-CPRN-O, Corporate Renewal Online)
+            # is being removed, so Banner correctly won't carry its code.
             code_mismatch.append({'program': g['name'], 'cim_code': g['bcode'],
                                   'banner_code': ', '.join(sorted(codes))})
         if should_be_live and g['bcode'] in progs:      # campus footprint (code-matched only)
