@@ -1132,6 +1132,11 @@ _CAMPUS_NAMES = {
     'SV': 'Silicon Valley', 'SJ': 'Silicon Valley', 'SEA': 'Seattle',
     'MIA': 'Miami', 'ARL': 'Arlington', 'VAN': 'Vancouver',
     'CHA': 'Charlotte', 'LON': 'London',
+    # CIM's XML <campus> field uses these 3-letter codes (the 2-letter forms
+    # above are legacy/external-feed aliases that don't appear in CIM XML).
+    # VTL ("virtual") and PVL ("primarily virtual") both mean Online.
+    'CHL': 'Charlotte', 'LDN': 'London', 'NYC': 'New York', 'PTL': 'Portland',
+    'SJO': 'Silicon Valley', 'VTL': 'Online', 'PVL': 'Online',
     # All online variants collapse to a single "Online" campus. Anything that
     # starts with "online" or "primarily online" — including suffix-tagged
     # deployment notes like "Online - Vancouver Requirements" or
@@ -2153,6 +2158,20 @@ def _parse_cim_name(full_name):
     if m:
         campus = m.group(1).strip()
         name = name[:m.start()].strip()
+
+    # No parenthetical campus, but a trailing "—Online" em-dash deployment
+    # suffix (e.g. "Business Analytics, MS—Online", "Information Systems,
+    # MSIS—Bridge—Online") means the online deployment — CIM's XML <campus>
+    # tags these VTL/Online. Without this they fall through to the Boston
+    # default and mis-report as Boston in the Banner campus reconciliation.
+    # Only "—Online" maps to a campus; other deployment suffixes (—Align,
+    # —Bridge, —Accelerated, —Part-Time) are not campuses and are left on the
+    # degree for the variant-lookup path.
+    if not campus:
+        mo = re.search(r'[-–—]\s*online\s*$', name, re.I)
+        if mo:
+            campus = 'Online'
+            name = name[:mo.start()].strip()
 
     # Find last comma to split subject and degree
     idx = name.rfind(',')
