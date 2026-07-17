@@ -891,7 +891,7 @@ def parse_banner_pmc(path=BANNER_PMC_PATH):
 # special-student/transitional records, and general-studies catch-alls.
 _BANNER_NONDEGREE_RE = re.compile(
     r'\bundeclar|\bundecid|\bprovisional\b|non-degree|\bindep|independent stud'
-    r'|\bminor\b|\bgnrl studies\b|general studies|\bexchange\b|\bnuin\b|\bscholars?\b'
+    r'|\bminor\b|\bgnrl studies\b|general studies|exchange students?\b|\bnd exchange\b|special exchange|\bnuin\b|\bscholars?\b'
     r'|\btransitional\b|global pathway|pre[-\s]?college|\bimmerse\b|special student'
     r'|special learning|performance-based admission|professional education'
     r'|double degree|medical school prep|teacher in context|\bfoundation\b'
