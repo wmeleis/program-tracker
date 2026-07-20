@@ -582,15 +582,20 @@ def _svt_courseleaf_id(courseleaf_key):
 
 # SVT "How Can We Help You" picklist value → portfolio cim_change_type style
 # proposal classification. Values not in this map fall through to '' (Other).
-# Source: distinct values observed in the SVT sheet 2026-05-20.
+# Source: distinct values observed in the SVT sheet 2026-05-20; extended
+# 2026-07-20 for new Airtable `Request_Type` values (Sunset/Inactivate,
+# Redeploy/New to Network) that the Smartsheet-era map lacked.
 _SVT_HCWHY_TO_TYPE = {
     'New Program':                                'New',
     'Inactivate an existing or launching program': 'Inactivation',
+    'Sunset/Inactivate an existing program':      'Inactivation',
     'Redesign an existing program':               'Change',
     'Revamp an Existing Program':                 'Change',
     'Term change request':                        'Change',
     'Launch term change request':                 'Change',
     'Deploy Program to Network':                  'Network Deployment',
+    'Redeploy to International Network':          'Network Deployment',
+    'New to Network':                             'Network Deployment',
 }
 # NOTE: SVT concentration proposals whose parent is ambiguous (and any other
 # manual disposition) are no longer hardcoded here — they live in the durable,
