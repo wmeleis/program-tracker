@@ -7621,25 +7621,33 @@ async function loadPortfolioDashboard() {
     }
 }
 
+// Distinct non-empty values for a portfolio field, plus a '(none)' sentinel
+// when any row has a blank value — so blank-valued rows can be isolated or
+// excluded from every value filter (matches the catalog-year pattern).
+function _optsNone(programs, get, cmp) {
+    const v = [...new Set(programs.map(get).filter(Boolean))].sort(cmp);
+    if (programs.some(p => !get(p))) v.push('(none)');
+    return v;
+}
+// Match a possibly-blank field value against a filter set; a blank value
+// matches only when '(none)' is selected.
+function _matchNone(set, val) { const v = val || ''; return v ? set.has(v) : set.has('(none)'); }
+
 function _getPortfolioFilterValues() {
     const programs = allPortfolioPrograms;
     return {
-        'portfolio-filter-college':    [...new Set(programs.map(p => p.college).filter(Boolean))].sort(),
-        'portfolio-filter-campus':     [...new Set(programs.map(p => p.campus).filter(Boolean))].sort(),
-        'portfolio-filter-otp':        [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort(),
-        'portfolio-filter-ipd':        [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort(),
-        'portfolio-filter-roster':     (() => {
-            const v = [...new Set(programs.map(p => p.svt_status).filter(Boolean))].sort();
-            if (programs.some(p => !p.svt_status)) v.push('(none)');   // isolate rows with no SVT status
-            return v;
-        })(),
-        'portfolio-filter-substatus':  [...new Set(programs.map(p => p.roster_sub_status).filter(Boolean))].sort(),
+        'portfolio-filter-college':    _optsNone(programs, p => p.college),
+        'portfolio-filter-campus':     _optsNone(programs, p => p.campus),
+        'portfolio-filter-otp':        _optsNone(programs, p => p.otp_status),
+        'portfolio-filter-ipd':        _optsNone(programs, p => p.ipd_status),
+        'portfolio-filter-roster':     _optsNone(programs, p => p.svt_status),
+        'portfolio-filter-substatus':  _optsNone(programs, p => p.roster_sub_status),
         'portfolio-filter-speed':      ['True', 'False'],
-        'portfolio-filter-gls':        [...new Set(programs.map(p => p.gls_status).filter(Boolean))].sort(),
-        'portfolio-filter-cim':        [...new Set(programs.map(p => p.cim_step).filter(Boolean))].sort(),
-        'portfolio-filter-cimchange':  [...new Set(programs.map(p => p.cim_change_type).filter(Boolean))].sort(),
+        'portfolio-filter-gls':        _optsNone(programs, p => p.gls_status),
+        'portfolio-filter-cim':        _optsNone(programs, p => p.cim_step),
+        'portfolio-filter-cimchange':  _optsNone(programs, p => p.cim_change_type),
         'portfolio-filter-inworkflow': ['Yes', 'No'],
-        'portfolio-filter-inactadmit': [...new Set(programs.map(p => p.inactivation_admission).filter(Boolean))].sort(
+        'portfolio-filter-inactadmit': _optsNone(programs, p => p.inactivation_admission,
             (a, b) => (_semesterToDate(a)||0) - (_semesterToDate(b)||0)),
         'portfolio-filter-catalogyear': (() => {
             const ys = new Set();
@@ -7901,7 +7909,7 @@ function getPortfolioFiltered() {
         );
     }
     if (portfolioCollegeFilter.size)    rows = rows.filter(p =>
-        portfolioCollegeFilter.has(p.college || '')
+        _matchNone(portfolioCollegeFilter, p.college)
         // Also keep a program whose OWN college doesn't match but which has an
         // interdisciplinary concentration managed by the selected college
         // (e.g. Khoury-managed Robotics/Machine Learning concentrations under a
@@ -7909,17 +7917,17 @@ function getPortfolioFiltered() {
         // surfaced (and the parent auto-expanded) at render time.
         || (p.concentrations || []).some(c => c && typeof c === 'object'
                 && c.college && portfolioCollegeFilter.has(c.college)));
-    if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
-    if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
-    if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
-    if (portfolioRosterFilter.size)     rows = rows.filter(p => { const v = p.svt_status || ''; return v ? portfolioRosterFilter.has(v) : portfolioRosterFilter.has('(none)'); });
-    if (portfolioSubStatusFilter.size)  rows = rows.filter(p => portfolioSubStatusFilter.has(p.roster_sub_status || ''));
+    if (portfolioCampusFilter.size)     rows = rows.filter(p => _matchNone(portfolioCampusFilter, p.campus));
+    if (portfolioOtpFilter.size)        rows = rows.filter(p => _matchNone(portfolioOtpFilter, p.otp_status));
+    if (portfolioIpdFilter.size)        rows = rows.filter(p => _matchNone(portfolioIpdFilter, p.ipd_status));
+    if (portfolioRosterFilter.size)     rows = rows.filter(p => _matchNone(portfolioRosterFilter, p.svt_status));
+    if (portfolioSubStatusFilter.size)  rows = rows.filter(p => _matchNone(portfolioSubStatusFilter, p.roster_sub_status));
     if (portfolioSpeedFilter.size)      rows = rows.filter(p => portfolioSpeedFilter.has(p.speed_to_market || ''));
-    if (portfolioGlsFilter.size)        rows = rows.filter(p => portfolioGlsFilter.has(p.gls_status || ''));
-    if (portfolioCimFilter.size)        rows = rows.filter(p => portfolioCimFilter.has(p.cim_step || ''));
-    if (portfolioCimChangeFilter.size)  rows = rows.filter(p => portfolioCimChangeFilter.has(p.cim_change_type || ''));
+    if (portfolioGlsFilter.size)        rows = rows.filter(p => _matchNone(portfolioGlsFilter, p.gls_status));
+    if (portfolioCimFilter.size)        rows = rows.filter(p => _matchNone(portfolioCimFilter, p.cim_step));
+    if (portfolioCimChangeFilter.size)  rows = rows.filter(p => _matchNone(portfolioCimChangeFilter, p.cim_change_type));
     if (portfolioInWorkflowFilter.size) rows = rows.filter(p => portfolioInWorkflowFilter.has(p.cim_program_id ? 'Yes' : 'No'));
-    if (portfolioInactAdmitFilter.size) rows = rows.filter(p => portfolioInactAdmitFilter.has(p.inactivation_admission || ''));
+    if (portfolioInactAdmitFilter.size) rows = rows.filter(p => _matchNone(portfolioInactAdmitFilter, p.inactivation_admission));
     if (portfolioCatalogYearFilter.size) rows = rows.filter(p => {
         const ys = (p.catalog_years || '').split(/,\s*/).filter(Boolean);
         return [...portfolioCatalogYearFilter].some(
