@@ -575,7 +575,8 @@ def _svt_courseleaf_id(courseleaf_key):
     Returns an int, or None when the field is empty / non-numeric ('see notes')."""
     if not courseleaf_key:
         return None
-    m = re.search(r'[?&]key=(\d+)', courseleaf_key)
+    # Airtable Courseleaf_URL uses mixed case (?key= and ?Key=) — match both.
+    m = re.search(r'[?&]key=(\d+)', courseleaf_key, re.I)
     return int(m.group(1)) if m else None
 
 
@@ -612,13 +613,15 @@ _SVT_HCWHY_NON_PROGRAM = {
 
 
 def parse_svt(path=None):
-    """Parse the SVT Source Data Smartsheet JSON produced by
-    fetch_portfolio_data.fetch_svt_sheet() via the Smartsheet REST API.
+    """Parse the SVT Source Data Airtable JSON produced by
+    fetch_portfolio_data.fetch_svt_sheet() via the Airtable REST API
+    ({"source":"airtable","records":[{"id","fields":{...}}, ...]}).
 
     Returns a list of dicts with normalized fields:
       {program_code, program_name, college, campus, program_level,
        degree_type, status, sub_status, speed_to_market, hcwhy,
-       actual_launch_date, uip_program}
+       actual_launch_date, uip_program, courseleaf_key, initiative_type,
+       phase, svt_key}
     """
     if path is None:
         # Default lives in data/portfolio_feeds/ alongside the other feeds.
@@ -632,72 +635,69 @@ def parse_svt(path=None):
     except Exception:
         return []
 
-    col_by_id = {c['id']: c['title'] for c in data.get('columns', [])}
-    KEEP = {
-        'Program Code', 'Program Name', 'College', 'Campus',
-        'Program Level', 'Degree Type', 'Status', 'Launch Sub-Status',
-        'Speed to Market?', 'How Can We Help You', 'Actual Launch Date',
-        'UIP Program', 'Courseleaf Key', 'Initiative Type', 'Phase',
-        'New Intake ID',
-    }
+    def _txt(v):
+        """Airtable cells: multipleSelects → list, checkbox → bool, others str.
+        Lists are SORTED so a stable, order-independent string results — Airtable
+        returns multi-select values in an arbitrary order, and unsorted joins made
+        the svt_seen fingerprint (which includes initiative_type) flip spuriously,
+        which in turn reset user disposition overrides on 'changed' entries."""
+        if v is None:
+            return ''
+        if isinstance(v, bool):
+            return 'True' if v else ''
+        if isinstance(v, list):
+            return ', '.join(sorted(str(x).strip() for x in v if x not in (None, '')))
+        return str(v).strip()
 
     out = []
-    for row in data.get('rows', []):
-        rec = {}
-        for cell in row.get('cells', []):
-            title = col_by_id.get(cell.get('columnId'))
-            if title not in KEEP:
-                continue
-            v = cell.get('value')
-            if v is None:
-                v = cell.get('displayValue', '')
-            if v is None:
-                v = ''
-            rec[title] = str(v).strip() if not isinstance(v, bool) else ('True' if v else 'False')
-
-        # Skip header rows / blank rows
-        if not rec.get('Program Name'):
+    for rec in data.get('records', []):
+        f = rec.get('fields', {})
+        name = _txt(f.get('Program_Name'))
+        if not name:
             continue
 
         # Normalize campus: drop placeholder values.
-        camp = rec.get('Campus', '')
-        if camp in ('Not Applicable', 'N/A', ''):
+        camp = _txt(f.get('Campus'))
+        if camp in ('Not Applicable', 'N/A'):
             camp = ''
 
         # Normalize college. UIP variants → "Office of the Provost" so the
         # College filter groups them under Provost (per Waleed's request).
-        col = rec.get('College', '')
-        if col in ('Not Applicable', 'All', ''):
+        col = _txt(f.get('College'))
+        if col in ('Not Applicable', 'All'):
             col = ''
-        elif col == 'University Interdisciplinary Program (UIP)':
+        elif col.startswith('University Interdisciplinary Program'):
             col = 'Office of the Provost'
 
         out.append({
-            'program_code':       rec.get('Program Code', ''),
-            'program_name':       rec.get('Program Name', ''),
+            'program_code':       _txt(f.get('Program_Code')),
+            'program_name':       name,
             'college':            col,
             'campus':             camp,
-            'program_level':      rec.get('Program Level', ''),
-            'degree_type':        rec.get('Degree Type', ''),
-            'status':             rec.get('Status', ''),
-            'sub_status':         rec.get('Launch Sub-Status', ''),
-            'speed_to_market':    rec.get('Speed to Market?', ''),
-            'hcwhy':              rec.get('How Can We Help You', ''),
-            'actual_launch_date': rec.get('Actual Launch Date', ''),
-            'uip_program':        rec.get('UIP Program', ''),
-            # Courseleaf Key embeds the CIM program id (?key=N) — an authoritative
+            'program_level':      _txt(f.get('Program_Level')),
+            'degree_type':        _txt(f.get('Degree_Type')),
+            'status':             _txt(f.get('Status')),
+            'sub_status':         _txt(f.get('Launch_Sub-Status')),
+            'speed_to_market':    _txt(f.get('Speed_To_Market')),
+            # Airtable 'Request_Type' carries what Smartsheet called "How Can We
+            # Help You" — the same value set (_SVT_HCWHY_TO_TYPE / _NON_PROGRAM).
+            'hcwhy':              _txt(f.get('Request_Type')),
+            # 'GTM_Launch' is the launch date (Smartsheet's "Actual Launch Date").
+            'actual_launch_date': _txt(f.get('GTM_Launch')),
+            'uip_program':        _txt(f.get('UIP_Program')),
+            # Courseleaf_URL embeds the CIM program id (?key=N) — an authoritative
             # direct link to the CIM record, far more robust than name matching.
-            'courseleaf_key':     rec.get('Courseleaf Key', ''),
+            'courseleaf_key':     _txt(f.get('Courseleaf_URL')),
             # Initiative Type / Phase describe what the SVT entry IS (full degree/
             # certificate program vs a concentration/course/product) and how far
             # along it is — used to decide whether an unmatched row is a genuinely
             # new program worth synthesizing into the portfolio.
-            'initiative_type':    rec.get('Initiative Type', ''),
-            'phase':              rec.get('Phase', ''),
+            'initiative_type':    _txt(f.get('Initiative_Type')),
+            'phase':              _txt(f.get('Phase')),
             # Stable per-row key for durable, user-editable disposition overrides
-            # (svt_overrides table). Prefer the human-readable New Intake ID
-            # ("p762"); fall back to the Smartsheet row id when absent.
-            'svt_key':            (rec.get('New Intake ID', '') or str(row.get('id') or '')),
+            # (svt_overrides table). Airtable_ID (autoNumber) is the new key; it's
+            # present on every record and stable across edits.
+            'svt_key':            _txt(f.get('Airtable_ID')),
         })
 
     return out
@@ -3287,7 +3287,17 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         # SVT mapping applies only to graduate programs. Undergraduate entries
         # are skipped entirely (not matched / added / held) and logged to an
         # auditable bucket. Confirmed with Waleed 2026-07-13.
-        if is_undergrad_svt(original_name):
+        # Airtable carries an explicit Program_Level field — trust it when
+        # definitive ('Graduate' / 'Undergraduate'); otherwise fall back to the
+        # name-based heuristic (is_undergrad_svt).
+        _lvl = (p.get('program_level') or '').strip().lower()
+        if _lvl.startswith('undergrad'):
+            _is_ug = True
+        elif _lvl.startswith('grad'):
+            _is_ug = False
+        else:
+            _is_ug = is_undergrad_svt(original_name)
+        if _is_ug:
             svt_undergrad.append({'source_name': original_name,
                                   'campus': p.get('campus', ''), 'svt_key': svt_key})
             _svt_resolve(svt_key, 'undergrad', 'undergraduate — mapping is graduate-only')

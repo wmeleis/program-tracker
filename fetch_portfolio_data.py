@@ -29,10 +29,30 @@ SHAREPOINT_URL = "https://northeastern-my.sharepoint.com/:x:/r/personal/g_wahhab
 SMARTSHEET_URL = "https://app.smartsheet.com/b/publish?EQBCT=65a022ed48d94beea1d54ef5b933fc48"
 TABLEAU_PAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'tableau_pat.json')
 
-# SVT Source Data — fetched via Smartsheet REST API using a personal access
-# token stored at ~/.smartsheet_token (mode 600, outside git). Replaces the
-# old publish-URL Chrome-scraped GLS Roster pipeline.
-SVT_SHEET_ID = 3889012330680196
+# SVT Source Data — now fetched via the Airtable REST API (SVT moved from
+# Smartsheet to Airtable, 2026-07). Credentials + base/table id live in a
+# gitignored data/airtable_pat.json ({token, base_id, table_name}).
+AIRTABLE_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    'data', 'airtable_pat.json')
+
+
+def _airtable_config():
+    """Return (token, base_id, table_name) from data/airtable_pat.json, or
+    (None, None, None) if the file is missing/blank. Never logs the token."""
+    try:
+        with open(AIRTABLE_CONFIG_PATH) as f:
+            c = json.load(f)
+    except Exception:
+        return None, None, None
+    tok = (c.get('token') or '').strip()
+    base = (c.get('base_id') or '').strip()
+    table = (c.get('table_name') or '').strip()
+    if not tok or tok.startswith('PASTE_') or not base or not table:
+        return None, None, None
+    return tok, base, table
+
+
+# GTM still comes from Smartsheet; its token remains ~/.smartsheet_token.
 SVT_TOKEN_PATH = os.path.expanduser('~/.smartsheet_token')
 
 # GTM — "Go To Market Roster 2.0" sheet, fetched via the same Smartsheet API
@@ -432,37 +452,31 @@ def _check_smartsheet_tab_legacy(source, url):
 
 
 def _check_svt_api_token():
-    """Verify ~/.smartsheet_token exists and works (one-time API health probe)."""
-    if not os.path.exists(SVT_TOKEN_PATH):
+    """Verify the Airtable SVT config exists and works (one-time API health probe)."""
+    token, base_id, table_name = _airtable_config()
+    if not token:
         return {
-            'source': 'Smartsheet API (SVT)',
+            'source': 'Airtable API (SVT)',
             'ok': False,
-            'detail': (f'SVT API token file not found at {SVT_TOKEN_PATH}. '
-                       'Generate one in Smartsheet → Personal Settings → API Access '
-                       'and write the token to that path (chmod 600).'),
+            'detail': (f'Airtable config missing/blank at {AIRTABLE_CONFIG_PATH}. '
+                       'Needs {token, base_id, table_name}.'),
         }
     try:
-        with open(SVT_TOKEN_PATH) as f:
-            token = f.read().strip()
-        if not token:
-            raise ValueError('empty token file')
-        # Lightweight probe — fetch sheet metadata only (1 row).
-        import urllib.request
-        req = urllib.request.Request(
-            f'https://api.smartsheet.com/2.0/sheets/{SVT_SHEET_ID}?pageSize=1',
-            headers={'Authorization': f'Bearer {token}'},
-        )
+        import urllib.request, urllib.parse
+        url = (f'https://api.airtable.com/v0/{base_id}/'
+               f'{urllib.parse.quote(table_name)}?maxRecords=1')
+        req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
         with urllib.request.urlopen(req, timeout=10) as r:
             if r.status == 200:
-                return {'source': 'Smartsheet API (SVT)', 'ok': True, 'detail': ''}
+                return {'source': 'Airtable API (SVT)', 'ok': True, 'detail': ''}
             return {
-                'source': 'Smartsheet API (SVT)',
+                'source': 'Airtable API (SVT)',
                 'ok': False,
-                'detail': f'HTTP {r.status} from Smartsheet API',
+                'detail': f'HTTP {r.status} from Airtable API',
             }
     except Exception as e:
         return {
-            'source': 'Smartsheet API (SVT)',
+            'source': 'Airtable API (SVT)',
             'ok': False,
             'detail': f'SVT API probe failed: {e}',
         }
@@ -630,48 +644,65 @@ def fetch_smartsheet():
 # full JSON to data/portfolio_feeds/svt.json. portfolio_ingest.parse_svt()
 # consumes that JSON.
 
-def fetch_svt_sheet():
-    """Download the SVT Source Data sheet as JSON via the Smartsheet REST API.
+# Airtable fields we actually consume downstream (parse_svt). Limiting the
+# fetch to these keeps the payload small and the mapping explicit.
+_SVT_AIRTABLE_FIELDS = [
+    'Airtable_ID', 'Smartsheet_Intake_ID', 'Program_Name', 'Program_Code',
+    'College', 'Campus', 'Program_Level', 'Degree_Type', 'Status',
+    'Launch_Sub-Status', 'Speed_To_Market', 'Request_Type', 'GTM_Launch',
+    'UIP_Program', 'Courseleaf_URL', 'Initiative_Type', 'Phase',
+]
 
-    Requires ~/.smartsheet_token containing a Smartsheet Personal Access
-    Token (generated under Account → Personal Settings → API Access).
+
+def fetch_svt_sheet():
+    """Download the SVT Source Data table via the Airtable REST API.
+
+    Credentials + base/table id come from data/airtable_pat.json (gitignored).
+    Writes data/portfolio_feeds/svt.json as {"source":"airtable","records":[...]}
+    where each record is Airtable's {"id","fields"} shape. SVT moved from
+    Smartsheet to Airtable (2026-07); GTM still uses Smartsheet.
     """
-    import urllib.request, urllib.error
-    print("\n--- SVT Source Data (Smartsheet API) ---")
-    if not os.path.exists(SVT_TOKEN_PATH):
-        print(f"  SKIP — no token at {SVT_TOKEN_PATH}")
-        return
-    try:
-        with open(SVT_TOKEN_PATH) as f:
-            token = f.read().strip()
-    except Exception as e:
-        print(f"  ERROR reading token: {e}")
-        return
+    import urllib.request, urllib.error, urllib.parse
+    print("\n--- SVT Source Data (Airtable API) ---")
+    token, base_id, table_name = _airtable_config()
     if not token:
-        print("  SKIP — token file is empty")
+        print(f"  SKIP — no usable Airtable config at {AIRTABLE_CONFIG_PATH}")
+        _record_feed_health('SVT (Airtable API)', False, 'no Airtable token/base/table configured')
         return
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     out_path = os.path.join(OUTPUT_DIR, "svt.json")
-    url = f"https://api.smartsheet.com/2.0/sheets/{SVT_SHEET_ID}"
-    req = urllib.request.Request(url, headers={
-        'Authorization': f'Bearer {token}',
-        'Accept': 'application/json',
-    })
+    base_url = f"https://api.airtable.com/v0/{base_id}/{urllib.parse.quote(table_name)}"
+    params = [('pageSize', '100')]
+    params += [('fields[]', f) for f in _SVT_AIRTABLE_FIELDS]
+
+    records = []
+    offset = None
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = r.read()
-        if _save_validated('SVT (Smartsheet API)', out_path, data, 'json'):
-            import json as _json
-            d = _json.loads(data)
-            print(f"    ({d.get('totalRowCount', '?')} rows, "
-                  f"{len(d.get('columns', []))} columns)")
+        while True:
+            q = list(params)
+            if offset:
+                q.append(('offset', offset))
+            url = base_url + '?' + urllib.parse.urlencode(q)
+            req = urllib.request.Request(url, headers={
+                'Authorization': f'Bearer {token}',
+                'Accept': 'application/json',
+            })
+            with urllib.request.urlopen(req, timeout=30) as r:
+                page = json.loads(r.read())
+            records.extend(page.get('records', []))
+            offset = page.get('offset')
+            if not offset:
+                break
+        data = json.dumps({'source': 'airtable', 'records': records}).encode('utf-8')
+        if _save_validated('SVT (Airtable API)', out_path, data, 'json'):
+            print(f"    ({len(records)} records)")
     except urllib.error.HTTPError as e:
         print(f"  ERROR HTTP {e.code}: {e.reason}")
-        _record_feed_health('SVT (Smartsheet API)', False, f'HTTP {e.code}: {e.reason}')
+        _record_feed_health('SVT (Airtable API)', False, f'HTTP {e.code}: {e.reason}')
     except Exception as e:
         print(f"  ERROR: {e}")
-        _record_feed_health('SVT (Smartsheet API)', False, str(e))
+        _record_feed_health('SVT (Airtable API)', False, str(e))
 
 
 def fetch_gtm_sheet():
