@@ -7628,7 +7628,11 @@ function _getPortfolioFilterValues() {
         'portfolio-filter-campus':     [...new Set(programs.map(p => p.campus).filter(Boolean))].sort(),
         'portfolio-filter-otp':        [...new Set(programs.map(p => p.otp_status).filter(Boolean))].sort(),
         'portfolio-filter-ipd':        [...new Set(programs.map(p => p.ipd_status).filter(Boolean))].sort(),
-        'portfolio-filter-roster':     [...new Set(programs.map(p => p.svt_status).filter(Boolean))].sort(),
+        'portfolio-filter-roster':     (() => {
+            const v = [...new Set(programs.map(p => p.svt_status).filter(Boolean))].sort();
+            if (programs.some(p => !p.svt_status)) v.push('(none)');   // isolate rows with no SVT status
+            return v;
+        })(),
         'portfolio-filter-substatus':  [...new Set(programs.map(p => p.roster_sub_status).filter(Boolean))].sort(),
         'portfolio-filter-speed':      ['True', 'False'],
         'portfolio-filter-gls':        [...new Set(programs.map(p => p.gls_status).filter(Boolean))].sort(),
@@ -7908,7 +7912,7 @@ function getPortfolioFiltered() {
     if (portfolioCampusFilter.size)     rows = rows.filter(p => portfolioCampusFilter.has(p.campus || ''));
     if (portfolioOtpFilter.size)        rows = rows.filter(p => portfolioOtpFilter.has(p.otp_status || ''));
     if (portfolioIpdFilter.size)        rows = rows.filter(p => portfolioIpdFilter.has(p.ipd_status || ''));
-    if (portfolioRosterFilter.size)     rows = rows.filter(p => portfolioRosterFilter.has(p.svt_status || ''));
+    if (portfolioRosterFilter.size)     rows = rows.filter(p => { const v = p.svt_status || ''; return v ? portfolioRosterFilter.has(v) : portfolioRosterFilter.has('(none)'); });
     if (portfolioSubStatusFilter.size)  rows = rows.filter(p => portfolioSubStatusFilter.has(p.roster_sub_status || ''));
     if (portfolioSpeedFilter.size)      rows = rows.filter(p => portfolioSpeedFilter.has(p.speed_to_market || ''));
     if (portfolioGlsFilter.size)        rows = rows.filter(p => portfolioGlsFilter.has(p.gls_status || ''));
