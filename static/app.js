@@ -2391,22 +2391,25 @@ async function refreshCimAuthStatus() {
     }
 }
 
-async function openRegulatorySession() {
-    // Open the SharePoint Global Regulatory Affairs site in Chrome so the user
-    // can log in / leave the tab open; the next scan's regulatory fetch then
-    // succeeds. Mirrors cimAuthenticate() but simpler (no session probe — SharePoint
-    // validity is only knowable by attempting the download during a scan).
-    const btn = document.getElementById('reg-auth-btn');
+// Open a SharePoint source (regulatory | otp) in Chrome so the user can log in /
+// leave the tab open; the next scan's fetch then succeeds. Mirrors cimAuthenticate()
+// but simpler (no session probe — SharePoint validity is only knowable by
+// attempting the download during a scan). btnId = header button, label = display name.
+async function _openSharePointSession(btnId, source, sourceName, label) {
+    const btn = document.getElementById(btnId);
     if (btn) btn.disabled = true;
     try {
-        const res = await fetch('/api/auth/sharepoint', {method: 'POST'});
+        const res = await fetch('/api/auth/sharepoint', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source})
+        });
         const data = await res.json().catch(() => ({}));
         if (btn) {
             if (res.ok && data.ok) {
                 btn.innerHTML = '<span class="auth-dot bad">●</span> log in to SharePoint…';
-                // Stays red until the next scan actually re-fetches regulatory;
-                // then refreshRegulatoryStatus() flips it green on its own.
-                setTimeout(() => { btn.disabled = false; refreshRegulatoryStatus(); }, 8000);
+                // Stays red until the next scan actually re-fetches; then the
+                // freshness poll flips it green on its own.
+                setTimeout(() => { btn.disabled = false; _refreshSourceDot(btnId, sourceName, label); }, 8000);
             } else {
                 btn.innerHTML = '<span class="auth-dot bad">●</span> could not open Chrome';
                 btn.title = data.detail || '';
@@ -2418,31 +2421,35 @@ async function openRegulatorySession() {
     }
 }
 
-// Green/red dot on the Regulatory Login button, driven by the regulatory feed's
-// freshness (GET /api/source_health → 'Regulatory' source; stale = >3 days).
-// Green = data is current; red = stale / never fetched → click to reopen the
-// SharePoint tab and log in.
-async function refreshRegulatoryStatus() {
-    const btn = document.getElementById('reg-auth-btn');
+// Green/red dot on a SharePoint-source button, driven by that feed's freshness
+// (GET /api/source_health → the named source; stale = >3 days). Green = current;
+// red = stale / never fetched → click to reopen the SharePoint tab and log in.
+async function _refreshSourceDot(btnId, sourceName, label) {
+    const btn = document.getElementById(btnId);
     if (!btn || window._staticMode) return;
     try {
         const res = await fetch('/api/source_health');
         const data = await res.json();
-        const reg = ((data && data.sources) || []).find(s => s.name === 'Regulatory');
-        const days = (reg && reg.age_hours != null) ? Math.round(reg.age_hours / 24) : null;
+        const s = ((data && data.sources) || []).find(x => x.name === sourceName);
+        const days = (s && s.age_hours != null) ? Math.round(s.age_hours / 24) : null;
         btn.className = 'header-secondary-btn';
-        if (reg && !reg.stale) {
-            btn.innerHTML = '<span class="auth-dot ok">●</span> Regulatory OK';
-            btn.title = `Regulatory data current (${days === 0 ? 'today' : days + 'd old'}) — click to reopen SharePoint in Chrome`;
+        if (s && !s.stale) {
+            btn.innerHTML = `<span class="auth-dot ok">●</span> ${label} OK`;
+            btn.title = `${label} data current (${days === 0 ? 'today' : days + 'd old'}) — click to reopen SharePoint in Chrome`;
         } else {
-            btn.innerHTML = '<span class="auth-dot bad">●</span> Regulatory stale';
-            btn.title = (days != null ? `Regulatory data is ${days} days old` : 'Regulatory data never fetched')
+            btn.innerHTML = `<span class="auth-dot bad">●</span> ${label} stale`;
+            btn.title = (days != null ? `${label} data is ${days} days old` : `${label} data never fetched`)
                 + ' — click to open SharePoint in Chrome and log in, then it refreshes on the next scan';
         }
     } catch (_) {
-        btn.textContent = 'Regulatory Login';
+        btn.textContent = label + ' Login';
     }
 }
+
+function openRegulatorySession()  { return _openSharePointSession('reg-auth-btn', 'regulatory', 'Regulatory', 'Regulatory'); }
+function refreshRegulatoryStatus(){ return _refreshSourceDot('reg-auth-btn', 'Regulatory', 'Regulatory'); }
+function openOtpSession()         { return _openSharePointSession('otp-auth-btn', 'otp', 'OTP', 'OTP'); }
+function refreshOtpStatus()       { return _refreshSourceDot('otp-auth-btn', 'OTP', 'OTP'); }
 
 async function cimAuthenticate() {
     const btn = document.getElementById('auth-btn');
@@ -5833,6 +5840,7 @@ function _initDashboard() {
         checkSessionHealth();
         refreshCimAuthStatus();
         refreshRegulatoryStatus();
+        refreshOtpStatus();
     }
 }
 
@@ -5849,7 +5857,7 @@ setInterval(() => {
 // Keep the CIM session badge + error banner self-correcting on the local
 // dashboard, so re-authenticating reflects within a minute without a reload.
 if (typeof window._staticMode === 'undefined') {
-    setInterval(() => { refreshCimAuthStatus(); refreshRegulatoryStatus(); checkSessionHealth(); }, 60000);
+    setInterval(() => { refreshCimAuthStatus(); refreshRegulatoryStatus(); refreshOtpStatus(); checkSessionHealth(); }, 60000);
 }
 
 // ==================== Portfolio view ====================

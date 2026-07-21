@@ -529,8 +529,9 @@ def build_static_site():
     # folded into that button) — local-only, opens Chrome on the server
     # machine, so it's meaningless on the static site.
     html = re.sub(r'<button id="auth-btn"[^>]*>.*?</button>', '', html, count=1, flags=re.DOTALL)
-    # Remove the Regulatory Login button — local-only (opens Chrome on the server).
+    # Remove the Regulatory Login + OTP Login buttons — local-only (open Chrome on the server).
     html = re.sub(r'<button id="reg-auth-btn"[^>]*>.*?</button>', '', html, count=1, flags=re.DOTALL)
+    html = re.sub(r'<button id="otp-auth-btn"[^>]*>.*?</button>', '', html, count=1, flags=re.DOTALL)
     # Remove the Console button and modal — local-only, no backend on static site.
     html = re.sub(
         r'<button id="console-btn"[^>]*>.*?</button>',

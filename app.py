@@ -841,14 +841,16 @@ def api_source_health():
             sources.append({'name': name, 'last_success': d.isoformat(),
                             'age_hours': round(age, 1), 'stale': age > STALE_SOURCE_DAYS * 24})
 
-    # OTP and IPD are intentionally excluded: both are retired sources. IPD was
-    # disabled 2026-05-22 (SVT is the single source of program-status truth now;
-    # its overlay in portfolio_ingest is off), so its feed file is stale BY
-    # DESIGN and must not raise a false "out of date" alarm.
+    # IPD is intentionally excluded: its fetch was disabled 2026-05-22 (SVT is the
+    # single source of program-status truth now; its overlay in portfolio_ingest is
+    # off), so its feed file is stale BY DESIGN and must not raise a false alarm.
+    # OTP IS monitored: only its column-M "EMPL Review" notes are still used, but
+    # the user needs to know when those go stale.
     add('CIM scan', cim_ts)
-    add('SVT roster', _success('SVT (Smartsheet API)'))
+    add('SVT roster', _success('SVT (Airtable API)'))   # SVT moved Smartsheet→Airtable 2026-07
     add('GTM', _success('GTM (Smartsheet API)'))
     add('GLS', _success('GLS (Tableau)'))
+    add('OTP', _success('OTP (SharePoint)'))
     add('Regulatory', _mtime(os.path.join(_DATA_DIR, 'last_regulatory_fetch')))
     add('Course Inventory', _mtime(os.path.join(_DATA_DIR, 'last_course_inventory_fetch')))
 
@@ -1166,13 +1168,17 @@ def api_auth_login():
 
 @app.route('/api/auth/sharepoint', methods=['POST'])
 def api_auth_sharepoint():
-    """Open Chrome to the SharePoint Global Regulatory Affairs site so the user
-    can (re)establish the session and leave the tab open. The regulatory feed is
-    downloaded through that tab, so once it's open+logged-in the next scan's
-    regulatory fetch succeeds and the 'N days old' flag clears. Local-only
-    (opens Chrome on the machine running the server)."""
+    """Open Chrome to a SharePoint source so the user can (re)establish the session
+    and leave the tab open; the next scan's fetch then succeeds and the source's
+    'N days old' flag clears. `source` selects the site: 'regulatory' (Global
+    Regulatory Affairs) or 'otp' (Optimization, Withdrawal, and Deactivation
+    Tracker). Local-only (opens Chrome on the machine running the server)."""
     import subprocess
-    url = "https://northeastern.sharepoint.com/sites/GlobalRegulatoryAffairs"
+    src = (request.get_json(silent=True) or {}).get('source', 'regulatory')
+    if src == 'otp':
+        from fetch_portfolio_data import SHAREPOINT_URL as url
+    else:
+        url = "https://northeastern.sharepoint.com/sites/GlobalRegulatoryAffairs"
     try:
         subprocess.run(['open', '-a', 'Google Chrome', url], timeout=10)
         return jsonify({'ok': True, 'url': url})
