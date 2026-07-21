@@ -2403,16 +2403,44 @@ async function openRegulatorySession() {
         const data = await res.json().catch(() => ({}));
         if (btn) {
             if (res.ok && data.ok) {
-                btn.textContent = 'log in to SharePoint in Chrome…';
-                setTimeout(() => { btn.textContent = 'Regulatory Login'; btn.disabled = false; }, 8000);
+                btn.innerHTML = '<span class="auth-dot bad">●</span> log in to SharePoint…';
+                // Stays red until the next scan actually re-fetches regulatory;
+                // then refreshRegulatoryStatus() flips it green on its own.
+                setTimeout(() => { btn.disabled = false; refreshRegulatoryStatus(); }, 8000);
             } else {
-                btn.textContent = 'could not open Chrome';
+                btn.innerHTML = '<span class="auth-dot bad">●</span> could not open Chrome';
                 btn.title = data.detail || '';
                 btn.disabled = false;
             }
         }
     } catch (_) {
         if (btn) btn.disabled = false;
+    }
+}
+
+// Green/red dot on the Regulatory Login button, driven by the regulatory feed's
+// freshness (GET /api/source_health → 'Regulatory' source; stale = >3 days).
+// Green = data is current; red = stale / never fetched → click to reopen the
+// SharePoint tab and log in.
+async function refreshRegulatoryStatus() {
+    const btn = document.getElementById('reg-auth-btn');
+    if (!btn || window._staticMode) return;
+    try {
+        const res = await fetch('/api/source_health');
+        const data = await res.json();
+        const reg = ((data && data.sources) || []).find(s => s.name === 'Regulatory');
+        const days = (reg && reg.age_hours != null) ? Math.round(reg.age_hours / 24) : null;
+        btn.className = 'header-secondary-btn';
+        if (reg && !reg.stale) {
+            btn.innerHTML = '<span class="auth-dot ok">●</span> Regulatory OK';
+            btn.title = `Regulatory data current (${days === 0 ? 'today' : days + 'd old'}) — click to reopen SharePoint in Chrome`;
+        } else {
+            btn.innerHTML = '<span class="auth-dot bad">●</span> Regulatory stale';
+            btn.title = (days != null ? `Regulatory data is ${days} days old` : 'Regulatory data never fetched')
+                + ' — click to open SharePoint in Chrome and log in, then it refreshes on the next scan';
+        }
+    } catch (_) {
+        btn.textContent = 'Regulatory Login';
     }
 }
 
@@ -5804,6 +5832,7 @@ function _initDashboard() {
     if (typeof window._staticMode === 'undefined') {
         checkSessionHealth();
         refreshCimAuthStatus();
+        refreshRegulatoryStatus();
     }
 }
 
@@ -5820,7 +5849,7 @@ setInterval(() => {
 // Keep the CIM session badge + error banner self-correcting on the local
 // dashboard, so re-authenticating reflects within a minute without a reload.
 if (typeof window._staticMode === 'undefined') {
-    setInterval(() => { refreshCimAuthStatus(); checkSessionHealth(); }, 60000);
+    setInterval(() => { refreshCimAuthStatus(); refreshRegulatoryStatus(); checkSessionHealth(); }, 60000);
 }
 
 // ==================== Portfolio view ====================
