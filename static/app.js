@@ -2391,6 +2391,31 @@ async function refreshCimAuthStatus() {
     }
 }
 
+async function openRegulatorySession() {
+    // Open the SharePoint Global Regulatory Affairs site in Chrome so the user
+    // can log in / leave the tab open; the next scan's regulatory fetch then
+    // succeeds. Mirrors cimAuthenticate() but simpler (no session probe — SharePoint
+    // validity is only knowable by attempting the download during a scan).
+    const btn = document.getElementById('reg-auth-btn');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/auth/sharepoint', {method: 'POST'});
+        const data = await res.json().catch(() => ({}));
+        if (btn) {
+            if (res.ok && data.ok) {
+                btn.textContent = 'log in to SharePoint in Chrome…';
+                setTimeout(() => { btn.textContent = 'Regulatory Login'; btn.disabled = false; }, 8000);
+            } else {
+                btn.textContent = 'could not open Chrome';
+                btn.title = data.detail || '';
+                btn.disabled = false;
+            }
+        }
+    } catch (_) {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function cimAuthenticate() {
     const btn = document.getElementById('auth-btn');
     if (btn) btn.disabled = true;

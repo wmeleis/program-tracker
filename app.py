@@ -1164,6 +1164,22 @@ def api_auth_login():
         return jsonify({'ok': False, 'detail': str(e)}), 500
 
 
+@app.route('/api/auth/sharepoint', methods=['POST'])
+def api_auth_sharepoint():
+    """Open Chrome to the SharePoint Global Regulatory Affairs site so the user
+    can (re)establish the session and leave the tab open. The regulatory feed is
+    downloaded through that tab, so once it's open+logged-in the next scan's
+    regulatory fetch succeeds and the 'N days old' flag clears. Local-only
+    (opens Chrome on the machine running the server)."""
+    import subprocess
+    url = "https://northeastern.sharepoint.com/sites/GlobalRegulatoryAffairs"
+    try:
+        subprocess.run(['open', '-a', 'Google Chrome', url], timeout=10)
+        return jsonify({'ok': True, 'url': url})
+    except Exception as e:
+        return jsonify({'ok': False, 'detail': str(e)}), 500
+
+
 def _select_scan_mode():
     """Pick scan mode based on what's been run recently.
 
