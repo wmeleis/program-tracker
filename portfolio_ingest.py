@@ -3190,6 +3190,11 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
     # back to name parsing (Program Level + Degree Type + Program Name)
     # for rows with no Program Code.
     svt_rows_data = _safe_parse('SVT', parse_svt)
+    # Process intakes oldest→newest (by Airtable_ID). When several intakes for one
+    # program aggregate onto a single portfolio row, _apply_svt_fields overwrites
+    # with each newer non-empty value, so the MOST RECENT intake wins — e.g. a
+    # later Inactivation supersedes an earlier Deploy (Waleed 2026-07-21).
+    svt_rows_data.sort(key=lambda p: int(p['svt_key']) if str(p.get('svt_key', '')).isdigit() else -1)
 
     # Change tracking: fingerprint each entry's mapping-relevant fields (name,
     # code, campus, courseleaf key, initiative type — NOT status/phase, which
@@ -3262,19 +3267,20 @@ def ingest(xlsx_path=XLSX_PATH, tsv_path=TSV_PATH, roster_path=ROSTER_PATH, gls_
         return parent
 
     def _apply_svt_fields(row, p):
-        """Overlay SVT fields onto a tracker row (only if currently empty)."""
-        if not row.get('svt_status') and p.get('status'):
+        """Overlay SVT fields onto a tracker row. Intakes are processed
+        oldest→newest, so overwrite with each newer intake's non-empty value —
+        the MOST RECENT intake wins per field (a later Inactivation supersedes an
+        earlier Deploy). Empty newer values never clobber an existing value."""
+        if p.get('status'):
             row['svt_status'] = p['status']
-        if not row.get('roster_sub_status') and p.get('sub_status'):
+        if p.get('sub_status'):
             row['roster_sub_status'] = p['sub_status']
-        # roster_proposal_type now holds the HCWHY-derived classification
-        # (was the raw "Proposal Type" column in the old roster).
-        if not row.get('roster_proposal_type') and p.get('hcwhy'):
-            classified = _SVT_HCWHY_TO_TYPE.get(p['hcwhy'], p['hcwhy'])
-            row['roster_proposal_type'] = classified
-        if not row.get('roster_launch_date') and p.get('actual_launch_date'):
+        # roster_proposal_type holds the HCWHY-derived classification.
+        if p.get('hcwhy'):
+            row['roster_proposal_type'] = _SVT_HCWHY_TO_TYPE.get(p['hcwhy'], p['hcwhy'])
+        if p.get('actual_launch_date'):
             row['roster_launch_date'] = p['actual_launch_date']
-        if not row.get('speed_to_market') and p.get('speed_to_market'):
+        if p.get('speed_to_market'):
             row['speed_to_market'] = p['speed_to_market']
 
     for p in svt_rows_data:
