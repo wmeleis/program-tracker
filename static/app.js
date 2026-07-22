@@ -7499,7 +7499,7 @@ const _CRED_SETS = {
     "Bachelor's":    new Set(['BS','BA','BFA','BARCH','BSN','BSBA','BSCF','BACS','BSCS','BSCE','BSCHE','BSCMPE','BSIE','BSME','BSIS','AA']),
     "Master's":      new Set(['MS','MA','MBA','MFA','MPS','MPA','MPP','MPH','MED','MARCH','MDES','MSCS','MSIS','MSOR','MSCP','MSML','MSBA','MENG','MSJ','MSW','MAT','MSCIVE','MSECE','MSCH E','MSFMBA','MSENVE','MSSBS','LLM']),
     "PhD":           new Set(['PHD','PH.D']),
-    "Prof Doctorate":new Set(['DNP','DPT','DPS','DLP','EDD','DMSC','PHARMD','JD','JSSD','LLM']),
+    "Prof Doctorate":new Set(['DNP','DPT','DPS','DLP','EDD','DMSC','PHARMD','JD','JSSD']),  // LLM (Master of Laws) is a master's, not a doctorate
     "CAGS":          new Set(['CAGS']),
     "Certificate":   new Set(['CERTG','CERTU','CERTP','CERT']),
     "Minor":         new Set(['MINOR']),
