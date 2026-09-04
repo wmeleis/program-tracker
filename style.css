@@ -1,0 +1,2927 @@
+/* Program Approval Tracker - Dashboard Styles */
+
+:root {
+    --bg: #f8f9fa;
+    --surface: #ffffff;
+    --border: #e2e8f0;
+    --text: #1a202c;
+    --text-secondary: #64748b;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --current: #3b82f6;
+    --approved: #22c55e;
+    --pending: #cbd5e1;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06);
+    --radius: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+}
+
+/* Header */
+header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    row-gap: 10px;
+    flex-wrap: wrap;   /* wrap to a second line instead of squeezing items */
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+}
+
+.header-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-left: 12px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+}
+
+.last-updated {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-right: 8px;
+    white-space: nowrap;   /* never truncate the "Updated …" time */
+    flex-shrink: 0;
+}
+
+.scan-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.scan-status.running {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+/* All header buttons use the neutral secondary style (Update is rarely
+   clicked, so it isn't emphasized); the active tab is the only blue accent. */
+.header-secondary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Progress Container */
+.progress-container {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.progress-phase {
+    display: inline;
+}
+
+/* Pipeline Summary */
+.pipeline-section {
+    padding: 12px 24px;
+    background: var(--surface);
+    margin: 8px 24px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.pipeline-section h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0;
+}
+.pipeline-header-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+/* College perspective: arrows flank the pipeline bar (left = back to college,
+   right = forward to university). They sit OUTSIDE the scrollable bar so they
+   stay pinned at the edges and never scroll off. */
+.pipeline-row {
+    display: flex;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+}
+/* Size the bar to its tiles (don't grow to fill the row) so the panel arrow
+   sits right after the last tile instead of pinned to the far right. Still
+   shrinks + scrolls when the tiles overflow the available width. */
+.pipeline-row .pipeline-bar { flex: 0 1 auto; min-width: 0; }
+.panel-arrow {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--accent);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+.panel-arrow:hover { background: #eef2f7; }
+
+.pipeline-bar {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.pipeline-step {
+    flex: 0 0 auto;
+    min-width: 72px;
+    max-width: 104px;
+    padding: 10px 8px;
+    border-radius: 6px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+}
+
+.pipeline-step:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.pipeline-step.active {
+    border-color: var(--accent);
+}
+
+.pipeline-step .step-count {
+    font-size: 24px;
+    font-weight: 700;
+    display: block;
+    line-height: 1.2;
+}
+
+.pipeline-step .step-name {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: normal;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.pipeline-divider {
+    flex: 0 0 auto; align-self: stretch; display: flex; align-items: center;
+    padding: 0 4px; color: var(--text-secondary); font-weight: 700; font-size: 16px;
+    opacity: 0.5;
+}
+@keyframes pipeSlideIn { from { opacity: 0.3; transform: translateX(14px); } to { opacity: 1; transform: translateX(0); } }
+.pipeline-bar.pipe-slide-in { animation: pipeSlideIn 0.18s ease; }
+.pipeline-step.has-items { background: #eff6ff; }
+.pipeline-step.has-items .step-count { color: var(--accent); }
+.pipeline-step.empty { background: #f8fafc; }
+.pipeline-step.empty .step-count { color: var(--pending); }
+
+/* Smart Views + Type Buttons */
+.smart-views-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 24px 4px;
+    margin: 8px 24px 0;
+    flex-wrap: wrap;
+    /* Portfolio-style soft blue tint, block 1 (the button rows). */
+    background: #d8e6f6;
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.view-group {
+    display: flex;
+    gap: 6px;
+}
+
+.view-divider {
+    width: 1px;
+    height: 28px;
+    background: var(--border);
+    margin: 0 20px;
+}
+
+.type-btn {
+    padding: 7px 16px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.type-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.type-btn.active {
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* The College-perspective Level switch is a binary toggle, and its counts are
+   cross-filter previews — so the ACTIVE level needs an unmistakable "on" look
+   (solid accent, not the subtle light-blue used for preview buttons), otherwise
+   it's unclear whether a level filter is actually applied. */
+#level-filter-group .type-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+#level-filter-group .type-btn.active:hover { color: #fff; }
+
+/* Program-kind row: between smart-views and the filters dropdown row.
+   padding/margin match smart-views-section so buttons line up at the same
+   left edge as the rows above (48px from the page edge). */
+.kind-filter-section,
+.smart-actions-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 24px;
+    margin: 0 24px;
+    /* Same block-1 tint as smart-views-section; continues the visual band. */
+    background: #d8e6f6;
+}
+.smart-actions-section {
+    /* Last row of block 1 — round bottom corners and add bottom padding. */
+    padding-bottom: 8px;
+    margin-bottom: 0;
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.kind-btn {
+    padding: 6px 12px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.kind-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.kind-btn.active {
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.smart-view-btn {
+    padding: 7px 14px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.smart-view-btn:hover {
+    border-color: #94a3b8;
+    color: var(--text);
+}
+
+.smart-view-btn.active {
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.smart-view-btn .view-count {
+    background: rgba(59, 130, 246, 0.15);
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 4px;
+    font-size: 11px;
+}
+
+.smart-view-btn.active .view-count {
+    background: rgba(59, 130, 246, 0.25);
+    color: var(--accent);
+}
+
+/* Info tooltip: fixed-position overlay driven by JS (escapes overflow:hidden parents) */
+.info-tip-wrap {
+    display: inline-flex;
+    align-items: center;
+}
+.info-tip {
+    display: inline-flex;
+    align-items: center;
+}
+.tip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 10px;
+    margin-left: 2px;
+    border-radius: 50%;
+    background: rgba(100, 116, 139, 0.2);
+    color: #64748b;
+    font-size: 7px;
+    font-weight: 700;
+    font-style: normal;
+    line-height: 1;
+    cursor: default;
+    flex-shrink: 0;
+    position: relative;
+    top: -5px;
+}
+.tip-icon:hover {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--accent);
+}
+.tip-bubble { display: none; }
+#tip-overlay {
+    display: none;
+    position: fixed;
+    background: #1e293b;
+    color: #f1f5f9;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+    padding: 8px 12px;
+    border-radius: 7px;
+    white-space: normal;
+    width: 220px;
+    z-index: 99999;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    text-transform: none;
+    letter-spacing: 0;
+}
+#tip-overlay::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #1e293b;
+}
+
+/* Days at step indicator */
+.days-at-step {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.days-at-step.fresh { color: var(--success); }
+.days-at-step.aging { color: var(--warning); }
+.days-at-step.stuck { color: var(--danger); font-weight: 700; }
+
+/* Filters */
+.filters-section {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 24px;
+    margin: 4px 24px 0;
+    /* Portfolio-style block 2 (the dropdown filters). Lighter tint than
+       block 1 so the two bands are visually distinct. */
+    background: #e0ecfa;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.filter-group label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.filter-group select, .filter-group input {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text);
+    background: white;
+}
+
+.filter-select-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.filter-clear {
+    display: none;               /* only shown when the filter has a value */
+    cursor: pointer;
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1;
+    padding: 1px 3px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: -2px;
+}
+
+.filter-clear:hover {
+    color: var(--text);
+    background: var(--border);
+}
+
+.filter-select-wrap.has-value .filter-clear,
+.filter-multi-wrap.has-value .filter-clear {
+    display: inline-block;
+    color: var(--text);
+}
+
+/* Multi-select checkbox filter dropdowns */
+.filter-multi-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+}
+.filter-multi-btn {
+    font-size: 0.85em;
+    padding: 4px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.filter-multi-wrap.has-value .filter-multi-btn {
+    background: #eff6ff;
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.filter-multi-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.10);
+    min-width: 180px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 200;
+    padding: 6px 4px;
+}
+.filter-multi-dropdown.open { display: block; }
+
+.search-group { flex: 1; min-width: 200px; }
+.search-group input { width: 100%; }
+.search-group .filter-select-wrap { width: 100%; }
+.search-group .filter-select-wrap input { width: 100%; }
+
+
+.result-count {
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Programs Table */
+.programs-section {
+    padding: 16px 24px;
+}
+
+.group-header {
+    background: #f1f5f9;
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+    border-radius: var(--radius) var(--radius) 0 0;
+    margin-top: 16px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+}
+
+.group-header:hover { background: #e2e8f0; }
+
+.group-header .group-count {
+    background: var(--accent);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.group-header .collapse-icon {
+    transition: transform 0.2s;
+    font-size: 12px;
+}
+
+.group-header.collapsed .collapse-icon {
+    transform: rotate(-90deg);
+}
+
+.program-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    border-radius: 0 0 var(--radius) var(--radius);
+    overflow: hidden;
+}
+/* Portfolio table: fixed layout so per-column widths (drag-to-resize) are
+   authoritative. Data cells clip with an ellipsis; the Program name column keeps
+   wrapping so long names stay fully readable. */
+.program-table.pf-fixed { table-layout: fixed; width: auto; }
+.program-table.pf-fixed th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.program-table.pf-fixed td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.program-table.pf-fixed td.program-name-cell { position: relative; padding-left: 29px; white-space: normal; word-break: break-word; text-overflow: clip; }
+/* Per-level indent (16px/level) when a program group is open: program (level 0) →
+   campus (level 1) → concentration. Flat Deployments view: deployment (0) → conc
+   (1); grouped Program view (.pf-grouped): program (0) → campus (1) → conc (2).
+   The absolute caret's `left` shifts with the indent so its gutter stays aligned. */
+.program-table.pf-fixed tr.portfolio-grouped-deployment td.program-name-cell { padding-left: 45px; }
+.program-table.pf-fixed tr.portfolio-grouped-deployment .pf-caret { left: 24px; }
+.program-table.pf-fixed tr.portfolio-curriculum-conc-row td.program-name-cell,
+.program-table.pf-fixed tr.portfolio-concentration-row td.program-name-cell { padding-left: 42px; }
+.program-table.pf-fixed.pf-grouped tr.portfolio-curriculum-conc-row td.program-name-cell,
+.program-table.pf-fixed.pf-grouped tr.portfolio-concentration-row td.program-name-cell { padding-left: 58px; }
+
+.program-table th {
+    text-align: left;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--border);
+    background: #fafbfc;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.program-table th:has(.tip-icon) {
+    overflow: visible;
+}
+.col-resize-handle {
+    position: absolute;
+    top: 0; right: 0;
+    width: 6px; height: 100%;
+    cursor: col-resize;
+    z-index: 2;
+}
+.col-resize-handle:hover, .col-resize-handle.resizing {
+    background: rgba(59,130,246,0.35);
+}
+
+.program-table th:hover {
+    background: #f1f5f9;
+}
+
+.program-table th .sort-icon {
+    margin-left: 4px;
+    font-size: 10px;
+}
+.program-table th.sort-active {
+    color: var(--accent);
+    background: #eff6ff;
+}
+
+/* Info ⓘ icon shown next to portfolio column header labels. Hover shows the
+   help tooltip (native title attribute). Clicking it does not trigger sort
+   on the parent <th>. */
+.col-help {
+    display: inline-block;
+    margin-left: 5px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: help;
+    vertical-align: 2px;
+}
+.col-help:hover {
+    color: var(--accent);
+}
+
+.program-table td {
+    padding: 2px 10px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.15;
+}
+
+.program-table tr.program-row {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.program-table tr.program-row:hover {
+    background: #f8fafc;
+}
+
+.program-table tr.program-row.expanded {
+    background: #eff6ff;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Row-level visual distinction for new vs changed programs.
+   CIM Programs table keeps its colored left-border marker; Portfolio
+   rows get a full-row very-light tint matching the same colors so a
+   user scanning the table can see status at a glance. */
+.program-row.row-added td:first-child {
+    border-left: 4px solid #22c55e;
+    padding-left: 10px;
+}
+.program-row.row-edited td:first-child {
+    border-left: 4px solid #3b82f6;
+    padding-left: 10px;
+}
+.program-row.row-deactivated td:first-child {
+    border-left: 4px solid #ef4444;
+    padding-left: 10px;
+}
+
+/* Portfolio rows: very light full-row tint (~5% opacity) instead of a
+   border marker. Kept faint so the row text stays readable and the
+   different states stand out only on glance. */
+/* Portfolio: very light pastels (default) */
+.portfolio-row.row-added td             { background: #c6ecd6; }  /* whole program new (deeper green) */
+.portfolio-row.row-added-partial td     { background: #edfaf2; }  /* contains something new (pale green) */
+.portfolio-row.row-launching td         { background: #e7defb; }  /* whole program launching (purple) */
+.portfolio-row.row-launching-partial td { background: #f4f0fe; }  /* some campuses launching (pale purple) */
+.portfolio-row.row-edited td            { background: #f7fbff; }
+.portfolio-row.row-deactivated td       { background: #f2cfcf; }  /* inactivation (deeper red) */
+.portfolio-row.row-added:hover td            { background: #b4e4c8; }
+.portfolio-row.row-added-partial:hover td    { background: #e0f6ea; }
+.portfolio-row.row-launching:hover td        { background: #dacdf7; }
+.portfolio-row.row-launching-partial:hover td { background: #e9e1fc; }
+.portfolio-row.row-edited:hover td      { background: #eff6ff; }
+.portfolio-row.row-deactivated:hover td { background: #ecbcbc; }
+/* CIM Programs / Courses: slightly darker tint than Portfolio so the
+   row status reads more clearly against the table's white background. */
+.program-row.row-added td               { background: #ecfdf3; }
+.program-row.row-edited td              { background: #eff5fe; }
+.program-row.row-deactivated td         { background: #fdeeee; }
+.program-row.row-added:hover td         { background: #dcfce7; }
+.program-row.row-edited:hover td        { background: #dbeafe; }
+.program-row.row-deactivated:hover td   { background: #fee2e2; }
+
+/* Portfolio rows for programs that don't exist in CIM (external-feed-only).
+   Very light amber tint across all cells flags 'no CIM record yet'. */
+.portfolio-row.portfolio-not-in-cim td {
+    background: #fffbeb;
+}
+.portfolio-row.portfolio-not-in-cim:hover td {
+    background: #fef3c7;
+}
+
+/* Proposal type filter buttons */
+.proposal-btn {
+    padding: 7px 14px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.proposal-btn:hover { border-color: #94a3b8; color: var(--text); }
+
+.proposal-btn.active-new { background: #dcfce7; color: #166534; border-color: #22c55e; }
+.proposal-btn.active-edit { background: #dbeafe; color: #1e40af; border-color: #3b82f6; }
+.proposal-btn.active-inact { background: #fee2e2; color: #991b1b; border-color: #ef4444; }
+.proposal-btn.active-all { background: #eff6ff; color: var(--accent); border-color: var(--accent); }
+.proposal-btn.active-complete { background: #ecfdf5; color: #065f46; border-color: #22c55e; }
+
+/* Progress bar */
+.progress-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 8px;
+    background: var(--pending);
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 60px;
+}
+
+.progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+
+.progress-fill.early { background: var(--danger); }
+.progress-fill.mid { background: var(--warning); }
+.progress-fill.late { background: var(--success); }
+
+.progress-text {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Table legend */
+.table-legend {
+    display: flex;
+    gap: 16px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+/* Clickable legend entries = quick colour filter. */
+.legend-item.legend-clickable { cursor: pointer; border-radius: 5px; padding: 1px 6px; margin: -1px -2px; }
+.legend-item.legend-clickable:hover { background: #eef2f7; }
+.legend-item.legend-active { background: #dbe7f6; color: #1c4e8a; font-weight: 600; }
+
+.legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+}
+
+.legend-swatch.new { background: #22c55e; }
+.legend-swatch.new-partial { background: #86efac; }
+.legend-swatch.launching { background: #8b5cf6; }
+.legend-swatch.change { background: #3b82f6; }
+.legend-swatch.inactivation { background: #ef4444; }
+.legend-swatch.not-in-cim { background: #fffbeb; border: 1px solid #fcd34d; }
+.legend-swatch.completed { background: #ffffff; border: 1px solid #cbd5e1; }
+.legend-swatch.concentration { background: #f1f5f9; border: 1px solid #cbd5e1; }
+
+/* Workflow detail (expanded row) */
+.workflow-detail {
+    padding: 16px 20px;
+    background: #eef2f7;
+    border-left: 4px solid var(--primary);
+    border-bottom: 3px solid var(--primary);
+}
+
+.workflow-detail td {
+    padding: 12px 16px;
+}
+
+/* Highlight the program row that is expanded */
+tr.program-row.expanded {
+    background: #eef2f7;
+    border-bottom: none;
+}
+
+tr.program-row.expanded td {
+    font-weight: 600;
+}
+
+.workflow-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+
+.wf-step {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.wf-step.approved {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.wf-step.current {
+    background: #dbeafe;
+    color: #1e40af;
+    font-weight: 600;
+    box-shadow: 0 0 0 2px var(--accent);
+}
+
+.wf-step.pending {
+    background: #f1f5f9;
+    color: #94a3b8;
+}
+
+.wf-arrow {
+    color: var(--pending);
+    font-size: 14px;
+    margin: 0 2px;
+}
+
+.workflow-meta {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.workflow-meta a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.workflow-meta a:hover { text-decoration: underline; }
+
+/* Recent Changes */
+.changes-section {
+    padding: 20px 24px;
+    margin: 16px 24px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.changes-section h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+}
+
+.change-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+
+.change-item:last-child { border-bottom: none; }
+
+.change-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.change-icon.step-change { background: #dbeafe; color: var(--accent); }
+.change-icon.new-program { background: #dcfce7; color: var(--success); }
+
+.change-arrow {
+    color: var(--text-secondary);
+    margin: 0 4px;
+}
+
+.change-time {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px;
+    font-size: 14px;
+}
+
+/* Loading spinner */
+.spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Detail tabs */
+.detail-tabs {
+    display: flex;
+    gap: 0;
+    align-items: center;
+    border-bottom: 2px solid #e2e8f0;
+    margin-bottom: 12px;
+}
+
+.detail-search {
+    margin-left: auto;
+    margin-right: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #fff;
+    width: 200px;
+    color: #334155;
+}
+
+.detail-search:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+mark.detail-hl { background: #fef08a; padding: 0 2px; border-radius: 2px; }
+mark.detail-hl.detail-hl-current { background: #fb923c; box-shadow: 0 0 0 2px #fb923c; }
+
+/* The content area that opens when a detail tab is selected. Give it a
+ * white card background distinct from the (pale blue-grey) detail panel
+ * and the (near-white) page, so it's easy to see where the opened
+ * tab's information begins. */
+.detail-content {
+    background: #fff;
+    border: 1px solid #d3dce8;
+    border-radius: 6px;
+    padding: 14px 16px;
+}
+
+.detail-tab {
+    padding: 6px 18px;
+    border: none;
+    background: transparent;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+}
+
+.detail-tab:hover { color: #334155; }
+
+.detail-tab.active {
+    color: #3b82f6;
+    border-bottom-color: #3b82f6;
+}
+
+/* Header search bar */
+.header-search {
+    position: relative;
+    margin-left: 16px;
+    flex: 1;
+    min-width: 220px;   /* don't let the search collapse when the header is crowded */
+    max-width: 360px;
+}
+.header-search input[type=text] {
+    width: 100%;
+    padding: 8px 30px 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--surface);
+}
+.header-search input[type=text]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+.header-search-clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+    font-size: 16px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px 6px;
+}
+.header-search-clear.visible { display: block; }
+
+/* Subtle links row below the header — lower-priority actions */
+/* Secondary action button in the page header (e.g. "References" — opens
+   the custom-reference-curriculum manager modal on the Programs view). */
+.header-secondary-btn {
+    padding: 8px 14px;
+    border: 1px solid var(--border);   /* one neutral outline for all secondary buttons */
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+.header-secondary-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: #eff6ff;
+}
+.subtle-links a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--text-secondary);
+}
+.subtle-links a:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* Modal overlay */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 2000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 20px;
+    overflow-y: auto;
+}
+.modal-panel {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+    width: 100%;
+    max-width: 720px;
+    max-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+.modal-header h2 {
+    margin: 0;
+    font-size: 18px;
+}
+.modal-close {
+    background: transparent;
+    border: none;
+    font-size: 24px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 8px;
+    line-height: 1;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* References modal */
+.refs-upload h3, .refs-list-wrap h3 {
+    margin-top: 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+.refs-help {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: -4px;
+}
+#ref-upload-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+#ref-upload-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+#ref-upload-form input[type=text] {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+}
+#ref-upload-submit {
+    align-self: flex-start;
+    padding: 8px 16px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#ref-upload-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+#ref-upload-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+    align-self: flex-start;
+}
+#ref-upload-status.ok { color: #166534; }
+#ref-upload-status.err { color: #991b1b; }
+.refs-list-item {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.refs-list-item-info { flex: 1; }
+.refs-list-item-name { font-weight: 600; font-size: 14px; }
+.refs-list-item-meta { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.refs-list-item-delete {
+    padding: 6px 12px;
+    background: transparent;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.refs-list-item-delete:hover { background: #fee2e2; }
+.refs-list-item-actions { display: flex; flex-direction: column; gap: 6px; }
+.refs-list-item-download {
+    padding: 6px 12px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid #bfdbfe;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.refs-list-item-download:hover { background: #eff6ff; }
+
+/* Reference-source selector inside the Reference tab */
+.ref-source-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+.ref-source-picker label { color: var(--text-secondary); font-weight: 500; }
+.ref-source-picker select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    min-width: 280px;
+}
+
+/* "This program is the reference for: …" banner shown on the Reference tab
+ * when other programs (explicitly or via auto-Boston-counterpart) use this
+ * program as their reference. */
+.referenced-by-banner {
+    background: #eff6ff;
+    border-left: 3px solid var(--accent, #2563eb);
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #1e3a8a;
+}
+.referenced-by-banner ul {
+    margin: 6px 0 0 0;
+    padding-left: 18px;
+}
+.referenced-by-banner li {
+    margin: 2px 0;
+}
+
+/* Error banner (session check failures etc.) */
+.error-banner {
+    background: #fee2e2;
+    border-bottom: 2px solid #ef4444;
+    color: #991b1b;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.error-banner-close {
+    background: transparent;
+    border: none;
+    color: #991b1b;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+    border-radius: 4px;
+}
+
+.error-banner-close:hover {
+    background: rgba(153, 27, 27, 0.1);
+}
+
+/* Reference curriculum header */
+.reference-header {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: #856404;
+    font-weight: 500;
+}
+
+/* Regulatory tab */
+.regulatory-header {
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #0c4a6e;
+}
+.regulatory-header .reg-source {
+    font-size: 12px;
+    color: #475569;
+    margin-bottom: 4px;
+}
+.regulatory-header .reg-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+.regulatory-header .reg-low-confidence {
+    color: #b45309;
+    background: #fef3c7;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+}
+.reg-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid;
+}
+.reg-badge-ok {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+    color: #065f46;
+}
+.reg-badge-moved {
+    background: #fffbeb;
+    border-color: #fde68a;
+    color: #92400e;
+}
+.reg-badge-missing {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #991b1b;
+}
+.reg-approved-count {
+    color: #475569;
+    font-size: 12px;
+    margin-left: 4px;
+}
+.regulatory-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.regulatory-table th {
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 600;
+}
+.regulatory-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: top;
+}
+.regulatory-table .reg-section {
+    font-weight: 600;
+    color: #334155;
+    background: #f8fafc;
+    padding-top: 10px;
+    padding-bottom: 4px;
+}
+.regulatory-table .reg-flag {
+    width: 20px;
+    text-align: center;
+}
+.regulatory-table .reg-code {
+    font-family: "SF Mono", Monaco, Consolas, monospace;
+    white-space: nowrap;
+    width: 90px;
+    color: #1f2937;
+}
+.regulatory-table .reg-note {
+    font-size: 12px;
+    color: #64748b;
+    white-space: nowrap;
+}
+.regulatory-table tr.regflag-missing {
+    background: #fef2f2;
+}
+.regulatory-table tr.regflag-missing .reg-flag { color: #dc2626; }
+.regulatory-table tr.regflag-missing .reg-note { color: #991b1b; }
+.regulatory-table tr.regflag-moved {
+    background: #fffbeb;
+}
+.regulatory-table tr.regflag-moved .reg-flag { color: #d97706; }
+.regulatory-table tr.regflag-moved .reg-note { color: #92400e; }
+
+/* Complete tile (label-only pipeline-bar tile after Catalog) */
+.pipeline-step.pipeline-step-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pipeline-step.pipeline-step-label .step-name {
+    font-weight: 600;
+    color: #475569;
+}
+.pipeline-step.pipeline-step-label:hover { background: #f1f5f9; cursor: pointer; }
+.pipeline-step.pipeline-step-label.active { background: #eff6ff; border-color: var(--accent); }
+.pipeline-step.pipeline-step-label.active .step-name { color: var(--accent); }
+
+/* Completed program row styling */
+.progress-fill.complete { background: #22c55e; }
+.days-at-step.complete {
+    background: #ecfdf5; color: #065f46;
+    border: 1px solid #a7f3d0;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.program-row.row-complete td em.muted { color: #64748b; font-style: italic; }
+
+/* Any remaining structuredcontenterror elements — show without red styling */
+.curriculum-content .structuredcontenterror {
+    border: none !important;
+    color: inherit;
+    cursor: default;
+}
+
+/* Fallback: hide CIM's "Course List" captions and redundant header rows via CSS too */
+.curriculum-content .hidden,
+.curriculum-content .noscript,
+.curriculum-content caption {
+    display: none !important;
+}
+
+/* Curriculum content */
+.curriculum-content {
+    padding: 8px 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.curriculum-content table.sc_courselist {
+    width: auto;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 12px 0;
+}
+
+.curriculum-content table {
+    width: auto;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 12px 0;
+}
+
+.curriculum-content th,
+.curriculum-content td {
+    padding: 5px 12px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+    font-size: 13px;
+    vertical-align: top;
+}
+
+/* Code column fixed width for alignment */
+.curriculum-content .codecol {
+    width: 120px;
+    white-space: nowrap;
+}
+
+/* Title column */
+.curriculum-content .titlecol {
+    min-width: 250px;
+}
+
+/* Hours column right-aligned and fixed width */
+.curriculum-content .hourscol {
+    width: 50px;
+    text-align: right;
+    padding-left: 16px;
+}
+
+.curriculum-content th {
+    font-weight: 600;
+    background: #f8fafc;
+    color: #64748b;
+}
+
+/* Area headers within tables (e.g., "Restricted Electives", "Capstone") */
+/* Area headers within tables (e.g., "Required Core", "Electives", "Programming") */
+/* Default area header: low-emphasis structural marker (Required / Core / etc.) */
+.curriculum-content .areaheader {
+    font-weight: 600;
+    color: #475569;
+    font-size: 13px;
+    letter-spacing: 0.01em;
+}
+
+.curriculum-content tr.areaheader td {
+    padding-top: 14px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+/* "Option A:", "Complete 3 semester hours...", "In consultation with advisor..." —
+   these describe choices but don't need heavy visual weight. */
+.curriculum-content tr.areaheader.ref-option td {
+    border-bottom: none;
+    padding-top: 8px;
+}
+.curriculum-content tr.areaheader.ref-option .areaheader,
+.curriculum-content tr.areaheader.ref-option .courselistcomment {
+    font-weight: 500;
+    font-style: italic;
+    color: #64748b;
+}
+
+/* Comment rows (e.g., "Complete 4 semester hours from...") */
+.curriculum-content .courselistcomment {
+    font-style: italic;
+    color: #475569;
+}
+
+.curriculum-content .courselistcomment.areaheader {
+    font-style: normal;
+}
+
+/* Indented sub-items (inline style is stripped, so enforce via CSS) */
+.curriculum-content .blockindent {
+    margin-left: 20px !important;
+}
+
+/* "or COURSE 1234" alternative rows attach visually to the row above:
+   no top spacing, no border separating them from the primary course.
+   The blockindent on the code cell already provides the visual indent.
+   :has() drops the bottom border of the row preceding an orclass so the
+   primary + its alternatives read as one grouped requirement. */
+.curriculum-content tr.orclass td {
+    padding-top: 0;
+}
+.curriculum-content tr:has(+ tr.orclass) td {
+    border-bottom: none;
+}
+
+/* H2 — major section (Core Requirements, Electives Option, etc.) */
+.curriculum-content h2 {
+    margin: 18px 0 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    border-bottom: 1px solid #cbd5e1;
+    padding-bottom: 3px;
+}
+
+.curriculum-content h2:first-child {
+    margin-top: 4px;
+}
+
+/* H3/H4 — subsections (concentrations also use h3) — low emphasis by default */
+.curriculum-content h3,
+.curriculum-content h4 {
+    margin: 12px 0 4px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #475569;
+}
+
+/* Concentration headings — visually dominant so they stand out from the
+   structural plumbing (Core / Electives / Option A / ...) */
+.curriculum-content h2.ref-concentration,
+.curriculum-content h3.ref-concentration,
+.curriculum-content h4.ref-concentration {
+    margin-top: 22px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 3px;
+    letter-spacing: 0.01em;
+}
+
+.curriculum-content p {
+    margin: 4px 0;
+}
+
+.curriculum-content ul,
+.curriculum-content ol {
+    margin: 4px 0;
+    padding-left: 20px;
+}
+
+.curriculum-content hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 16px 0;
+}
+
+/* Compare / Diff view */
+.compare-identical {
+    padding: 16px;
+    background: #dcfce7;
+    border: 1px solid #86efac;
+    border-radius: 6px;
+    color: #166534;
+    font-weight: 600;
+    font-size: 14px;
+    text-align: center;
+    margin-top: 8px;
+}
+
+/* Academic Alignment — one-line summary above the side-by-side */
+.align-summary {
+    margin: 8px 0 10px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+.align-summary.align-ok {
+    background: #dcfce7;
+    border: 1px solid #86efac;
+    color: #166534;
+    font-weight: 600;
+}
+.align-summary.align-diff {
+    background: #fef9c3;
+    border: 1px solid #fde047;
+    color: #854d0e;
+}
+.align-summary b { font-weight: 700; }
+
+/* Misaligned tab — headed, bidirectional course lists */
+.mis-heading {
+    margin: 14px 0 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #1f2937);
+}
+.mis-none {
+    font-size: 13px;
+    color: var(--text-secondary, #6b7280);
+    margin: 2px 0 6px;
+    font-style: italic;
+}
+.misaligned-table {
+    border-collapse: collapse;
+    margin: 6px 0 14px;
+    width: auto;
+}
+.misaligned-table td {
+    padding: 3px 14px 3px 0;
+    font-size: 13px;
+    vertical-align: top;
+}
+.misaligned-table .mis-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+    color: #991b1b;
+    white-space: nowrap;
+}
+.misaligned-table .mis-title { color: var(--text-secondary); }
+
+.compare-identical-small {
+    padding: 8px 12px;
+    background: #dcfce7;
+    border: 1px solid #86efac;
+    border-radius: 4px;
+    color: #166534;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: center;
+    margin: 4px 0;
+}
+
+.compare-legend {
+    display: flex;
+    gap: 20px;
+    margin: 8px 0 12px;
+    font-size: 12px;
+    color: #475569;
+}
+
+.compare-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-box {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+}
+
+.diff-removed-bg { background: #fecaca; }
+.diff-added-bg { background: #bbf7d0; }
+.diff-moved-bg { background: #fde68a; }
+
+/* Side-by-side comparison table */
+.compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    line-height: 1.5;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.compare-table thead th {
+    background: #f1f5f9;
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: 12px;
+    color: #475569;
+    text-align: left;
+    border-bottom: 2px solid #cbd5e1;
+}
+
+.compare-table thead th.cmp-divider {
+    width: 3px;
+    padding: 0;
+    background: #cbd5e1;
+}
+
+.compare-table td {
+    padding: 4px 8px;
+    vertical-align: top;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.compare-table td.cmp-divider {
+    width: 3px;
+    padding: 0;
+    background: #e2e8f0;
+}
+
+.compare-table td.cmp-code {
+    width: 90px;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+/* "or COURSE 1234" / "and COURSE 1234" alternative rows that mergeAlts
+   couldn't fold into a primary (orphans). Fallback styling so they at
+   least read as alternatives. */
+.compare-table td.cmp-code.cmp-alt {
+    padding-left: 28px;
+    font-weight: 400;
+}
+
+/* Alternatives that DID get merged into a primary's cell render as
+   sub-lines (one <div> per alt) inside the same td as the primary,
+   so they can never be visually separated by the LCS diff layout. */
+.compare-table .cmp-alt-line {
+    padding-left: 20px;
+    font-weight: 400;
+    font-style: normal;
+    margin-top: 2px;
+}
+
+/* Asymmetric alt: present on this side but not the opposite side. In a
+   row that LCS calls "same" overall (primaries match), this is the
+   visual cue that the cell still differs. The right side's only-alts
+   are "added relative to the proposal" → green tint; the left side's
+   only-alts are "in the proposal but not the reference" → red tint. */
+.compare-table .cmp-alt-line.cmp-alt-asym-right {
+    background: #dcfce7;
+    color: #166534;
+    border-radius: 3px;
+    padding-right: 4px;
+}
+.compare-table .cmp-alt-line.cmp-alt-asym-left {
+    background: #fee2e2;
+    color: #991b1b;
+    border-radius: 3px;
+    padding-right: 4px;
+}
+
+.compare-table td.cmp-title {
+    /* flexible width */
+}
+
+.compare-table td.cmp-hours {
+    width: 35px;
+    text-align: right;
+}
+
+.compare-table td.cmp-header {
+    font-weight: 700;
+    font-size: 13px;
+    padding-top: 10px;
+    border-bottom: 1px solid #cbd5e1;
+}
+
+.compare-table td.cmp-same {
+    background: #fff;
+    color: #334155;
+}
+
+/* Removed/added cells use a NEUTRAL background; meaning is carried per-code
+   by .cmp-c-left / .cmp-c-right below (presence-based coloring), so a shared
+   course inside a one-sided "or-group" row isn't painted as flagged. */
+.compare-table td.cmp-removed { background: #fff; }
+.compare-table td.cmp-added   { background: #fff; }
+
+/* Per-code presence color (left column = Proposed, right column = Reference):
+   a code only in the proposal (left, missing from reference) is red; a code
+   only in the reference (right, missing from proposal) is green; shared codes
+   carry no class and inherit the neutral cell color. */
+.compare-table .cmp-c-left  { color: #b91c1c; font-weight: 600; }
+.compare-table .cmp-c-right { color: #15803d; font-weight: 600; }
+
+.compare-table td.cmp-moved {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.compare-table td.cmp-empty {
+    background: #f8fafc;
+}
+
+/* Deployment section headers in Boston program Compare view */
+.compare-deployment-section {
+    margin: 16px 0 8px;
+}
+
+.compare-deployment-section:first-of-type {
+    margin-top: 8px;
+}
+
+.compare-deployment-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0 0 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+/* Colored Compare button */
+.detail-tab.compare-identical-btn {
+    color: #166534;
+    border-bottom-color: #22c55e;
+    background: #f0fdf4;
+}
+
+.detail-tab.compare-different-btn {
+    color: #991b1b;
+    border-bottom-color: #ef4444;
+    background: #fef2f2;
+}
+
+/* View Toggle (Programs/Courses) + search */
+.header-middle {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+}
+
+.view-toggle {
+    display: flex;
+    gap: 8px;
+}
+
+.toggle-btn {
+    padding: 8px 20px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.toggle-btn.active {
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* ==================== Portfolio view ==================== */
+
+.portfolio-lvl-btn, .portfolio-deg-btn, .portfolio-status-btn,
+.portfolio-incim-btn, .portfolio-cimchg-btn {
+    padding: 5px 13px;
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.portfolio-lvl-btn:hover, .portfolio-deg-btn:hover, .portfolio-status-btn:hover,
+.portfolio-incim-btn:hover, .portfolio-cimchg-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.portfolio-lvl-btn.active, .portfolio-deg-btn.active, .portfolio-status-btn.active,
+.portfolio-incim-btn.active {
+    background: #eff6ff;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+/* CIM Change buttons echo the row-border colors: green/blue/red on active */
+.portfolio-cimchg-btn.cimchg-new.active {
+    background: #dcfce7; color: #166534; border-color: #22c55e;
+}
+.portfolio-cimchg-btn.cimchg-edit.active {
+    background: #dbeafe; color: #1e40af; border-color: #3b82f6;
+}
+.portfolio-cimchg-btn.cimchg-inact.active {
+    background: #fee2e2; color: #991b1b; border-color: #ef4444;
+}
+.portfolio-btn-row-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    margin-right: 2px;
+}
+
+.portfolio-filters-section {
+    display: block;
+    padding: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+.portfolio-filter-block {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 4px;
+    column-gap: 12px;
+    padding: 6px 16px;
+}
+.portfolio-filter-block-1 {
+    background: #d8e6f6;  /* a touch darker, still soft */
+    border-bottom: 1px solid #c7dcf2;
+}
+.portfolio-filter-block-2 {
+    background: #e0ecfa;  /* faint blue */
+}
+
+.portfolio-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.78em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.badge-good {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+.badge-bad {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+.badge-proposal {
+    background: #f59e0b;
+    color: #fff;
+    border: 1px solid #d97706;
+}
+.badge-complete {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+}
+.otp-badge {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.ipd-badge {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+}
+
+.roster-badge {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+
+.gls-badge {
+    background: #ede9fe;
+    color: #5b21b6;
+    border: 1px solid #c4b5fd;
+}
+
+.portfolio-row td {
+    vertical-align: top;
+    padding: 8px 10px;
+}
+
+/* Column resize handle on the Portfolio (and any program-table) headers.
+   Sits flush against the right edge; cursor flips to col-resize on hover. */
+.col-resize {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 5;
+    background: transparent;
+}
+.col-resize:hover,
+.col-resize:active {
+    background: rgba(59,130,246,0.35);
+}
+
+/* Parent-row expansion affordance — no dedicated toggle column.
+   The program-name cell becomes clickable when the row has children, gets
+   a semibold name + an inline chevron suffix that flips on expand. */
+.portfolio-parent-name {
+    cursor: pointer;
+}
+.portfolio-parent-name:hover {
+    background: #f1f5f9;
+}
+/* Grouped Program view: LEADING caret column (expand) + name-opens-drawer.
+   The caret is its own generous 22x22 target; a single ▸ glyph rotated 90° on
+   .expanded shows state. A spacer keeps leaf-row names aligned. */
+/* Caret and spacer are the SAME box (16x16 + 3px gap) so a name starts at the
+   exact same x whether or not its row has a caret. The SVG rotates, not the box,
+   so the caret's footprint never changes between collapsed/expanded. */
+/* The caret sits ABSOLUTELY in the name cell's left gutter (reserved by the
+   cell's padding-left), so it never occupies text flow. That gives the name a
+   hanging indent: every wrapped line aligns under the first line's text, and the
+   name starts at the same x whether or not the row has a caret. */
+.pf-caret {
+    position: absolute; left: 8px; top: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; box-sizing: border-box;
+    color: #64748b; border-radius: 5px; cursor: pointer; user-select: none;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+.pf-caret svg { transition: transform 0.12s ease; }
+.pf-caret.expanded svg { transform: rotate(90deg); }
+.pf-caret:hover { background: #dbe3ec; color: var(--text); }
+.pf-caret-spacer { display: none; }
+/* Name = open the drawer; hover cue is an underline + a faint panel icon that
+   fades in (fixed size so it doesn't reflow the row). */
+.pf-open { cursor: pointer; }
+.pf-open:hover { text-decoration: underline; }
+
+/* Trailing expand/collapse control — after the name, with a generous padded
+   click target and its own handler so it toggles reliably. */
+.portfolio-conc-chevron {
+    display: inline-block;
+    margin-left: 3px;
+    padding: 3px 8px;              /* bigger click target — it was a ~7px glyph */
+    font-size: 15px;
+    line-height: 1;
+    color: #475569;
+    vertical-align: middle;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.12s ease, background 0.12s ease;
+}
+.portfolio-conc-chevron:hover {
+    background: #dbe3ec;           /* signal it's clickable */
+    color: var(--text);
+}
+.portfolio-parent-name:hover .portfolio-conc-chevron,
+.portfolio-conc-chevron.expanded {
+    color: var(--text);
+}
+
+/* Campus quick-shortcut button (e.g. "Boston") next to the Campus filter. */
+.portfolio-campus-shortcut {
+    font-size: 0.85em;
+    padding: 4px 10px;
+    margin-left: 4px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.portfolio-campus-shortcut:hover {
+    background: #eff6ff;
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.portfolio-curriculum-conc-row {
+    background: #f8fafc;
+}
+.portfolio-curriculum-conc-row td {
+    font-size: 12px;
+    color: #475569;
+    padding-top: 4px;
+    padding-bottom: 4px;
+}
+.portfolio-curriculum-conc-row td:first-child {
+    padding-left: 9px;
+    border-left: 3px solid #bfdbfe;
+}
+.portfolio-curriculum-conc-indent {
+    margin-right: 5px;
+    color: #94a3b8;
+    font-size: 0.85em;
+}
+.portfolio-curriculum-conc-row mark {
+    background: #fef9c3;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.portfolio-concentration-row {
+    background: #fafbfd;
+}
+
+.portfolio-concentration-row td:first-child {
+    padding-left: 9px;
+    border-left: 3px solid #cbd5e1;
+}
+
+.portfolio-precim-row {
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+}
+.portfolio-synthetic-row {
+    background: #f8fafc;
+}
+
+.portfolio-synthetic-row td {
+    color: #64748b;
+}
+
+.portfolio-conc-badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.72em;
+    font-weight: 600;
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.portfolio-note-cell {
+    min-width: 160px;
+    max-width: 260px;
+}
+
+.portfolio-note-text {
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.portfolio-note-text:hover { background: #f0f9ff; border-radius: 3px; }
+
+.add-note { color: #94a3b8; font-style: italic; }
+
+/* OTP note marker (row shows a marker, not the full note; text is the tooltip) */
+.portfolio-note-marker {
+    font-size: 0.8em;
+    color: #2563eb;
+    white-space: nowrap;
+    cursor: pointer;
+}
+/* Source tag: the effective disposition/note is inherited from the program grain */
+.otp-src-tag {
+    font-size: 0.72em;
+    color: #64748b;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 3px;
+    padding: 0 4px;
+    white-space: nowrap;
+}
+/* OTP drawer-tab field labels */
+.otp-field-label {
+    font-size: 12px;
+    color: #475569;
+    margin: 8px 0 4px;
+}
+/* OTP drawer tab: sub-tabs (disposition / notes) + program/deployment scopes */
+.otp-detail { padding: 10px 12px; max-width: 560px; }
+.otp-subtabs { display: flex; gap: 6px; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; }
+.otp-subtab { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 10px; font-size: 13px; color: #64748b; cursor: pointer; }
+.otp-subtab:hover { color: #334155; }
+.otp-subtab.active { color: #1c4e8a; border-bottom-color: #2563eb; font-weight: 500; }
+.otp-scope { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.otp-scope-deployment { border-color: #fcd9b6; background: #fffaf3; }
+.otp-scope-head { font-size: 12px; color: #475569; margin-bottom: 7px; }
+.otp-scope-head strong { color: #0f172a; }
+.otp-scope-key { font-family: monospace; font-size: 11px; color: #94a3b8; margin-left: 6px; }
+.otp-opt { display: block; white-space: nowrap; font-size: 12px; cursor: pointer; padding: 1px 0; }
+.otp-checks { margin: 2px 0 8px; }
+.otp-save-btn { margin-top: 6px; font-size: 12px; }
+.otp-save-status { margin-top: 6px; font-size: 12px; color: #64748b; min-height: 1em; }
+.otp-inherit-hint { font-size: 11.5px; color: #8a5a12; background: #fffaf3; border: 0.5px solid #f0d9b5; border-radius: 6px; padding: 5px 8px; margin: 6px 0 0; }
+
+.portfolio-note-input {
+    width: 100%;
+    font-size: 0.85em;
+    padding: 4px 6px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.refresh-btn {
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+#portfolio-table-toolbar {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: #fafbfc;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: var(--radius) var(--radius) 0 0;
+    margin-top: 8px;
+}
+
+.portfolio-col-picker {
+    position: relative;
+    display: inline-block;
+}
+.portfolio-col-picker-btn {
+    padding: 6px 12px;
+    background: #f8fafc;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.portfolio-col-picker-btn:hover { background: #f1f5f9; border-color: #94a3b8; }
+.portfolio-col-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.10);
+    min-width: 190px;
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: 200;
+    padding: 6px 4px;
+}
+.portfolio-col-dropdown.open { display: block; }
+.portfolio-col-search {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    padding: 2px 4px 6px;
+    border-bottom: 1px solid #f1f5f9;
+    margin-bottom: 4px;
+}
+.portfolio-col-search input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 12px;
+}
+.portfolio-col-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.88em;
+    color: #334155;
+    white-space: nowrap;
+    user-select: none;
+}
+.portfolio-col-check:hover { background: #f8fafc; }
+.portfolio-col-check input[type=checkbox] { cursor: pointer; accent-color: var(--accent); }
+.portfolio-col-selectall {
+    display: flex;
+    gap: 6px;
+    padding: 4px 8px 6px;
+    border-bottom: 1px solid #e2e8f0;
+    margin-bottom: 4px;
+}
+.portfolio-col-selectall button {
+    flex: 1;
+    font-size: 0.8em;
+    padding: 3px 6px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #f8fafc;
+    color: #475569;
+    cursor: pointer;
+}
+.portfolio-col-selectall button:hover { background: #e2e8f0; }
+/* column drag-to-reorder (⊞ Columns picker) */
+.portfolio-col-check.col-drag-row { cursor: grab; }
+.portfolio-col-check.col-drag-row:active { cursor: grabbing; }
+.portfolio-col-check .col-item-lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.col-drag-handle { color: #94a3b8; font-size: 18px; line-height: 1; flex-shrink: 0; cursor: grab; letter-spacing: -1px; margin-left: auto; padding-left: 6px; }
+.col-drag-row:hover .col-drag-handle { color: #475569; }
+.portfolio-col-check.col-placeholder { border: 2px dashed var(--accent, #2563eb); background: #eff6ff; border-radius: 4px; padding: 0; }
+.col-pick-hint { font-size: 10px; color: #94a3b8; margin: 2px 10px 6px; display: flex; align-items: center; gap: 4px; }
+
+.muted { color: #94a3b8; }
+
+/* Program action panel (approve / send-back / comment) */
+.program-actions {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--accent, #2563eb);
+    border-radius: 8px;
+    background: #f8fbff;
+}
+.pa-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.pa-step { font-weight: 400; color: #64748b; }
+.pa-comment {
+    width: 100%; box-sizing: border-box; resize: vertical;
+    border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px;
+    font: inherit; font-size: 13px; margin-bottom: 8px;
+}
+.pa-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.pa-label { font-size: 13px; color: #475569; }
+.pa-select {
+    border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px;
+    font: inherit; font-size: 13px; max-width: 320px;
+}
+.pa-btn {
+    border: 1px solid transparent; border-radius: 6px; padding: 6px 14px;
+    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.pa-btn:disabled { opacity: .5; cursor: default; }
+.pa-approve { background: #16a34a; color: #fff; }
+.pa-approve:hover:not(:disabled) { background: #15803d; }
+.pa-sendback { background: #fff; color: #b91c1c; border-color: #b91c1c; }
+.pa-sendback:hover:not(:disabled) { background: #fef2f2; }
+.pa-comment-only { background: #fff; color: var(--accent, #2563eb); border-color: var(--accent, #2563eb); }
+.pa-comment-only:hover:not(:disabled) { background: #eff6ff; }
+.pa-result { margin-top: 8px; font-size: 13px; white-space: pre-wrap; }
+.pa-result.pa-ok { color: #15803d; }
+.pa-result.pa-err { color: #b91c1c; }
+
+/* CIM session indicator — a neutral button (like Console/References) whose
+   only color is a small status dot. Keeps the header palette to blue (primary)
+   + neutral + a tiny green/red status cue. */
+#auth-btn { white-space: nowrap; }
+.auth-dot { font-size: 10px; vertical-align: middle; }
+.auth-dot.ok { color: var(--success); }
+.auth-dot.bad { color: var(--danger); }
+
+/* OTP / College perspective toggle (CIM Programs & Courses pipeline) */
+.pipeline-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.perspective-bar { display: flex; align-items: center; gap: 8px; }
+.perspective-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+.level-switch-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-right: 4px; align-self: center; }
+.level-switch { display: inline-flex; gap: 6px; }
+/* CIM scoping bar sits above the pipeline; chosen before the tiles/buttons. */
+#cim-scope-bar.scope-bar { margin-bottom: 12px; }
+.perspective-btn {
+    /* Match .type-btn (Level) sizing so Perspective and Level buttons align. */
+    padding: 7px 16px; border: 2px solid var(--border); background: #fff;
+    color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+    border-radius: 6px;
+}
+
+/* Freshness line under the "Program Dashboard" title (inside header-left,
+   above the header's grey border). No color bar; kept faint/low-key. */
+.freshness-row {
+    display: flex;
+    gap: 16px;
+    padding: 0;
+    margin-top: 2px;
+}
+.freshness-row .last-updated {
+    margin-right: 0;
+    color: #aab2bd;      /* much fainter */
+    font-weight: 400;
+    font-size: 11px;
+}
+.perspective-btn.active { background: #eff6ff; border-color: var(--accent); color: var(--accent); }
+.perspective-college {
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; max-width: 220px;
+}
+
+/* Portfolio layout toggle (Table | Matrix) */
+#portfolio-table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.portfolio-layout-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.portfolio-layout-btn {
+    padding: 5px 14px; border: none; background: #fff; color: var(--text-secondary);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.portfolio-layout-btn + .portfolio-layout-btn { border-left: 1px solid var(--border); }
+.portfolio-layout-btn.active { background: #eff6ff; color: var(--accent); }
+
+/* ── Left navigation rail — moved to shared/web/rail.css (inlined into the page
+   via {{ rail_css|safe }}). A few program-specific in-rail-mode suppressions of
+   THIS tracker's classic chrome stay here, since they reference program markup. */
+body.shell-rail header .view-toggle { display: none; }
+body.shell-rail header .header-right .header-secondary-btn { display: none; }
+body.shell-rail header .header-left { display: none; }
+body.shell-rail header { padding-top: 10px; padding-bottom: 10px; align-items: center; }
+body.shell-rail header .header-middle { margin-left: 0; }
+body.shell-rail #portfolio-view-tiles { display: none !important; }
+body.shell-rail #portfolio-views-toggle-row { display: none !important; }
+body.shell-rail #portfolio-filters { display: none !important; }
+body.shell-rail #cim-filter-toggle-row-top { display: none !important; }
+body.shell-rail .portfolio-layout-toggle { display: none !important; }
+/* CIM/Courses/Catalog classic chrome → the rail (Perspective, Level, Proposal,
+   Credential, Approver, and the filters block). The Pipeline Summary stays in
+   the content, and the College sub-picker (#perspective-college) stays visible
+   in the scope bar so College perspective can still pick a college. */
+/* The whole scope bar (Perspective, Level, and the college sub-picker) now lives
+   in the rail — hide it entirely in rail mode. */
+body.shell-rail #cim-scope-bar { display: none !important; }
+body.shell-rail #cim-filter-toggle-row-cim,
+body.shell-rail .smart-views-section,
+body.shell-rail .kind-filter-section,
+body.shell-rail .smart-actions-section,
+body.shell-rail .filters-section:not(.scope-bar) { display: none !important; }
+
+/* Program-group sort control (Program view only) */
+.portfolio-progsort { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; }
+.portfolio-progsort .progsort-label { font-size: 0.82em; color: var(--text-muted); }
+.portfolio-progsort select { font-size: 0.85em; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; }
+#program-group-sort-dir { padding: 2px 8px; min-width: 0; }
+
+/* Program (grouped) view — abstract program row + nested campus rows */
+/* Program header rows carry no distinct fill — they use the SAME status tint as
+   their campus rows (rolled up), so a program group reads as one colour. A 2px
+   top border + bold name mark the group boundary. */
+tr.portfolio-program-row { border-top: 2px solid #d8dbe0; }
+tr.portfolio-program-row .program-name-cell { font-weight: 600; color: #0f172a; }
+.pph-count { font-size: 0.78em; font-weight: 400; color: #64748b; margin-left: 4px; }
+tr.portfolio-grouped-deployment .program-name-cell { padding-left: 10px; color: #334155; }
+
+/* Matrix mode: flow the CIM buttons + Admitting Today onto one compact row
+   (in Table mode the CIM buttons occupy their own full-width row). */
+.portfolio-filters-section.matrix-mode .pf-cim-row { flex-basis: auto !important; }
+.portfolio-filters-section.matrix-mode #pf-admit-break { display: none !important; }
+.portfolio-filters-section.matrix-mode .portfolio-filter-block-2 { gap: 8px 16px; align-items: center; }
+
+/* Portfolio Matrix (program × campus grid) — widths come from <colgroup>
+   (resizable via the header handles); table-layout:fixed is set inline. */
+.mx-scroll { overflow-x: auto; }
+table.matrix-table { border-collapse: separate; border-spacing: 0; }
+table.matrix-table th, table.matrix-table td {
+    border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+    padding: 6px 10px; font-size: 12px; vertical-align: top;
+    overflow: hidden; overflow-wrap: anywhere;
+}
+table.matrix-table thead th {
+    position: sticky; top: 0; z-index: 2; background: #f8fafc;
+    font-weight: 700; color: var(--text-secondary); white-space: nowrap;
+}
+table.matrix-table th { position: relative; }
+table.matrix-table th.mx-sortable { cursor: pointer; user-select: none; }
+table.matrix-table th.mx-sortable:hover { background: #eef2f7; }
+.mx-corner, .mx-rowhead {
+    position: sticky; left: 0; z-index: 1; background: #fff; text-align: left;
+    font-weight: 600;
+}
+.mx-corner { z-index: 3; background: #f8fafc; }
+/* Second sticky column: college acronym, pinned just right of the program name.
+   Its `left` tracks the (resizable) program-column width via the CSS var. */
+.mx-corner2, .mx-college-cell {
+    position: sticky; left: var(--mx-prog-w, 260px); z-index: 1; background: #fff;
+    text-align: center; border-right: 2px solid var(--border);
+}
+.mx-corner2 { z-index: 3; background: #f8fafc; }
+.mx-college-cell { font-weight: 600; color: #475569; font-size: 11px; }
+.mx-conc-row .mx-college-cell { font-weight: 400; background: #fcfcfd; }
+.mx-campus-col { text-align: center; }
+.mx-clickable { cursor: pointer; }
+.mx-clickable:hover { background: #f8fafc; }
+.mx-caret { display: inline-block; width: 14px; color: var(--text-secondary); }
+.mx-caret-spacer { display: inline-block; width: 14px; }
+.mx-conc-row .mx-conc-name { padding-left: 28px; font-weight: 400; color: var(--text-secondary); background: #fcfcfd; }
+.mx-cell { text-align: center; }
+.mx-cell.mx-empty { background: #fafafa; }
+.mx-stage { display: block; font-weight: 600; }
+.mx-sub { display: block; font-size: 10.5px; color: var(--text-secondary); margin-top: 1px; }
+/* CIM change-type tints (match the table's row colors) */
+.mx-cell.mx-new      { background: #ecfdf3; }
+.mx-cell.mx-change   { background: #eff6ff; }
+.mx-cell.mx-inact    { background: #fef2f2; }
+.mx-cell.mx-approved { background: #f1f5f9; }
+.mx-cell.mx-present  { background: #fff; }
+
+/* Concentration status badges (Portfolio expand rows): "Existing" vs
+   "In workflow" — distinguishes approved concentrations from ones being
+   added through the current CIM proposal. */
+.conc-status {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+.conc-status.conc-existing { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.conc-status.conc-workflow { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+/* Portfolio toolbar right group (Export | Views | Columns) */
+#portfolio-table-toolbar { justify-content: space-between; }
+.portfolio-toolbar-right { display: flex; align-items: center; gap: 8px; }
+.pv-active-btn { border-color: var(--accent) !important; color: var(--accent) !important; background: #eff6ff !important; }
+.pv-dirty { color: #f59e0b; font-size: 10px; margin: 0 2px; }
+
+/* Portfolio Views modal */
+.pv-modal-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(15,23,42,.45); z-index: 600;
+    align-items: flex-start; justify-content: center;
+    padding: 40px 16px; overflow-y: auto;
+}
+.pv-modal-backdrop.open { display: flex; }
+.pv-modal {
+    background: #fff; border-radius: 10px; overflow: hidden;
+    width: min(1080px, 100%); max-height: calc(100vh - 80px);
+    display: flex; flex-direction: column;
+    box-shadow: 0 16px 48px rgba(0,0,0,.3);
+}
+.pv-modal-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0;
+}
+.pv-modal-title { font-size: 14px; font-weight: 600; color: #111827; }
+.pv-modal-x {
+    background: none; border: none; font-size: 22px; cursor: pointer;
+    color: #94a3b8; line-height: 1; padding: 0 4px;
+    margin-left: auto;   /* push close button to the far right */
+}
+.pv-modal-x:hover { color: #374151; }
+.pv-modal-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.pv-modal-sidebar {
+    width: 240px; flex-shrink: 0; border-right: 1px solid #e5e7eb;
+    background: #f9fafb; overflow-y: auto; padding: 10px 8px;
+}
+.pv-modal-maincol { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.pv-modal-main { flex: 1; overflow-y: auto; padding: 14px 16px; }
+.pv-modal-footer {
+    padding: 10px 16px; border-top: 1px solid #e5e7eb; flex-shrink: 0;
+    background: #f9fafb; border-radius: 0 0 10px 0;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.pv-modal-count { font-size: 12px; color: #6b7280; }
+.pv-save-form { display: inline-flex; gap: 8px; align-items: center; }
+.pv-save-form .pv-name-input { width: 220px; flex: none; }
+
+/* ── Filter-tree builder ─────────────────────────────────────────── */
+.pvb-group {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin: 8px 0; background: #f9fafb;
+}
+.pv-modal-main > .pvb-group-head:first-child { margin-top: 0; }
+.pvb-group .pvb-group { background: #fff; }
+.pvb-group-head {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600; margin-bottom: 6px;
+}
+.pvb-conj { padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; font: inherit; font-size: 13px; }
+.pv-conj { padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; font: inherit; font-size: 13px; }
+.pvb-rule {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0; flex-wrap: wrap;
+}
+.pvb-rule select, .pvb-text {
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    font: inherit; font-size: 13px; background: #fff;
+}
+.pvb-text { min-width: 160px; }
+.pvb-iconbtn {
+    background: none; border: none; cursor: pointer; color: var(--text-secondary);
+    font-size: 14px; line-height: 1; padding: 2px 5px; border-radius: 4px;
+}
+.pvb-iconbtn:hover { color: var(--danger, #ef4444); background: #fee2e2; }
+.pvb-add-row { display: flex; gap: 8px; margin-top: 8px; }
+.pvb-add-row button {
+    padding: 5px 12px; border: 1px dashed var(--border); border-radius: 6px;
+    background: #fff; font: inherit; font-size: 12px; font-weight: 600;
+    color: var(--accent); cursor: pointer;
+}
+.pvb-add-row button:hover { border-color: var(--accent); background: #eff6ff; }
+.pvb-valwrap { position: relative; display: inline-block; }
+.pvb-values {
+    display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    min-width: 140px; min-height: 30px; padding: 3px 8px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px; background: #fff;
+}
+.pvb-values:hover { border-color: var(--accent); }
+.pvb-values-empty { color: var(--text-secondary); font-size: 12px; font-style: italic; }
+.pvb-chip {
+    background: #eff6ff; color: var(--accent); font-size: 12px;
+    padding: 1px 8px; border-radius: 10px; white-space: nowrap;
+}
+.pvb-multi-pop {
+    position: absolute; z-index: 610; top: calc(100% + 4px); left: 0;
+    min-width: 200px; max-width: 320px; max-height: 260px; overflow-y: auto;
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 6px;
+}
+.pvb-multi-pop label {
+    display: flex; align-items: center; gap: 7px; padding: 4px 6px;
+    font-size: 13px; cursor: pointer; border-radius: 4px;
+}
+.pvb-multi-pop label:hover { background: #eff6ff; }
+.pvb-bool { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── Sidebar select state + star marks + ADMIN pill ──────────────── */
+/* selected:hover is more specific than :hover, so the dark highlight always
+   wins even while the cursor is on the just-clicked row */
+.pv-side-item.selected,
+.pv-side-item.selected:hover { background: #2563eb; color: #fff; }
+.pv-side-item.selected .pv-side-starmark { color: #fde68a; }
+.pv-side-item.selected .pv-side-name:hover { text-decoration: underline; }
+.pv-side-starmark { color: #f59e0b; font-size: 12px; line-height: 1; margin-right: 2px; }
+.pv-admin-pill {
+    display: inline-block; background: #7c3aed; color: #fff; font-size: 9px;
+    font-weight: 700; letter-spacing: .04em; padding: 2px 6px; border-radius: 8px;
+    vertical-align: middle; margin-left: 4px;
+}
+
+/* ── Footer: context label + dirty dot + grouped actions ─────────── */
+.pv-active-tag { font-size: 11.5px; color: #6b7280; }
+.pv-active-tag b { color: #111827; font-weight: 600; }
+.pv-dirty-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: #f59e0b; margin-right: 5px; vertical-align: middle;
+}
+.pv-footer-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pv-btn-danger { color: #dc2626; }
+.pv-btn-danger:hover { background: #fef2f2; }
+
+/* ── Starred-view tile bar above the Portfolio table ─────────────── */
+.portfolio-view-tiles {
+    display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+    padding: 8px 14px; margin: 10px 0 6px;
+    background: #d8e6f6; border: 1px solid #bcd0e6;
+    border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.07);
+}
+/* "VIEWS" button (opens the Views modal) — styled as a real button, matching
+   the Export/Columns toolbar buttons. Replaces the old non-clickable ::before. */
+.view-tiles-label {
+    font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: #475569;
+    background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px;
+    padding: 6px 12px; margin-right: 8px; align-self: center;
+    cursor: pointer; white-space: nowrap;
+}
+.view-tiles-label:hover { background: #eef2f7; border-color: var(--accent); color: var(--accent); }
+.pv-tile {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 18px; border-radius: 6px; border: 2px solid var(--border);
+    background: #fff; font: inherit; font-size: 13px; font-weight: 600;
+    color: var(--text); cursor: pointer; white-space: nowrap;
+}
+.pv-tile:hover:not(.active) { border-color: #94a3b8; }
+.pv-tile.active { background: #eff6ff; color: var(--accent); border-color: var(--accent); }
+.pv-tile .pv-tile-count { font-size: 13px; font-weight: 700; line-height: 1; }
+.pv-tile .pv-tile-label { font-size: 13px; font-weight: 600; line-height: 1; }
+.pv-tile.active .pv-tile-count, .pv-tile.active .pv-tile-label { color: var(--accent); }
+.pv-tile-hint {
+    font-size: 12px; color: #3c5b80; font-style: italic; padding: 4px 8px;
+}
+.pv-side-newbtn {
+    display: flex; align-items: center; justify-content: center;
+    width: calc(100% - 4px); margin: 6px 2px;
+    padding: 6px 8px; background: #fff; border: 1px dashed #cbd5e1;
+    border-radius: 5px; font: inherit; font-size: 12px;
+    color: #475569; cursor: pointer;
+}
+.pv-side-newbtn:hover { background: #eff6ff; border-color: #2563eb; color: #2563eb; }
+.pv-side-section {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; color: #6b7280;
+    padding: 8px 8px 4px;
+}
+.pv-side-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 9px; border-radius: 5px; cursor: pointer;
+    font-size: 12.5px; color: #1f2937; margin-bottom: 1px;
+}
+.pv-side-item:hover { background: #eef2ff; }
+.pv-side-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Per-view controls grouped on the far right: star, then move/delete. Hidden
+   until row hover — except a starred star, which stays visible as an indicator. */
+.pv-side-acts {
+    display: flex; align-items: center; gap: 1px; flex-shrink: 0; margin-left: auto;
+}
+.pv-side-act {
+    background: none; border: none; cursor: pointer; line-height: 1;
+    font-size: 12px; padding: 1px 3px; border-radius: 3px; color: #64748b;
+    opacity: 0; transition: opacity .1s;
+}
+.pv-side-item:hover .pv-side-act { opacity: 1; }
+.pv-side-act:hover { color: #2563eb; background: rgba(37,99,235,.1); }
+.pv-side-act-del:hover { color: #dc2626; background: rgba(220,38,38,.1); }
+.pv-side-act-star { font-size: 13px; }
+/* Permanent "All Programs" view: always-on star, no toggle/move/delete */
+.pv-side-star { color: #f59e0b; font-size: 13px; cursor: default; padding: 0 2px; }
+.pv-side-item.selected .pv-side-star { color: #fde68a; }
+.pv-side-act-star.on { color: #f59e0b; opacity: 1; }   /* starred = always visible */
+.pv-side-act-star:hover { color: #f59e0b; }
+.pv-side-item.selected .pv-side-act { color: #dbeafe; }
+.pv-side-item.selected .pv-side-act-star.on { color: #fde68a; }
+.pv-side-item.selected .pv-side-act:hover { color: #fff; background: rgba(255,255,255,.2); }
+.pv-side-empty { font-size: 11.5px; color: #94a3b8; padding: 6px 8px; font-style: italic; }
+.pv-side-admintoggle {
+    display: block; width: 100%; margin-top: 14px; padding: 6px 8px;
+    background: none; border: none; border-top: 1px solid #e5e7eb;
+    color: #94a3b8; font-size: 11px; text-align: left; cursor: pointer;
+}
+.pv-side-admintoggle:hover { color: #2563eb; }
+.pv-side-admintoggle.on { color: #2563eb; }
+.pv-editing-tag {
+    display: inline-block; margin-bottom: 10px; font-size: 13px;
+    color: var(--text-secondary); background: #f1f5f9;
+    padding: 4px 10px; border-radius: 4px;
+}
+.pv-editing-tag.dirty { background: #fef3c7; color: #92400e; }
+.pv-summary-line { font-size: 13px; margin-top: 5px; color: var(--text-secondary); }
+.pv-main-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.pv-save-label { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.pv-save-row { display: flex; gap: 8px; align-items: center; }
+.pv-name-input {
+    flex: 1; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font: inherit; font-size: 13px;
+}
+.pv-name-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
+.pv-btn { padding: 5px 14px; border-radius: 5px; border: 1px solid #d1d5db; background: #fff; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+.pv-btn-primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+.pv-btn-primary:hover { background: #1d4ed8; }
+.pv-btn-ghost { background: #fff; color: var(--text); border-color: #d1d5db; }
+.pv-btn-ghost:hover { background: #f3f4f6; }
+
+/* Campuses tab */
+.campuses-table { border-collapse: collapse; margin-top: 10px; font-size: 13px; min-width: 360px; }
+.campuses-table th, .campuses-table td {
+    text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--border);
+}
+.campuses-table th { color: var(--text-secondary); font-weight: 600; }
+.campus-current { color: var(--accent); font-weight: 600; font-size: 12px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+    .pipeline-bar { flex-wrap: wrap; }
+    .filters-section { flex-direction: column; align-items: stretch; }
+    .program-table { font-size: 12px; }
+}
+
+/* UGCC-approval indicator on uploaded reference curricula */
+.ugcc-badge { display:inline-block; font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px; vertical-align:middle; }
+.ugcc-badge.ugcc-yes { background:#dcfce7; color:#166534; }
+.ugcc-badge.ugcc-no  { background:#fef3c7; color:#92400e; }
+.refs-ugcc-edit { display:flex; align-items:center; gap:8px; margin-top:5px; font-size:12px; color:var(--text-secondary); }
+.refs-ugcc-edit input[type=date] { font:inherit; font-size:12px; padding:2px 5px; border:1px solid var(--border); border-radius:5px; }
+.ugcc-save-btn { font:inherit; font-size:12px; padding:2px 10px; border:1px solid var(--border); border-radius:5px; background:#fff; cursor:pointer; }
+.ugcc-save-btn:hover { border-color:var(--accent); color:var(--accent); background:#eff6ff; }
+
+/* Source-data staleness banner — amber, top of page, all views.
+   Only rendered when a watched source is >STALE_SOURCE_DAYS old. The always-
+   visible last-refresh + app-build timestamps live in the header, not here. */
+#source-health-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    font-size: 12px;
+    line-height: 1.3;
+    background: #fef3c7;
+    color: #92400e;
+    border-bottom: 1px solid #f59e0b;
+}
+#source-health-banner strong { color: #7c2d12; }
+#source-health-banner .shb-icon { font-size: 14px; }
+
+/* Portfolio table toolbar: keep result-count on the left; push the layout
+   toggle + Export/Columns actions to the right, just above the list. */
+#portfolio-table-toolbar .portfolio-layout-toggle { margin-left: auto; }
+.portfolio-toolbar-actions { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Collapsible CIM filters (programs/courses) — mirrors the student/section
+   tracker's "▸ Filters" toggle. Hides the filter controls; the pipeline summary
+   stays visible. !important overrides switchView's per-view inline display. */
+#cim-filter-toggle-row-top, #cim-filter-toggle-row-cim,
+#portfolio-views-toggle-row { margin: 10px 24px 0; }
+/* Section-control pills (Views / Filters). Styled as deliberate labeled toggles
+   — uppercase like the section headers, bordered pill — so they read as controls
+   rather than the inline ▸ row-expander chevron used on concentration rows. */
+.cim-filter-toggle-btn, .views-toggle-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    transition: all 0.15s;
+}
+.cim-filter-toggle-btn:hover, .views-toggle-btn:hover {
+    border-color: var(--accent); color: var(--accent); background: #eff6ff;
+}
+body.portfolio-views-collapsed #portfolio-view-tiles { display: none !important; }
+/* Collapse hides only the filter CONTROLS — never the perspective/level scope
+   bar (.scope-bar) or the pipeline, which stay visible in CIM. The scope bar is
+   itself a section.filters-section, so it must be excluded explicitly. */
+body.cim-filters-collapsed .smart-views-section,
+body.cim-filters-collapsed .kind-filter-section,
+body.cim-filters-collapsed .smart-actions-section,
+body.cim-filters-collapsed section.filters-section:not(.scope-bar),
+body.cim-filters-collapsed #portfolio-filters { display: none !important; }
+
+/* Master's enrollment numeric columns — right-aligned */
+.enr-cell { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* "All" row at the top of multi-select filter dropdowns */
+.filter-multi-dropdown .filter-all-row { border-bottom: 1px solid #e5e7eb; margin-bottom: 2px; padding-bottom: 4px; font-weight: 500; }
+
+/* Portfolio "record" drawer (program detail: Curriculum / Alignment / Regulatory) */
+.portfolio-record-open { cursor: pointer; }
+.portfolio-record-open:hover { color: #1d4ed8; }
+/* Shared record drawer — used by both the CIM and Portfolio tables. */
+#record-drawer { position: fixed; inset: 0; z-index: 9000; display: none; }
+#record-drawer.open { display: block; }
+#record-drawer .rec-drawer-backdrop { position: absolute; inset: 0; background: rgba(15,23,42,.35); }
+#record-drawer .rec-drawer-panel { position: absolute; top: 0; right: 0; height: 100%;
+    width: min(1120px, 96vw); background: #fff; box-shadow: -8px 0 24px rgba(0,0,0,.15);
+    display: flex; flex-direction: column; transform: translateX(100%); transition: transform .18s ease; }
+#record-drawer.open .rec-drawer-panel { transform: translateX(0); }
+#record-drawer .rec-drawer-head { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px; border-bottom: 1px solid #e2e8f0; flex: none; }
+#record-drawer .rec-drawer-title { font-weight: 700; font-size: 15px; color: #0f172a; }
+#record-drawer .rec-drawer-close { border: none; background: none; font-size: 22px; line-height: 1;
+    cursor: pointer; color: #64748b; padding: 0 4px; }
+#record-drawer .rec-drawer-close:hover { color: #0f172a; }
+#record-drawer #rec-drawer-body { padding: 12px 18px 24px; overflow: auto; flex: 1; }

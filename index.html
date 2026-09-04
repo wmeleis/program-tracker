@@ -1,0 +1,1301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Program Approval Tracker</title>
+    <link rel="stylesheet" href="style.css?v=1788558064">
+    <!-- Shared left-rail shell styling (shared/web/rail.css), inlined -->
+    <style>/* ============================================================================
+   Left navigation rail — shared shell (opt-in; body.shell-rail)
+   Extracted from the program tracker's inline rail (2026-08). Consumed two ways:
+     • program/section tracker: <link>-loaded from shared/web/rail.css
+     • retention tracker: inlined at build time by generate_dashboard.py
+   Colors/tones are CSS custom properties so each tracker can brand the shell
+   via :root overrides (e.g. --rail-logo-bg). See left-rail-redesign.md.
+   ========================================================================== */
+:root {
+  --rail-w: 212px;                 /* live width; JS overrides + persists      */
+  --rail-bg: #e7eaef;              /* grey navigation surface                  */
+  --rail-border: #b4bdc9;          /* rail edge + footer/filters divider       */
+  --rail-sep: #aab4c2;             /* group-label separators (matches GR)      */
+  --rail-item: #3f4652;            /* nav/label text                          */
+  --rail-heading: #0f172a;         /* group labels                            */
+  --rail-hover: #dde1e8;
+  --rail-active-bg: #dbe7f6;       /* active nav item (light navy/blue)        */
+  --rail-active-fg: #1c4e8a;
+  --rail-view-active-bg: #dfe9fb;
+  --rail-logo-bg: #C8102E;         /* brand logo (NU red by default)           */
+  --rail-accent: #2563eb;          /* single primary-action blue               */
+  --rail-card-bg: #fff;            /* white filter cards on the grey rail      */
+  --rail-card-border: #dfe3ea;
+  --rail-muted: #6b7280;
+}
+
+/* Hidden by default; a fixed grey rail when the flag is on, page shifted right. */
+#app-rail { display: none; }
+body.shell-rail { padding-left: var(--rail-w, 212px); }
+body.shell-rail #app-rail {
+  display: flex; flex-direction: column;
+  position: fixed; left: 0; top: 0; bottom: 0; width: var(--rail-w, 212px); z-index: 60;
+  background: var(--rail-bg); border-right: 1px solid var(--rail-border); padding: 10px 0;
+}
+.rail-resize { position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 61; }
+.rail-resize:hover { background: var(--rail-sep); }
+
+.rail-brand { display: flex; align-items: center; gap: 8px; padding: 2px 14px 10px; font-weight: 600; color: var(--rail-heading); font-size: 13px; }
+.rail-logo { width: 22px; height: 22px; border-radius: 5px; background: var(--rail-logo-bg); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+
+.rail-scroll { flex: 1; overflow-y: auto; padding: 0 8px; }
+.rail-group-label { font-size: 12.5px; font-weight: 700; letter-spacing: .09em; color: var(--rail-heading); padding: 13px 8px 6px; margin-top: 7px; border-top: 1px solid var(--rail-sep); text-transform: uppercase; }
+.rail-scroll > .rail-group-label:first-child { border-top: none; margin-top: 0; }
+/* Collapsible section headers (Views / Filters) — closed by default. */
+.rail-sec-toggle { cursor: pointer; display: flex; align-items: center; gap: 5px; user-select: none; }
+.rail-sec-toggle:hover { color: var(--rail-active-fg); }
+.rail-sec-caret { font-size: 10px; color: #9aa1ad; }
+.rail-sec-count { font-size: 11px; color: var(--rail-accent); font-weight: 600; text-transform: none; letter-spacing: 0; }
+.rail-item { display: block; width: 100%; text-align: left; border: none; background: none; padding: 6px 10px; border-radius: 7px; color: var(--rail-item); font-size: 13px; cursor: pointer; }
+.rail-item:hover { background: var(--rail-hover); }
+.rail-item.active { background: var(--rail-active-bg); color: var(--rail-active-fg); font-weight: 500; }
+.rail-subitems { margin: 2px 0 0 12px; display: flex; flex-direction: column; gap: 1px; }
+.rail-subitem { display: block; width: 100%; text-align: left; border: none; background: none; padding: 5px 10px; border-radius: 6px; color: var(--rail-item); font-size: 12px; cursor: pointer; }
+.rail-subitem:hover { background: var(--rail-hover); }
+.rail-subitem.active { background: #e6eefb; color: var(--rail-active-fg); font-weight: 500; }
+
+/* Modes: a segmented toggle (e.g. Perspective) — a mode, not a filter. */
+.rail-modes { display: flex; gap: 4px; padding: 2px 10px 2px; }
+.rail-mode-btn { flex: 1; border: 1px solid var(--rail-card-border); background: var(--rail-card-bg); color: var(--rail-item); padding: 5px 8px; border-radius: 7px; font-size: 12.5px; cursor: pointer; }
+.rail-mode-btn:hover { background: var(--rail-hover); }
+.rail-mode-btn.active { background: var(--rail-active-bg); border-color: var(--rail-active-fg); color: var(--rail-active-fg); font-weight: 600; }
+.rail-mode-sub-wrap:not(:empty) { padding: 5px 10px 2px; }
+.rail-mode-sub { width: 100%; padding: 5px 7px; font-size: 12.5px; border: 1px solid var(--rail-card-border); border-radius: 7px; background: var(--rail-card-bg); color: var(--rail-item); cursor: pointer; }
+
+/* Scopes: permanent top-level pickers under the "Focus" heading (College /
+   Campus / Credential dropdowns + the Level buttons). */
+.rail-scopes { padding: 4px 10px 4px; display: flex; flex-direction: column; gap: 7px; }
+.rail-scope { display: flex; flex-direction: column; gap: 3px; }
+.rail-scope .rail-modes { padding: 0; }
+.rail-scope-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--rail-muted); text-transform: uppercase; }
+.rail-scope-sel { width: 100%; padding: 6px 7px; font-size: 12.5px; border: 1px solid var(--rail-card-border); border-radius: 7px; background: var(--rail-card-bg); color: var(--rail-item); cursor: pointer; }
+.rail-scope-sel:hover { border-color: var(--rail-active-fg); }
+.rail-scope-action { display: block; width: 100%; text-align: left; border: none; background: none; padding: 6px 2px 2px; color: var(--rail-accent); font-size: 13px; cursor: pointer; }
+.rail-scope-action:hover { text-decoration: underline; }
+
+.rail-footer { padding: 10px 14px 2px; border-top: 1px solid var(--rail-border); }
+.rail-fresh { font-size: 10.5px; color: var(--rail-muted); line-height: 1.5; }
+.rail-fresh .rail-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; background: #cbd5e1; }
+.rail-fresh .rail-dot.green { background: #16a34a; } .rail-fresh .rail-dot.amber { background: #f59e0b; } .rail-fresh .rail-dot.red { background: #dc2626; }
+.rail-shell-toggle { margin-top: 8px; background: none; border: 1px solid #cfd5dd; border-radius: 6px; padding: 4px 8px; font-size: 11px; color: var(--rail-item); cursor: pointer; }
+.rail-shell-toggle:hover { background: var(--rail-hover); }
+
+/* Views list */
+.rail-views { display: flex; flex-direction: column; gap: 1px; }
+.rail-view { display: block; width: 100%; text-align: left; border: none; background: none; padding: 5px 10px; border-radius: 7px; color: var(--rail-item); font-size: 12.5px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-view:hover { background: var(--rail-hover); }
+.rail-view.active { background: var(--rail-view-active-bg); color: var(--rail-active-fg); }
+.rail-view-manage { color: var(--rail-accent); margin-top: 2px; }
+
+/* Rail Filters (active-filters + Add-filter model) */
+.rail-filters-head { display: flex; align-items: center; padding: 11px 8px 5px; margin-top: 6px; border-top: 1px solid var(--rail-border); }
+.rail-filters-head .rail-group-label { border-top: none; margin-top: 0; padding: 0; }
+.rail-clear-filters { margin-left: auto; background: none; border: none; color: var(--rail-accent); font-size: 10px; cursor: pointer; }
+.rail-filters { display: flex; flex-direction: column; gap: 2px; }
+.rail-f-group { background: var(--rail-card-bg); border: 0.5px solid var(--rail-card-border); border-radius: 8px; overflow: hidden; }
+.rail-f-head { display: flex; align-items: center; gap: 6px; padding: 7px 9px; cursor: pointer; font-size: 12.5px; color: #1f2937; }
+.rail-f-head:hover { background: #f3f5f8; }
+.rail-f-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--rail-accent); flex: none; }
+.rail-f-label { flex: none; }
+.rail-f-summary { margin-left: auto; font-size: 11px; color: var(--rail-active-fg); max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-f-x { color: #9aa1ad; font-size: 14px; line-height: 1; padding: 0 2px; }
+.rail-f-x:hover { color: #a3312f; }
+.rail-f-caret { color: #9aa1ad; font-size: 11px; }
+.rail-f-body { padding: 4px 10px 8px; border-top: 0.5px solid #eef0f3; max-height: 210px; overflow-y: auto; }
+.rail-f-opt { display: block; font-size: 12px; color: var(--rail-item); padding: 2px 0; cursor: pointer; white-space: nowrap; }
+.rail-f-range { display: flex; gap: 6px; align-items: center; }
+.rail-f-range input { width: 68px; font-size: 12px; padding: 3px 5px; border: 0.5px solid var(--rail-card-border); border-radius: 5px; }
+.rail-f-text { width: 100%; font-size: 12px; padding: 4px 6px; border: 0.5px solid var(--rail-card-border); border-radius: 5px; box-sizing: border-box; }
+.rail-addfilter-btn { margin-top: 4px; background: none; border: 0.5px dashed #b7c6e6; color: var(--rail-accent); border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; width: 100%; text-align: left; }
+.rail-addfilter-btn:hover { background: #eef4ff; }
+.rail-addfilter { margin-top: 4px; background: var(--rail-card-bg); border: 0.5px solid var(--rail-card-border); border-radius: 8px; padding: 6px; }
+.rail-addfilter-search { width: 100%; font-size: 12px; padding: 5px 7px; border: 0.5px solid var(--rail-card-border); border-radius: 6px; box-sizing: border-box; }
+.rail-addfilter-list { max-height: 220px; overflow-y: auto; margin-top: 5px; display: flex; flex-direction: column; gap: 1px; }
+.rail-add-cat { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #94a3b8; padding: 6px 8px 2px; }
+.rail-add-item { display: block; width: 100%; text-align: left; border: none; background: none; padding: 5px 8px; border-radius: 6px; color: var(--rail-item); font-size: 12px; cursor: pointer; }
+.rail-add-item:hover { background: #eef4ff; color: var(--rail-active-fg); }
+.rail-add-empty { font-size: 11.5px; color: #9aa1ad; padding: 5px 8px; }
+</style>
+</head>
+<body>
+
+<style>
+  #password-gate {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #f5f5f5;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #password-gate .gate-card {
+    background: white; padding: 2.5rem; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    width: 360px; max-width: 90vw;
+  }
+  #password-gate h1 { margin: 0 0 0.25rem 0; font-size: 1.4rem; color: #333; }
+  #password-gate .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; display: block; }
+  #password-gate form { display: flex; gap: 0.5rem; }
+  #password-gate input {
+    flex: 1; padding: 0.6rem 0.8rem; font-size: 1rem;
+    border: 1px solid #ccc; border-radius: 4px; outline: none;
+  }
+  #password-gate input:focus { border-color: #C8102E; }
+  #password-gate button {
+    padding: 0.6rem 1.2rem; font-size: 1rem; font-weight: 600;
+    background: #C8102E; color: white; border: 0; border-radius: 4px; cursor: pointer;
+  }
+  #password-gate button:disabled { opacity: 0.6; cursor: default; }
+  #password-gate .gate-error { color: #C8102E; font-size: 0.9rem; margin-top: 0.75rem; min-height: 1.2em; }
+  #password-gate .gate-remember { font-size: 0.85rem; color: #666; margin-top: 0.75rem; }
+  #password-gate .gate-remember input { flex: 0; width: auto; margin-right: 0.4rem; vertical-align: middle; }
+</style>
+<div id="password-gate">
+  <div class="gate-card">
+    <h1>Program Approval Tracker</h1>
+    <span class="subtitle">Enter password to access the dashboard.</span>
+    <form id="gate-form" autocomplete="off">
+      <input type="password" id="gate-password" placeholder="Password" autofocus required>
+      <button type="submit" id="gate-submit">Unlock</button>
+    </form>
+    <label class="gate-remember">
+      <input type="checkbox" id="gate-remember" checked>
+      Remember me for 30 days on this device
+    </label>
+    <div id="gate-error" class="gate-error"></div>
+  </div>
+</div>
+<script>
+(function() {
+  const CACHE_BUST = 1788558064;
+  const REMEMBER_KEY = 'cim-tracker-key-v1';
+  const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+  const gate = document.getElementById('password-gate');
+  const form = document.getElementById('gate-form');
+  const input = document.getElementById('gate-password');
+  const submit = document.getElementById('gate-submit');
+  const errEl = document.getElementById('gate-error');
+  const remember = document.getElementById('gate-remember');
+
+  const textDecoder = new TextDecoder();
+
+  const ENC_FILES = new Set([
+    'data.json', 'curriculum.json', 'reference.json', 'history.json', 'campus_groups.json',
+    'regulatory.json',
+  ]);
+
+  let cryptoKey = null;
+  const cache = new Map(); // path -> parsed JSON
+
+  async function loadCryptoParams() {
+    const r = await fetch('crypto.json?v=' + CACHE_BUST);
+    if (!r.ok) throw new Error('crypto.json missing');
+    return r.json();
+  }
+
+  function b64ToBytes(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function bytesToB64(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  async function deriveKey(password, salt, iterations) {
+    const baseKey = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(password), {name: 'PBKDF2'}, false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      {name: 'PBKDF2', salt, iterations, hash: 'SHA-256'},
+      baseKey,
+      {name: 'AES-GCM', length: 256},
+      true,  // extractable (so we can stash it for remember-me)
+      ['decrypt']
+    );
+  }
+
+  async function decryptBlob(key, blob) {
+    // Layout: iv(12) || ciphertext+tag
+    const iv = blob.slice(0, 12);
+    const ct = blob.slice(12);
+    const pt = await crypto.subtle.decrypt({name: 'AES-GCM', iv}, key, ct);
+    return textDecoder.decode(pt);
+  }
+
+  async function fetchAndDecrypt(path) {
+    // data.json is the primary program list and is re-fetched every 2 min
+    // by the dashboard's auto-refresh loop — always pull fresh from origin
+    // (no in-memory cache, no browser cache). The bulkier lazy-loaded files
+    // (curriculum.json, reference.json, regulatory.json, campus_groups.json)
+    // are still cached after first fetch since they're requested on-demand
+    // from row expansions and don't need to track live scan updates.
+    const noCache = (path === 'data.json');
+    if (!noCache && cache.has(path)) return cache.get(path);
+    // Only data.json must dodge the browser cache (the dashboard re-fetches it
+    // every 2 min for live scan updates). The bulky lazy files (curriculum.json
+    // ~26MB, history.json ~28MB, reference/regulatory/campus_groups) change only
+    // on a new build, so let the browser cache them across reloads/sessions —
+    // keyed by ?v=CACHE_BUST, which changes each deploy. Previously every fetch
+    // appended &t=Date.now() with cache:'no-store', so first use each session
+    // re-downloaded tens of MB — the "regulatory tab hangs on first click".
+    const url = noCache ? (path + '.enc?v=' + CACHE_BUST + '&t=' + Date.now())
+                        : (path + '.enc?v=' + CACHE_BUST);
+    const r = await fetch(url, noCache ? {cache: 'no-store'} : {});
+    if (!r.ok) throw new Error('fetch ' + path + '.enc failed');
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(cryptoKey, blob);
+    const obj = JSON.parse(plaintext);
+    if (!noCache) cache.set(path, obj);
+    return obj;
+  }
+
+  // Monkey-patch fetch so existing app.js paths (fetch('data.json') etc.)
+  // transparently go through the decryptor.
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async function(url, opts) {
+    const name = typeof url === 'string'
+      ? url.replace(/^\.\//, '').split('?')[0]
+      : null;
+    if (name && ENC_FILES.has(name)) {
+      const obj = await fetchAndDecrypt(name);
+      return new Response(JSON.stringify(obj), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+    return origFetch(url, opts);
+  };
+
+  async function tryRememberedKey() {
+    try {
+      const raw = localStorage.getItem(REMEMBER_KEY);
+      if (!raw) return null;
+      const {jwk, expires} = JSON.parse(raw);
+      if (Date.now() > expires) { localStorage.removeItem(REMEMBER_KEY); return null; }
+      return await crypto.subtle.importKey(
+        'jwk', jwk, {name: 'AES-GCM'}, true, ['decrypt']
+      );
+    } catch (e) { return null; }
+  }
+
+  async function stashKeyForRemember(key) {
+    const jwk = await crypto.subtle.exportKey('jwk', key);
+    localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+      jwk, expires: Date.now() + REMEMBER_TTL_MS,
+    }));
+  }
+
+  async function verifyKey(key) {
+    // Try decrypting data.json.enc as a password check. AES-GCM throws if tag mismatches.
+    const r = await fetch('data.json.enc?v=' + CACHE_BUST);
+    const blob = new Uint8Array(await r.arrayBuffer());
+    const plaintext = await decryptBlob(key, blob);
+    const obj = JSON.parse(plaintext);
+    cache.set('data.json', obj);
+    return obj;
+  }
+
+  function bootDashboard() {
+    gate.style.display = 'none';
+    document.getElementById('app-root').style.display = '';
+    const s = document.createElement('script');
+    s.src = 'app.js?v=' + CACHE_BUST;
+    document.head.appendChild(s);
+  }
+
+  async function attemptUnlock(password) {
+    const params = await loadCryptoParams();
+    const salt = b64ToBytes(params.salt);
+    const key = await deriveKey(password, salt, params.iterations);
+    await verifyKey(key);  // throws on bad password
+    cryptoKey = key;
+    if (remember.checked) {
+      try { await stashKeyForRemember(key); } catch (e) { /* ignore */ }
+    }
+    bootDashboard();
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.textContent = '';
+    submit.disabled = true;
+    submit.textContent = 'Unlocking...';
+    try {
+      await attemptUnlock(input.value);
+    } catch (err) {
+      errEl.textContent = 'Wrong password.';
+      submit.disabled = false;
+      submit.textContent = 'Unlock';
+      input.select();
+    }
+  });
+
+  // Try remembered key silently
+  (async () => {
+    const key = await tryRememberedKey();
+    if (!key) return;
+    try {
+      await verifyKey(key);
+      cryptoKey = key;
+      bootDashboard();
+    } catch (e) {
+      localStorage.removeItem(REMEMBER_KEY);
+    }
+  })();
+})();
+</script>
+
+<div id="app-root" style="display:none">
+    <div id="error-banner" class="error-banner" style="display: none;">
+        <span id="error-banner-text"></span>
+        <button class="error-banner-close" onclick="dismissErrorBanner()" title="Dismiss">&times;</button>
+    </div>
+
+    <!-- Left-rail shell: shared, config-driven chrome. The rail library
+         (shared/web/rail.js) is inlined here; the rail markup itself is built by
+         initTrackerShell(config), called at the end of static/app.js. Default
+         OFF; the classic header below is the fallback. See left-rail-redesign.md. -->
+    <script>/* ============================================================================
+   Left navigation rail — shared shell.  initTrackerShell(config)
+   ----------------------------------------------------------------------------
+   One reusable, config-driven left-rail shell for every tracker. Builds the
+   #app-rail markup from `config`, owns the flag (body.shell-rail, ?shell=rail,
+   localStorage), the drag-resize, and a generic scalable-filter engine
+   (active-filters + searchable "＋ Add filter" picker) that reads an injected
+   field registry — so it works over the program tracker's Set-globals AND the
+   retention tracker's colFilters without knowing either.
+
+   Consumed two ways: <script>-loaded (program/section) or inlined at build time
+   (retention generate_dashboard.py). Pairs with rail.css. The rail is the DEFAULT
+   layout everywhere (defaultShell:'rail'); ?shell=classic is an escape hatch. A
+   tracker can opt back to classic-default via defaultShell:'classic'. See
+   left-rail-redesign.md.
+
+   config = {
+     brand:   { label, logo },                 // logo = 1–2 char badge text
+     persistPrefix: 'tracker',                  // localStorage key prefix
+     defaultShell: 'rail',                      // DEFAULT: rail loads for everyone (?shell=classic escapes)
+     classicToggle: false,                      // DEFAULT: no footer toggle; set true to show "↩ Classic layout"
+     nav:     [ { label, items: [ { label, onSelect, isActive:()=>bool } ] } ],
+     modes:   [ {                               // optional view-aware segmented
+       label, enabled:()=>bool,                 //   toggles (a MODE, not a filter)
+       options:()=>[{value,label}],
+       active:()=>value, onSelect:(value)=>{},  //   radio; OR has:(value)=>bool for
+       has?:(value)=>bool,                       //   multi-active (several lit at once)
+       sub?: { enabled:()=>bool, placeholder,   //   optional dropdown under the toggle
+         options:()=>[{value,label}], active:()=>value, onSelect:(value)=>{} } } ],
+     scopesLabel: 'Focus',                      // optional heading over the scopes group
+     scopes:  [ {                               // permanent top-level pickers under it
+       label, enabled:()=>bool, placeholder,    //   default kind: single-select dropdown.
+       options:()=>[{value,label}],             //   kind:'buttons' → segmented toggle
+       active:()=>value, onSelect:(value)=>{},  //   (provide has:(value)=>bool for
+       kind?:'buttons', has?:(value)=>bool } ], //   multi-active highlighting)
+     scopeActions: [ { label, enabled:()=>bool, //   action links rendered under the
+       onClick:()=>{} } ],                      //   scope pickers
+     tools:   [ { label, onClick } ],           // optional admin buttons
+     views:   {                                 // optional saved-views section
+       enabled: ()=>bool, list: ()=>[{id,name,active}], apply:(id)=>{},
+       onManage:()=>{}, manageLabel:'＋ Manage views…' },
+     filters: {                                 // optional scalable filters
+       enabled: ()=>bool, onChange: ()=>{},
+       fields:  ()=>[ FieldDef ] },
+     freshness: ()=>({ updated, build, connected })  // connected: 'green'|'amber'|'red'|null
+   }
+
+   FieldDef (all): { id, label, category, kind, active:()=>bool, clear:()=>{}, summary:()=>str }
+     kind 'multi': options:()=>[v], has:(v)=>bool, toggle:(v)=>{}, labelFor?:(v)=>str, search?:bool
+     kind 'bool' : get:()=>''|'Yes'|'No', set:(v)=>{}
+     kind 'num'  : get:()=>({min,max}),   set:(min,max)=>{}
+     kind 'text' : get:()=>str,           set:(v)=>{}
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  var CFG = null;                 // active config
+  var added = new Set();          // fields explicitly added but maybe empty
+  var openGroups = new Set();     // expanded filter cards
+  var addOpen = false;            // Add-filter picker open?
+  var addQuery = '';
+  var viewsCollapsed = true;      // Views / Filters / Tools sections collapse; CLOSED by default
+  var filtersCollapsed = true;
+  var toolsCollapsed = true;
+  function loadCollapse() {
+    try {
+      viewsCollapsed   = localStorage.getItem(prefKey('views-open'))   !== 'true';
+      filtersCollapsed = localStorage.getItem(prefKey('filters-open')) !== 'true';
+      toolsCollapsed   = localStorage.getItem(prefKey('tools-open'))   !== 'true';
+    } catch (_) {}
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function prefKey(k) { return (CFG && CFG.persistPrefix ? CFG.persistPrefix : 'tracker') + '-' + k; }
+
+  /* ---- flag + shell toggle ------------------------------------------------ */
+  function applyShell(mode) {
+    document.body.classList.toggle('shell-rail', mode === 'rail');
+    try { localStorage.setItem(prefKey('shell'), mode); } catch (_) {}
+    if (mode === 'rail') { ensureRail(); refresh(); }
+    else if (CFG && CFG.onExitRail) { try { CFG.onExitRail(); } catch (_) {} }
+  }
+  function setShell(mode) { applyShell(mode); }
+
+  /* ---- drag-resize -------------------------------------------------------- */
+  function startRailResize(e) {
+    e.preventDefault();
+    var MIN = 176, MAX = 380;
+    var setW = function (x) {
+      document.documentElement.style.setProperty('--rail-w', Math.min(MAX, Math.max(MIN, Math.round(x))) + 'px');
+    };
+    var onMove = function (ev) { setW(ev.clientX); };
+    var onUp = function (ev) {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      var w = Math.min(MAX, Math.max(MIN, Math.round(ev.clientX)));
+      try { localStorage.setItem(prefKey('rail-w'), String(w)); } catch (_) {}
+      // When embedded in the console cockpit, tell the parent so it can keep the
+      // grey-rail width consistent across every tracker (each tracker is a
+      // different origin, so localStorage can't be shared — the parent brokers it).
+      try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'railw', w: w }, '*'); } catch (_) {}
+    };
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+  function restoreRailWidth() {
+    try {
+      // A console-passed ?railw=<px> (cockpit embedding) wins over this tracker's
+      // own saved width, so the grey rail is one consistent width across trackers.
+      var m = /[?&]railw=(\d+)/.exec(location.search);
+      var rw = m ? parseInt(m[1], 10) : parseInt(localStorage.getItem(prefKey('rail-w')) || '', 10);
+      if (rw) document.documentElement.style.setProperty('--rail-w', rw + 'px');
+    } catch (_) {}
+  }
+
+  /* ---- markup ------------------------------------------------------------- */
+  function ensureRail() {
+    if (document.getElementById('app-rail')) return;
+    var nav = document.createElement('nav');
+    nav.id = 'app-rail';
+    nav.setAttribute('aria-label', 'Primary navigation');
+    var b = CFG.brand || {};
+    var navHtml = (CFG.nav || []).map(function (g, gi) {
+      var items = (g.items || []).map(function (it, ii) {
+        return '<button class="rail-item" data-nav="' + gi + '-' + ii + '">' + esc(it.label) + '</button>';
+      }).join('');
+      return '<div class="rail-group-label">' + esc(g.label) + '</div>' + items;
+    }).join('');
+    // Modes: view-aware segmented toggles (e.g. a Perspective switch) that are a
+    // MODE, not a filter — rendered as their own labelled section under the nav,
+    // separate from the Filters engine. Filled/synced by renderModes().
+    var modesHtml = (CFG.modes || []).map(function (m, mi) {
+      return '<div class="rail-modes-group" id="rail-modes-' + mi + '" style="display:none">' +
+        '<div class="rail-group-label">' + esc(m.label) + '</div>' +
+        '<div class="rail-modes" id="rail-modes-box-' + mi + '"></div>' +
+        '<div class="rail-mode-sub-wrap" id="rail-modes-sub-' + mi + '"></div>' +
+      '</div>';
+    }).join('');
+    // By default modes render under the nav; a tracker can pass
+    // modesBelowFilters:true to place them beneath the Filters block instead.
+    var modesTop    = CFG.modesBelowFilters ? '' : modesHtml;
+    var modesBottom = CFG.modesBelowFilters ? modesHtml : '';
+    // Scopes: permanent, view-aware single-select dropdowns pinned at the top
+    // level (e.g. College / Campus / Credential) — the common "narrow to one X"
+    // pickers, always visible, distinct from the collapsible Filters list.
+    var scopesHtml = (CFG.scopes && CFG.scopes.length)
+      ? (CFG.scopesLabel ? '<div class="rail-group-label" id="rail-scopes-label" style="display:none">' + esc(CFG.scopesLabel) + '</div>' : '') +
+        '<div class="rail-scopes" id="rail-scopes" style="display:none"></div>'
+      : '';
+    var toolsHtml = (CFG.tools && CFG.tools.length)
+      ? '<div class="rail-group-label rail-sec-toggle" id="rail-tools-label"><span class="rail-sec-caret" id="rail-tools-caret">▸</span>Tools</div>' +
+        '<div class="rail-tools" id="rail-tools" style="display:none">' + CFG.tools.map(function (t, i) {
+          return '<button class="rail-item" data-tool="' + i + '">' + esc(t.label) + '</button>';
+        }).join('') + '</div>'
+      : '';
+    nav.innerHTML =
+      '<div class="rail-brand"><span class="rail-logo">' + esc(b.logo || 'N') + '</span>' + esc(b.label || '') + '</div>' +
+      '<div class="rail-scroll">' +
+        navHtml +
+        modesTop +
+        scopesHtml +
+        '<div class="rail-group-label rail-sec-toggle" id="rail-views-label" style="display:none"><span class="rail-sec-caret" id="rail-views-caret">▸</span>Views</div>' +
+        '<div class="rail-views" id="rail-views" style="display:none"></div>' +
+        '<div class="rail-filters-head" id="rail-filters-head" style="display:none">' +
+          '<span class="rail-group-label rail-sec-toggle" id="rail-filters-toggle"><span class="rail-sec-caret" id="rail-filters-caret">▸</span>Filters<span class="rail-sec-count" id="rail-filters-count"></span></span>' +
+          '<button class="rail-clear-filters" id="rail-clear-filters">Clear all</button></div>' +
+        '<div class="rail-filters" id="rail-filters" style="display:none"></div>' +
+        modesBottom +
+        toolsHtml +
+      '</div>' +
+      '<div class="rail-footer">' +
+        '<div class="rail-fresh" id="rail-updated"></div>' +
+        '<div class="rail-fresh" id="rail-build"></div>' +
+        (CFG.classicToggle === true ?
+          '<button class="rail-shell-toggle" id="rail-classic-btn">↩ Classic layout</button>' : '') +
+      '</div>' +
+      '<div class="rail-resize" id="rail-resize"></div>';
+    document.body.appendChild(nav);
+
+    // wire events (no inline handlers → CSP-safe + works when inlined)
+    nav.querySelectorAll('.rail-item[data-nav]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var p = btn.dataset.nav.split('-'), it = CFG.nav[+p[0]].items[+p[1]];
+        if (it && it.onSelect) it.onSelect();
+        syncNav();
+      });
+    });
+    nav.querySelectorAll('.rail-item[data-tool]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var t = CFG.tools[+btn.dataset.tool]; if (t && t.onClick) t.onClick();
+      });
+    });
+    var classicBtn = document.getElementById('rail-classic-btn');
+    if (classicBtn) classicBtn.addEventListener('click', function () { setShell('classic'); });
+    document.getElementById('rail-clear-filters').addEventListener('click', function (e) { e.stopPropagation(); clearFilters(); });
+    document.getElementById('rail-views-label').addEventListener('click', function () {
+      viewsCollapsed = !viewsCollapsed;
+      try { localStorage.setItem(prefKey('views-open'), String(!viewsCollapsed)); } catch (_) {}
+      renderViews();
+    });
+    document.getElementById('rail-filters-toggle').addEventListener('click', function () {
+      filtersCollapsed = !filtersCollapsed;
+      try { localStorage.setItem(prefKey('filters-open'), String(!filtersCollapsed)); } catch (_) {}
+      renderFilters();
+    });
+    var toolsLabel = document.getElementById('rail-tools-label');
+    if (toolsLabel) toolsLabel.addEventListener('click', function () {
+      toolsCollapsed = !toolsCollapsed;
+      try { localStorage.setItem(prefKey('tools-open'), String(!toolsCollapsed)); } catch (_) {}
+      renderTools();
+    });
+    document.getElementById('rail-resize').addEventListener('mousedown', startRailResize);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && addOpen) { addOpen = false; renderFilters(); } });
+  }
+
+  /* ---- nav + footer sync -------------------------------------------------- */
+  function syncNav() {
+    (CFG.nav || []).forEach(function (g, gi) {
+      (g.items || []).forEach(function (it, ii) {
+        var btn = document.querySelector('#app-rail .rail-item[data-nav="' + gi + '-' + ii + '"]');
+        if (btn) btn.classList.toggle('active', !!(it.isActive && it.isActive()));
+      });
+    });
+    var f = (CFG.freshness && CFG.freshness()) || {};
+    var up = document.getElementById('rail-updated'), bd = document.getElementById('rail-build');
+    if (up) {
+      var dot = f.connected ? '<span class="rail-dot ' + esc(f.connected) + '"></span>' : '';
+      up.innerHTML = dot + esc(f.updated || '');
+    }
+    if (bd) bd.textContent = f.build || '';
+  }
+
+  /* ---- modes (view-aware segmented toggles; NOT filters) ------------------ */
+  function renderModes() {
+    (CFG.modes || []).forEach(function (m, mi) {
+      var group = document.getElementById('rail-modes-' + mi);
+      var box = document.getElementById('rail-modes-box-' + mi);
+      if (!group || !box) return;
+      var show = !m.enabled || m.enabled();
+      group.style.display = show ? '' : 'none';
+      if (!show) { box.innerHTML = ''; return; }
+      var opts = (m.options && m.options()) || [];
+      var cur = m.active && m.active();
+      box.innerHTML = opts.map(function (o, oi) {
+        // Multi-active modes provide has(value) (several buttons can be lit);
+        // single-active (radio) modes fall back to matching active().
+        var on = m.has ? m.has(o.value) : (String(o.value) === String(cur));
+        return '<button class="rail-mode-btn' + (on ? ' active' : '') +
+          '" data-mode="' + mi + '-' + oi + '">' + esc(o.label) + '</button>';
+      }).join('');
+      box.querySelectorAll('.rail-mode-btn[data-mode]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var p = btn.dataset.mode.split('-');
+          var mm = CFG.modes[+p[0]];
+          var oo = ((mm.options && mm.options()) || [])[+p[1]];
+          if (mm && oo && mm.onSelect) mm.onSelect(oo.value);
+          refresh();   // reflect new active + downstream (e.g. filters that depend on the mode)
+        });
+      });
+      // Optional sub-picker: a dropdown shown under the toggle (e.g. the college
+      // picker for the College perspective), only when m.sub.enabled() is true.
+      var subWrap = document.getElementById('rail-modes-sub-' + mi);
+      if (subWrap) {
+        var sub = m.sub;
+        if (!sub || (sub.enabled && !sub.enabled())) { subWrap.innerHTML = ''; }
+        else {
+          var sopts = (sub.options && sub.options()) || [];
+          var scur = (sub.active && sub.active()) || '';
+          subWrap.innerHTML = '<select class="rail-mode-sub">' +
+            (sub.placeholder ? '<option value="">' + esc(sub.placeholder) + '</option>' : '') +
+            sopts.map(function (o) {
+              return '<option value="' + esc(o.value) + '"' + (String(o.value) === String(scur) ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+            }).join('') + '</select>';
+          var selEl = subWrap.querySelector('select');
+          selEl.addEventListener('change', function () { if (sub.onSelect) sub.onSelect(selEl.value); refresh(); });
+        }
+      }
+    });
+  }
+
+  /* ---- scopes (permanent view-aware single-select pickers) ---------------- */
+  function renderScopes() {
+    var box = document.getElementById('rail-scopes');
+    if (!box) return;
+    var label = document.getElementById('rail-scopes-label');
+    var S = CFG.scopes || [];
+    var vis = [];
+    S.forEach(function (s, si) { if (!s.enabled || s.enabled()) vis.push(si); });
+    var acts = (CFG.scopeActions || []).map(function (a, ai) { return { a: a, ai: ai }; })
+      .filter(function (x) { return !x.a.enabled || x.a.enabled(); });
+    if (!vis.length && !acts.length) {
+      box.style.display = 'none'; box.innerHTML = '';
+      if (label) label.style.display = 'none';
+      return;
+    }
+    box.style.display = '';
+    if (label) label.style.display = vis.length ? '' : 'none';
+    var scopesHtml = vis.map(function (si) {
+      var s = S[si];
+      var opts = (s.options && s.options()) || [];
+      var body;
+      if (s.kind === 'buttons') {   // segmented toggle inside the scopes group
+        body = '<div class="rail-modes">' + opts.map(function (o, oi) {
+          var on = s.has ? s.has(o.value) : (String(o.value) === String((s.active && s.active()) || ''));
+          return '<button class="rail-mode-btn' + (on ? ' active' : '') + '" data-scopebtn="' + si + '-' + oi + '">' + esc(o.label) + '</button>';
+        }).join('') + '</div>';
+      } else {
+        var cur = (s.active && s.active()) || '';
+        body = '<select class="rail-scope-sel" data-scope="' + si + '">' +
+          '<option value="">' + esc(s.placeholder || ('All ' + String(s.label).toLowerCase())) + '</option>' +
+          opts.map(function (o) {
+            return '<option value="' + esc(o.value) + '"' + (String(o.value) === String(cur) ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+          }).join('') + '</select>';
+      }
+      return '<div class="rail-scope"><label class="rail-scope-label">' + esc(s.label) + '</label>' + body + '</div>';
+    }).join('');
+    var actsHtml = acts.map(function (x) {
+      return '<button class="rail-scope-action" data-scope-action="' + x.ai + '">' + esc(x.a.label) + '</button>';
+    }).join('');
+    box.innerHTML = scopesHtml + actsHtml;
+    box.querySelectorAll('.rail-scope-sel[data-scope]').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var s = CFG.scopes[+sel.dataset.scope];
+        if (s && s.onSelect) s.onSelect(sel.value);
+        refresh();
+      });
+    });
+    box.querySelectorAll('.rail-mode-btn[data-scopebtn]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var p = btn.dataset.scopebtn.split('-'), s = CFG.scopes[+p[0]];
+        var o = ((s.options && s.options()) || [])[+p[1]];
+        if (s && o && s.onSelect) s.onSelect(o.value);
+        refresh();
+      });
+    });
+    box.querySelectorAll('.rail-scope-action[data-scope-action]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var a = CFG.scopeActions[+btn.dataset.scopeAction];
+        if (a && a.onClick) a.onClick();
+      });
+    });
+  }
+
+  /* ---- views -------------------------------------------------------------- */
+  function renderViews() {
+    var box = document.getElementById('rail-views'), label = document.getElementById('rail-views-label');
+    var V = CFG.views;
+    var show = !!(V && (!V.enabled || V.enabled()));
+    if (label) label.style.display = show ? '' : 'none';
+    var vcaret = document.getElementById('rail-views-caret');
+    if (vcaret) vcaret.textContent = viewsCollapsed ? '▸' : '▾';
+    if (!box) return;
+    box.style.display = (show && !viewsCollapsed) ? '' : 'none';
+    if (!show || viewsCollapsed) { if (!show) box.innerHTML = ''; return; }
+    var list = (V.list && V.list()) || [];
+    box.innerHTML = list.map(function (v, i) {
+      return '<button class="rail-view' + (v.active ? ' active' : '') + '" data-view="' + i + '" title="' + esc(v.name) + '">' + esc(v.name) + '</button>';
+    }).join('') + (V.onManage ? '<button class="rail-view rail-view-manage" id="rail-view-manage">' + esc(V.manageLabel || '＋ Manage views…') + '</button>' : '');
+    box.querySelectorAll('.rail-view[data-view]').forEach(function (btn) {
+      btn.addEventListener('click', function () { var v = list[+btn.dataset.view]; if (v && V.apply) V.apply(v.id); });
+    });
+    var mg = document.getElementById('rail-view-manage');
+    if (mg) mg.addEventListener('click', function () { V.onManage(); });
+  }
+
+  /* ---- filters engine ----------------------------------------------------- */
+  function fields() { return (CFG.filters && CFG.filters.fields && CFG.filters.fields()) || []; }
+  function fieldsEnabled() { return !!(CFG.filters && (!CFG.filters.enabled || CFG.filters.enabled())); }
+  function filtersChanged() { if (CFG.filters && CFG.filters.onChange) CFG.filters.onChange(); renderFilters(); }
+
+  function toggleGroup(id) { if (openGroups.has(id)) openGroups.delete(id); else openGroups.add(id); renderFilters(); }
+  function removeFilter(f) { f.clear(); added.delete(f.id); openGroups.delete(f.id); filtersChanged(); }
+  function clearFilters() {
+    fields().forEach(function (f) { if (f.active()) f.clear(); });
+    added.clear(); openGroups.clear(); addOpen = false; filtersChanged();
+  }
+  function addField(id) { added.add(id); openGroups.add(id); addOpen = false; addQuery = ''; renderFilters(); }
+
+  function addListHtml() {
+    var shown = fields().filter(function (f) {
+      return !f.active() && !added.has(f.id) && (!addQuery || f.label.toLowerCase().indexOf(addQuery) > -1);
+    });
+    if (!shown.length) return '<div class="rail-add-empty">No matching field</div>';
+    // group by category
+    var cats = {}, order = [];
+    shown.forEach(function (f) { var c = f.category || ''; if (!cats[c]) { cats[c] = []; order.push(c); } cats[c].push(f); });
+    return order.map(function (c) {
+      return (c ? '<div class="rail-add-cat">' + esc(c) + '</div>' : '') +
+        cats[c].map(function (f) { return '<button class="rail-add-item" data-add="' + esc(f.id) + '">' + esc(f.label) + '</button>'; }).join('');
+    }).join('');
+  }
+
+  function fieldBody(f) {
+    if (f.kind === 'bool') {
+      return ['', 'Yes', 'No'].map(function (v) {
+        return '<label class="rail-f-opt"><input type="radio" name="railb-' + esc(f.id) + '" ' + (f.get() === v ? 'checked' : '') +
+          ' data-bool="' + esc(v) + '"> ' + (v === '' ? 'Any' : v) + '</label>';
+      }).join('');
+    }
+    if (f.kind === 'num') {
+      var r = f.get() || {};
+      return '<div class="rail-f-range"><input type="number" class="rail-f-min" placeholder="min" value="' + esc(r.min == null ? '' : r.min) + '">' +
+        '<span>–</span><input type="number" class="rail-f-max" placeholder="max" value="' + esc(r.max == null ? '' : r.max) + '"></div>';
+    }
+    if (f.kind === 'text') {
+      return '<input type="text" class="rail-f-text" placeholder="contains…" value="' + esc(f.get() || '') + '">';
+    }
+    // multi
+    var opts = (f.options && f.options()) || [];
+    if (!opts.length) return '<div class="rail-add-empty">No values</div>';
+    return opts.map(function (v) {
+      var lbl = f.labelFor ? f.labelFor(v) : v;
+      return '<label class="rail-f-opt"><input type="checkbox" ' + (f.has(v) ? 'checked' : '') +
+        ' data-v="' + esc(String(v)) + '"> ' + esc(String(lbl)) + '</label>';
+    }).join('');
+  }
+
+  function renderFilters() {
+    var box = document.getElementById('rail-filters'), head = document.getElementById('rail-filters-head'),
+        clear = document.getElementById('rail-clear-filters');
+    var show = fieldsEnabled();
+    if (head) head.style.display = show ? 'flex' : 'none';
+    var fcaret = document.getElementById('rail-filters-caret');
+    if (fcaret) fcaret.textContent = filtersCollapsed ? '▸' : '▾';
+    if (!box) return;
+    var fs = show ? fields() : [];
+    var activeCount = fs.filter(function (f) { return f.active(); }).length;
+    var cnt = document.getElementById('rail-filters-count');
+    if (cnt) cnt.textContent = activeCount ? (' (' + activeCount + ')') : '';
+    if (clear) clear.style.display = (show && activeCount) ? '' : 'none';
+    box.style.display = (show && !filtersCollapsed) ? 'flex' : 'none';
+    if (!show || filtersCollapsed) { if (!show) box.innerHTML = ''; return; }
+
+    var active = fs.filter(function (f) { return f.active() || added.has(f.id); });
+
+    var html = active.map(function (f) {
+      var open = openGroups.has(f.id);
+      var dot = f.active() ? '<span class="rail-f-dot"></span>' : '';
+      return '<div class="rail-f-group" data-fid="' + esc(f.id) + '">' +
+        '<div class="rail-f-head" data-toggle="' + esc(f.id) + '">' + dot +
+          '<span class="rail-f-label">' + esc(f.label) + '</span>' +
+          '<span class="rail-f-summary">' + esc(f.summary() || '') + '</span>' +
+          '<span class="rail-f-x" data-remove="' + esc(f.id) + '" title="Remove filter">&times;</span>' +
+          '<span class="rail-f-caret">' + (open ? '▾' : '▸') + '</span></div>' +
+        (open ? '<div class="rail-f-body">' + fieldBody(f) + '</div>' : '') + '</div>';
+    }).join('');
+
+    html += addOpen
+      ? '<div class="rail-addfilter"><input id="rail-addfilter-search" class="rail-addfilter-search" placeholder="Search fields…" autocomplete="off">' +
+        '<div id="rail-addfilter-list" class="rail-addfilter-list">' + addListHtml() + '</div></div>'
+      : '<button class="rail-addfilter-btn" id="rail-add-btn">＋ Add filter</button>';
+    box.innerHTML = html;
+    wireFilterEvents(box);
+    if (addOpen) { var inp = document.getElementById('rail-addfilter-search'); if (inp) inp.focus(); }
+  }
+
+  function wireFilterEvents(box) {
+    var byId = {}; fields().forEach(function (f) { byId[f.id] = f; });
+    box.querySelectorAll('[data-toggle]').forEach(function (h) {
+      h.addEventListener('click', function () { toggleGroup(h.dataset.toggle); });
+    });
+    box.querySelectorAll('[data-remove]').forEach(function (x) {
+      x.addEventListener('click', function (e) { e.stopPropagation(); removeFilter(byId[x.dataset.remove]); });
+    });
+    box.querySelectorAll('.rail-f-group').forEach(function (g) {
+      var f = byId[g.dataset.fid]; if (!f) return;
+      g.querySelectorAll('input[data-v]').forEach(function (cb) {
+        cb.addEventListener('change', function () { f.toggle(cb.getAttribute('data-v')); filtersChanged(); });
+      });
+      g.querySelectorAll('input[data-bool]').forEach(function (rb) {
+        rb.addEventListener('change', function () { if (rb.checked) { f.set(rb.getAttribute('data-bool')); filtersChanged(); } });
+      });
+      var mn = g.querySelector('.rail-f-min'), mx = g.querySelector('.rail-f-max');
+      if (mn && mx) {
+        var commit = function () {
+          f.set(mn.value === '' ? null : +mn.value, mx.value === '' ? null : +mx.value); filtersChanged();
+        };
+        mn.addEventListener('change', commit); mx.addEventListener('change', commit);
+      }
+      var tx = g.querySelector('.rail-f-text');
+      if (tx) tx.addEventListener('change', function () { f.set(tx.value); filtersChanged(); });
+    });
+    var addBtn = document.getElementById('rail-add-btn');
+    if (addBtn) addBtn.addEventListener('click', function () { addOpen = true; addQuery = ''; renderFilters(); });
+    var srch = document.getElementById('rail-addfilter-search');
+    if (srch) srch.addEventListener('input', function () {
+      addQuery = (srch.value || '').toLowerCase();
+      var list = document.getElementById('rail-addfilter-list'); if (list) { list.innerHTML = addListHtml(); wireAddList(list); }
+    });
+    wireAddList(document.getElementById('rail-addfilter-list'));
+  }
+  function wireAddList(list) {
+    if (!list) return;
+    list.querySelectorAll('[data-add]').forEach(function (b) {
+      b.addEventListener('click', function () { addField(b.dataset.add); });
+    });
+  }
+
+  function renderTools() {
+    var box = document.getElementById('rail-tools'), caret = document.getElementById('rail-tools-caret');
+    if (caret) caret.textContent = toolsCollapsed ? '▸' : '▾';
+    if (box) box.style.display = toolsCollapsed ? 'none' : '';
+  }
+
+  /* ---- public refresh ----------------------------------------------------- */
+  function refresh() { if (!document.body.classList.contains('shell-rail')) return; syncNav(); renderModes(); renderScopes(); renderViews(); renderFilters(); renderTools(); }
+
+  function initTrackerShell(config) {
+    CFG = config || {};
+    restoreRailWidth();
+    loadCollapse();
+    // Layout resolution: the rail is the default everywhere. An explicit ?shell=
+    // URL param always wins (an escape hatch, e.g. ?shell=classic); then
+    // CFG.defaultShell if a tracker sets one; otherwise 'rail'. The persisted
+    // choice is deliberately NOT consulted, so a stale 'classic' can't stick and
+    // a per-page ?shell=classic never persists past the next load.
+    var urlMode = null;
+    try { urlMode = new URLSearchParams(location.search).get('shell'); } catch (_) {}
+    var mode = urlMode || CFG.defaultShell || 'rail';
+    if (mode === 'rail') {
+      applyShell('rail');
+      setTimeout(refresh, 800);   // let freshness stamps populate
+      setTimeout(refresh, 2500);
+    }
+    window.trackerShell = { refresh: refresh, setShell: setShell, syncNav: syncNav, applyShell: applyShell };
+    return window.trackerShell;
+  }
+
+  window.initTrackerShell = initTrackerShell;
+  window.setShell = window.setShell || setShell;   // programmatic shell toggle (rail entry via ?shell=rail)
+})();
+</script>
+
+    <header>
+        <div class="header-left">
+            <h1>Program Dashboard</h1>
+            <!-- Freshness line: last data refresh + app build (under the title, above the header's grey line) -->
+            <div id="freshness-row" class="freshness-row">
+                <span id="last-updated" class="last-updated"></span>
+                <span id="app-build" class="last-updated"></span>
+            </div>
+        </div>
+        <div class="header-middle">
+            <div class="view-toggle">
+                <button class="toggle-btn active" onclick="switchView('programs')" id="btn-programs">CIM Programs</button>
+                <button class="toggle-btn" onclick="switchView('courses')" id="btn-courses">CIM Courses</button>
+                <button class="toggle-btn" onclick="switchView('catalog')" id="btn-catalog">CIM Catalog</button>
+                <button class="toggle-btn" onclick="switchView('portfolio')" id="btn-portfolio">Portfolio</button>
+            </div>
+            <div class="header-search">
+                <input type="text" id="filter-search" placeholder="Search programs by name or banner code..." oninput="applyFilters(); updateClearButtons()">
+                <span class="filter-clear header-search-clear" onclick="clearFilter('filter-search')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <span id="scan-status" class="scan-status"></span>
+            <div id="progress-container" class="progress-container" style="display: none;">
+                <span id="progress-phase" class="progress-phase"></span>
+            </div>
+            <!-- Login/connect controls (CIM Authenticate, Regulatory/OTP SharePoint login)
+                 moved to the shared login console (console/app.py :5099) — the single
+                 place to establish sessions. The source-staleness banner below stays. -->
+            
+            
+            
+            
+            <!-- Portfolio actions moved out of the header: Export + Columns are in
+                 the table toolbar; Views opens via the clickable "VIEWS" label. -->
+            <span id="portfolio-header-actions" style="display:none; align-items:center; gap:8px;"></span>
+        </div>
+    </header>
+
+    
+
+    
+    </div>
+
+    
+    </div>
+
+    <!-- Manage References modal (local-only) -->
+    
+        </div>
+    </div>
+
+    <!-- Views toggle (Portfolio only): collapses the saved-Views tiles bar,
+         which sits just above the Portfolio filters. -->
+    <div id="portfolio-views-toggle-row" style="display:none">
+        <button class="views-toggle-btn" onclick="toggleViewsBar()">▾ Views</button>
+    </div>
+
+    <!-- Portfolio starred-view tiles (quick-apply); only shown on Portfolio view -->
+    <div id="portfolio-view-tiles" class="portfolio-view-tiles" style="display:none"></div>
+
+    <!-- Filters toggle for the PORTFOLIO view: sits above the portfolio filter
+         bar and collapses it. CIM/courses/catalog use the toggle below the
+         pipeline instead (see #cim-filter-toggle-row-cim). -->
+    <div id="cim-filter-toggle-row-top" style="display:none">
+        <button class="cim-filter-toggle-btn" onclick="toggleCimFilters()">▸ Filters</button>
+    </div>
+
+    <!-- Portfolio filter bar (visible only in portfolio view) -->
+    <section id="portfolio-filters" class="portfolio-filters-section" style="display:none">
+      <div class="portfolio-filter-block portfolio-filter-block-1">
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <button class="portfolio-lvl-btn" data-lvl="Undergraduate" onclick="setPortfolioLevel(this,'Undergraduate')">Undergraduate</button>
+            <button class="portfolio-lvl-btn" data-lvl="Graduate" onclick="setPortfolioLevel(this,'Graduate')">Graduate</button>
+        </div>
+        <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <button class="portfolio-deg-btn" data-deg="Bachelor's" onclick="setPortfolioDegree(this,&quot;Bachelor's&quot;)">Bachelor's</button>
+            <button class="portfolio-deg-btn" data-deg="Master's" onclick="setPortfolioDegree(this,&quot;Master's&quot;)">Master's</button>
+            <button class="portfolio-deg-btn" data-deg="PhD" onclick="setPortfolioDegree(this,'PhD')">PhD</button>
+            <button class="portfolio-deg-btn" data-deg="Prof Doctorate" onclick="setPortfolioDegree(this,'Prof Doctorate')">Prof. Doctorate</button>
+            <button class="portfolio-deg-btn" data-deg="CAGS" onclick="setPortfolioDegree(this,'CAGS')">CAGS</button>
+            <button class="portfolio-deg-btn" data-deg="Certificate" onclick="setPortfolioDegree(this,'Certificate')">Certificate</button>
+            <button class="portfolio-deg-btn" data-deg="Minor" onclick="setPortfolioDegree(this,'Minor')">Minor</button>
+            <button class="portfolio-deg-btn" data-deg="Dual Degree" onclick="setPortfolioDegree(this,'Dual Degree')">Dual Degree</button>
+        </div>
+        <div class="filter-group" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>College:</label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-college">
+                <button class="filter-multi-btn" id="portfolio-filter-college" onclick="togglePortfolioMultiFilter('portfolio-filter-college', event)">All Colleges ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-college"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-college')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Campus:</label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-campus">
+                <button class="filter-multi-btn" id="portfolio-filter-campus" onclick="togglePortfolioMultiFilter('portfolio-filter-campus', event)">All Campuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-campus"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-campus')" title="Clear">&times;</span>
+            </div>
+            <button class="portfolio-campus-shortcut" style="margin-left:14px" onclick="setPortfolioCampusBoston()" title="Filter to Boston only">Boston</button>
+            <button class="portfolio-campus-shortcut" style="margin-left:6px" onclick="setPortfolioCampusNetwork()" title="Filter to network campuses — all except Boston / Online">Network</button>
+        </div>
+        <div class="filter-group">
+            <label>Catalog Year:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Catalog years the program is part of, derived from CIM's effective catalog and proposal history (current year plus two forward).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-catalogyear">
+                <button class="filter-multi-btn" id="portfolio-filter-catalogyear" onclick="togglePortfolioMultiFilter('portfolio-filter-catalogyear', event)">All Catalog Years ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-catalogyear"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-catalogyear')" title="Clear">&times;</span>
+            </div>
+        </div>
+      </div>
+      <div class="portfolio-filter-block portfolio-filter-block-2">
+        <div class="pf-cim-row" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span class="portfolio-btn-row-label">CIM:</span>
+            <button class="portfolio-incim-btn" data-incim="Yes" onclick="setPortfolioInCim(this,'Yes')"><span class="info-tip-wrap">In CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Program exists in CourseLeaf CIM — active in workflow or already approved/historical.</span></span></span></button>
+            <button class="portfolio-incim-btn" data-incim="No"  onclick="setPortfolioInCim(this,'No')"><span class="info-tip-wrap">Not in CIM<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Portfolio entry has no CIM record — appears only in external feeds (SVT, IPD, OTP).</span></span></span></button>
+            <button class="portfolio-cimchg-btn cimchg-new"   data-cimchg="New"          style="margin-left:24px" onclick="setPortfolioCimChange(this,'New')"><span class="info-tip-wrap">New<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">CIM proposal type New — the current CIM proposal adds a new program.</span></span></span></button>
+            <button class="portfolio-cimchg-btn cimchg-edit"  data-cimchg="Change"       onclick="setPortfolioCimChange(this,'Change')"><span class="info-tip-wrap">Change<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">CIM proposal type Change — the current CIM proposal edits an existing program.</span></span></span></button>
+            <button class="portfolio-cimchg-btn cimchg-inact" data-cimchg="Inactivation" onclick="setPortfolioCimChange(this,'Inactivation')"><span class="info-tip-wrap">Inactivation<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">CIM proposal type Inactivation — the CIM proposal deactivates the program, whether the inactivation is in progress or already completed.</span></span></span></button>
+            <button class="portfolio-status-btn" data-status="inworkflow" style="margin-left:24px" onclick="setPortfolioStatus('inworkflow')"><span class="info-tip-wrap">In Workflow<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with an active proposal currently moving through CIM approval steps.</span></span></span></button>
+            <button class="portfolio-status-btn" data-status="catalog"    onclick="setPortfolioStatus('catalog')"><span class="info-tip-wrap">Completed Approval<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs approved at least once — either observed completing CIM, or currently undergoing a Change/Inactivation proposal (which implies a prior approval). A program in a new proposal still counts here AND in "In Workflow" until it completes.</span></span></span></button>
+        </div>
+        <!-- Portfolio search is the header #filter-search; applyFilters()
+             routes it through setPortfolioSearch() on Portfolio view. No
+             separate Portfolio search input here. -->
+        <div class="filter-group" id="pf-admit-break" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>Admitting Today:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Whether the program is currently admitting students. Yes = active, no inactivation in progress. No = inactivation underway or complete.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-inacttoday" onchange="portfolioInactTodayFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()"></select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inacttoday')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Inactivation in Progress:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs with a CIM inactivation that isn't fully wound down — still moving through the CIM workflow (including teach-out) or still admitting students.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-inactprogress" onchange="portfolioInactProgressFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()">
+                    <option value="">— select —</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactprogress')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Exit Master's Only:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Exit-master's-only programs — awarded on the way out of a doctoral program, with no direct admission.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="portfolio-filter-exitmasters" onchange="portfolioExitMastersFilter=this.value; updateClearButtons(); _portfolioViewTouch(); renderPortfolioTable()">
+                    <option value="">— select —</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-exitmasters')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Inact. of Admission:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Admissions inactivation status from the GLS Roster of Record.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-inactadmit">
+                <button class="filter-multi-btn" id="portfolio-filter-inactadmit" onclick="togglePortfolioMultiFilter('portfolio-filter-inactadmit', event)">All Semesters ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-inactadmit"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-inactadmit')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group" id="pf-status-break" style="flex-basis:100%; margin:0; padding:0"></div>
+        <div class="filter-group">
+            <label>SVT Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Status from the SVT Source Data table (Intake, Discovery, Launch in Progress, Complete, etc.).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-roster">
+                <button class="filter-multi-btn" id="portfolio-filter-roster" onclick="togglePortfolioMultiFilter('portfolio-filter-roster', event)">All Statuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-roster"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-roster')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>SVT Sub-status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch Sub-Status from the SVT Source Data table.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-substatus">
+                <button class="filter-multi-btn" id="portfolio-filter-substatus" onclick="togglePortfolioMultiFilter('portfolio-filter-substatus', event)">All Sub-statuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-substatus"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-substatus')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Speed to Market:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Speed to Market flag from the SVT Source Data table (True / False / blank).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-speed">
+                <button class="filter-multi-btn" id="portfolio-filter-speed" onclick="togglePortfolioMultiFilter('portfolio-filter-speed', event)">All ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-speed"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-speed')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>GLS Status:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Launch status from the GLS (Global Launch Strategy) Roster of Record.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-gls">
+                <button class="filter-multi-btn" id="portfolio-filter-gls" onclick="togglePortfolioMultiFilter('portfolio-filter-gls', event)">All GLS ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-gls"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-gls')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>OTP Disposition:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Editable leadership/college disposition on a program's future (multi-select, timestamped). Filters on the disposition values set on each program; "(none)" = no disposition set.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-portfolio-filter-disposition">
+                <button class="filter-multi-btn" id="portfolio-filter-disposition" onclick="togglePortfolioMultiFilter('portfolio-filter-disposition', event)">All Dispositions ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-portfolio-filter-disposition"></div>
+                <span class="filter-clear" onclick="clearPortfolioFilter('portfolio-filter-disposition')" title="Clear">&times;</span>
+            </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Portfolio table toolbar (just above the list): result count + layout on
+         the left; Export + Columns on the right. -->
+    <div id="portfolio-table-toolbar" style="display:none">
+        <span id="portfolio-result-count" class="result-count"></span>
+        <span class="portfolio-layout-toggle">
+            <button class="portfolio-layout-btn active" data-layout="table" onclick="setPortfolioLayout('table')">Deployments</button>
+            <button class="portfolio-layout-btn" data-layout="program" onclick="setPortfolioLayout('program')">Program</button>
+            <button class="portfolio-layout-btn" data-layout="matrix" onclick="setPortfolioLayout('matrix')">Matrix</button>
+        </span>
+        <span class="portfolio-progsort" id="portfolio-progsort" style="display:none">
+            <span class="progsort-label">Sort programs</span>
+            <select id="program-group-sort" onchange="setProgramGroupSort(this.value)">
+                <option value="name">Name</option>
+                <option value="college">College</option>
+                <option value="credential">Credential</option>
+                <option value="enrollment">Largest enrollment</option>
+                <option value="disposition">Program disposition</option>
+            </select>
+            <button class="portfolio-layout-btn" id="program-group-sort-dir"
+                    onclick="toggleProgramGroupSortDir()" title="Toggle sort direction">▲</button>
+        </span>
+        <span class="portfolio-toolbar-actions">
+            <button class="portfolio-col-picker-btn" onclick="openIdeasModal()" title="Add a portfolio idea / new project">＋ Add idea</button>
+            <button class="portfolio-col-picker-btn" onclick="exportPortfolioCsv()" title="Export filtered rows to CSV">⤓ Export</button>
+            <div class="portfolio-col-picker" id="portfolio-col-picker" style="position:relative">
+                <button class="portfolio-col-picker-btn" onclick="togglePortfolioColPicker(event)">⊞ Columns ▾</button>
+                <div class="portfolio-col-dropdown" id="portfolio-col-dropdown"></div>
+            </div>
+        </span>
+    </div>
+
+    <!-- Portfolio Views modal (mirrors student tracker's filter builder modal) -->
+    <div id="pv-modal-backdrop" class="pv-modal-backdrop" onclick="if(event.target===this)closePortfolioViewsModal()">
+        <div class="pv-modal" role="dialog" aria-modal="true" aria-label="Portfolio Views">
+            <div class="pv-modal-header">
+                <span class="pv-modal-title">Views</span>
+                <span class="pv-modal-count" id="pv-modal-count"></span>
+                <button class="pv-modal-x" onclick="closePortfolioViewsModal()" aria-label="Close">×</button>
+            </div>
+            <div class="pv-modal-body">
+                <aside class="pv-modal-sidebar" id="pv-modal-sidebar"></aside>
+                <div class="pv-modal-maincol">
+                    <div class="pv-modal-main" id="pv-modal-main"></div>
+                    <div class="pv-modal-footer" id="pv-modal-footer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CIM scoping controls (chosen first, above the pipeline/buttons) -->
+    <section id="cim-scope-bar" class="filters-section scope-bar">
+        <div class="filter-group" id="perspective-filter-group">
+            <label>Perspective:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">University = the university approval pipeline. College = a college's own internal roles (for ADs/coordinators); pick a college to scope to its roles.</span></span></label>
+            <div id="perspective-bar" class="perspective-bar">
+                <button class="perspective-btn" data-persp="otp" onclick="setCimPerspective('otp')">University</button>
+                <button class="perspective-btn" data-persp="college" onclick="setCimPerspective('college')">College</button>
+                <select id="perspective-college" class="perspective-college" onchange="setCimCollege(this.value)" style="display:none"></select>
+            </div>
+        </div>
+        <div class="filter-group" id="level-filter-group">
+            <label>Level:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Graduate / Undergraduate. Filters the table by level; in College perspective it also prunes the role tiles to that level.</span></span></label>
+            <div class="level-switch">
+                <button class="type-btn" onclick="setTypeFilter('Graduate')">Graduate</button>
+                <button class="type-btn" onclick="setTypeFilter('Undergraduate')">Undergraduate</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pipeline Summary -->
+    <section id="pipeline" class="pipeline-section">
+        <div class="pipeline-header-row">
+            <h2>Pipeline Summary</h2>
+        </div>
+        <div class="pipeline-row">
+            <button id="pipeline-arrow-left" class="panel-arrow" style="display:none" title="Back to college steps">◂</button>
+            <div id="pipeline-bar" class="pipeline-bar">
+                <!-- Populated by JS -->
+            </div>
+            <button id="pipeline-arrow-right" class="panel-arrow" style="display:none" title="Show university pipeline">▸</button>
+        </div>
+    </section>
+
+    <!-- Filters toggle for CIM / courses / catalog: BELOW the pipeline, ABOVE the
+         collapsible filter controls. It does NOT collapse the perspective/level
+         scope bar or the pipeline — only the proposal/kind/dropdown filters. -->
+    <div id="cim-filter-toggle-row-cim" style="display:none">
+        <button class="cim-filter-toggle-btn" onclick="toggleCimFilters()">▸ Filters</button>
+    </div>
+
+    <!-- Proposal-type buttons -->
+    <section class="smart-views-section">
+        <div class="view-group">
+            <span class="info-tip-wrap"><button class="proposal-btn" id="btn-proposal-new" onclick="setProposalFilter('Added')">New Programs</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to create a brand-new academic program.</span></span></span>
+            <span class="info-tip-wrap"><button class="proposal-btn" onclick="setProposalFilter('Edited')">Changes</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to modify an existing program's requirements, name, or structure.</span></span></span>
+            <span class="info-tip-wrap"><button class="proposal-btn" onclick="setProposalFilter('Deactivated')">Inactivations</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Proposals to retire and stop admitting students to an existing program.</span></span></span>
+            <span class="info-tip-wrap"><button class="proposal-btn" id="btn-proposal-complete" onclick="setProposalFilter('__complete__')">Complete</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have finished the full approval workflow and are no longer in the active pipeline.</span></span></span>
+        </div>
+    </section>
+
+    <!-- Program-kind filter (programs view only) -->
+    <section class="kind-filter-section" id="kind-filter-row">
+        <button class="kind-btn" data-kind="bachelors" onclick="setProgramKindFilter('bachelors')">Bachelor's</button>
+        <button class="kind-btn" data-kind="masters" onclick="setProgramKindFilter('masters')">Master's</button>
+        <button class="kind-btn" data-kind="phd" onclick="setProgramKindFilter('phd')">PhD</button>
+        <button class="kind-btn" data-kind="profdoc" onclick="setProgramKindFilter('profdoc')">Prof. Doctorate</button>
+        <button class="kind-btn" data-kind="certificate" onclick="setProgramKindFilter('certificate')">Certificate</button>
+        <button class="kind-btn" data-kind="cags" onclick="setProgramKindFilter('cags')">CAGS</button>
+        <button class="kind-btn" data-kind="minor" onclick="setProgramKindFilter('minor')">Minor</button>
+        <button class="kind-btn" data-kind="plusone" onclick="setProgramKindFilter('plusone')">PlusOne</button>
+        <button class="kind-btn" data-kind="concentration" onclick="setProgramKindFilter('concentration')">Concentration</button>
+        <button class="kind-btn" data-kind="dual" onclick="setProgramKindFilter('dual')">Dual Degree</button>
+    </section>
+
+    <!-- Smart Views: New Submissions → Recent Changes → Potentially Stuck -->
+    <section class="smart-actions-section">
+        <span class="info-tip-wrap"><button class="smart-view-btn" onclick="setSmartView('new')">New Submissions</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs submitted to CIM within the last 30 days.</span></span></span>
+        <span class="info-tip-wrap"><button class="smart-view-btn" onclick="setSmartView('recent')">Recent Changes</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that moved to a new approval step within the last 14 days.</span></span></span>
+        <span class="info-tip-wrap">
+            <button class="smart-view-btn" onclick="setSmartView('stuck')">Potentially Stuck</button><span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Programs that have been at the same approval step for 30 or more days.</span></span>
+        </span>
+    </section>
+
+    <!-- Filters -->
+    <section class="filters-section">
+        <div class="filter-group">
+            <label>College:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the college or school responsible for the program.</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-filter-college">
+                <button class="filter-multi-btn" id="filter-college" onclick="toggleCimMultiFilter('filter-college', event)">All Colleges ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-filter-college"></div>
+                <span class="filter-clear" onclick="clearFilter('filter-college')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group" id="filter-group-subject" style="display: none">
+            <label>Subject Code:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter courses by their subject prefix (e.g. CS, ENGR, HIST).</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-subject" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Subjects</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-subject')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Campus:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the campus where the program is offered (e.g. Boston, Oakland, Online).</span></span></label>
+            <div class="filter-multi-wrap" id="fmw-filter-campus">
+                <button class="filter-multi-btn" id="filter-campus" onclick="toggleCimMultiFilter('filter-campus', event)">All Campuses ▾</button>
+                <div class="filter-multi-dropdown" id="fmd-filter-campus"></div>
+                <span class="filter-clear" onclick="clearFilter('filter-campus')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Approver:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the person currently responsible for reviewing the proposal at its current step.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-approver" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Approvers</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-approver')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <label>Step:<span class="info-tip"><i class="tip-icon">i</i><span class="tip-bubble">Filter by the current approval step in the CIM workflow.</span></span></label>
+            <div class="filter-select-wrap">
+                <select id="filter-step" onchange="applyFilters(); updateClearButtons()">
+                    <option value="">All Steps</option>
+                </select>
+                <span class="filter-clear" onclick="clearFilter('filter-step')" title="Clear">&times;</span>
+            </div>
+        </div>
+        <div class="filter-group">
+            <span id="result-count" class="result-count"></span>
+        </div>
+    </section>
+
+    <!-- Programs Table -->
+    <section id="programs" class="programs-section">
+        <div id="programs-table-container">
+            <!-- Populated by JS -->
+        </div>
+    </section>
+
+
+    <div id="tip-overlay"></div>
+</div>
+</body>
+</html>
